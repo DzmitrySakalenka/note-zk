@@ -1,6 +1,6 @@
 # ADR 0010: Separate Browser Sessions From Device Tokens
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-03
 
 ## Decision

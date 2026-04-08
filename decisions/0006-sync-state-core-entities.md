@@ -1,6 +1,6 @@
 # ADR 0006: Sync State Uses Explicit Device, Item, and Per-Device State Records
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-02
 
 ## Decision

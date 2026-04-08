@@ -99,6 +99,7 @@ External reference: [SQLite](https://sqlite.org)
 - `created`
 - `source`
 - `status`
+- `sources` -- list of note IDs this page was derived from (LLM Wiki provenance)
 
 ## Links
 
@@ -149,7 +150,16 @@ Likely values:
 - `task`
 - `reference`
 
-This should stay flexible, not hardcoded too deeply.
+### LLM Wiki types
+
+For vaults using the LLM Wiki pattern, additional types are expected:
+
+- `wiki-entity` -- LLM-generated page about a person, place, concept, etc.
+- `wiki-synthesis` -- LLM-generated summary or comparison across multiple sources
+- `wiki-index` -- auto-generated index/catalog page (derived, regenerable)
+- `wiki-log` -- append-only chronological log of wiki operations
+
+The `type` field remains flexible and not hardcoded. These are conventions, not enforced values.
 
 ## IDs: What They Mean
 

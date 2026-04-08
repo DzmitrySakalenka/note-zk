@@ -1,6 +1,6 @@
 # ADR 0008: Real Trash Folder, Sync-Engine Timestamps, Stable Asset IDs
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-03
 
 ## Decision

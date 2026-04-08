@@ -98,16 +98,18 @@ pub struct SyncPushResponse {
 ```rust
 pub struct SyncPullRequest {
     pub device_id: String,
-    pub cursor: Option<String>,
+    pub cursor: Option<i64>,  // event_seq of last processed event; None for initial sync
     pub batch_size: Option<u32>,
 }
 ```
 
 ### Change item
 
+See ADR 0012 for sync ordering model.
+
 ```rust
 pub struct SyncChange {
-    pub cursor: String,
+    pub event_seq: i64,
     pub item_id: String,
     pub item_type: String,
     pub event_type: String,
@@ -125,7 +127,7 @@ pub struct SyncChange {
 ```rust
 pub struct SyncPullResponse {
     pub changes: Vec<SyncChange>,
-    pub next_cursor: Option<String>,
+    pub next_cursor: Option<i64>,  // event_seq of last event in batch; None if no more changes
 }
 ```
 
@@ -171,8 +173,42 @@ pub struct CreateBackupResponse {
 }
 ```
 
+## Enumerated String Values
+
+These are the valid values for string-typed fields in the API payloads.
+In the Rust implementation these should be proper enums; on the wire they
+serialize as lowercase strings.
+
+### `operation` (push payloads)
+
+- `create`
+- `update`
+- `move`
+- `trash`
+- `restore`
+- `delete`
+
+### `item_type` (pull changes, conflict resolution)
+
+- `note`
+- `asset`
+
+### `event_type` (pull changes)
+
+- `create`
+- `update`
+- `move`
+- `trash`
+- `restore`
+- `purge`
+
+### `resolution` (conflict resolution)
+
+- `keep_local` -- accept local version, discard remote
+- `keep_remote` -- accept remote version, discard local
+- `keep_both` -- keep both as separate files
+
 ## Notes
 
-- request/response enums can replace raw `String` fields later
 - asset upload may need a separate binary upload endpoint in practice
 - the domain model should stay richer than the wire model

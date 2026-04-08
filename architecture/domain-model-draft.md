@@ -48,7 +48,8 @@ pub struct DeviceId(pub String);
 
 ## RelativePath
 
-Vault-relative file path.
+Vault-relative file path. Always uses forward slash (`/`) as separator,
+regardless of OS. Normalized on read from the filesystem.
 
 ```rust
 pub struct RelativePath(pub String);
@@ -56,7 +57,9 @@ pub struct RelativePath(pub String);
 
 ## ContentHash
 
-Hash of canonical file content or asset bytes.
+SHA-256 hash of canonical file content (for notes) or raw bytes (for assets),
+hex-encoded lowercase. Input is the full file byte content with no
+preprocessing or normalization.
 
 ```rust
 pub struct ContentHash(pub String);
@@ -85,6 +88,8 @@ pub struct NoteFrontmatter {
     pub updated: Option<String>,
     pub source: Option<String>,
     pub status: Option<String>,
+    /// IDs of source notes this page was derived from (LLM Wiki provenance).
+    pub sources: Vec<NoteId>,
 }
 ```
 
@@ -199,7 +204,7 @@ pub struct DeviceRecord {
     pub capabilities: Vec<String>,
     pub created_at: String,
     pub last_seen_at: String,
-    pub last_sync_cursor: Option<String>,
+    pub last_sync_cursor: Option<i64>,  // event_seq from ADR 0012
 }
 ```
 
@@ -372,6 +377,52 @@ pub struct ChunkEmbedding {
     pub embedding_model: String,
     pub vector_ref: Option<String>,
     pub created_at: String,
+}
+```
+
+## Write Operations
+
+Used by `zk-app` to programmatically create and update notes (e.g., LLM Wiki ingest).
+
+```rust
+pub struct CreateNoteRequest {
+    pub path: RelativePath,
+    pub frontmatter: NoteFrontmatter,
+    pub body_markdown: String,
+}
+
+pub struct UpdateNoteRequest {
+    pub note_id: NoteId,
+    pub frontmatter: Option<NoteFrontmatter>,
+    pub body_markdown: Option<String>,
+}
+
+pub struct BatchWriteRequest {
+    pub creates: Vec<CreateNoteRequest>,
+    pub updates: Vec<UpdateNoteRequest>,
+}
+```
+
+All write operations use the atomic temp-file-then-rename pattern.
+Batch writes are applied sequentially but treated as a logical unit
+for reindex purposes.
+
+## Wiki Job Types
+
+Background jobs for LLM Wiki workflows. These run in `zk-worker`.
+
+```rust
+pub enum WikiJobType {
+    IngestSource,
+    LintWiki,
+}
+
+pub struct WikiJob {
+    pub job_id: String,
+    pub job_type: WikiJobType,
+    pub source_note_id: Option<NoteId>,
+    pub created_at: String,
+    pub status: String,
 }
 ```
 

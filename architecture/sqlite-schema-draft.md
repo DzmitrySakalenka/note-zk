@@ -24,7 +24,7 @@ Key columns:
 - `capabilities_json TEXT NOT NULL`
 - `created_at TEXT NOT NULL`
 - `last_seen_at TEXT NOT NULL`
-- `last_sync_cursor TEXT`
+- `last_sync_cursor INTEGER` -- event_seq from ADR 0012
 
 ### `notes_index`
 
@@ -37,7 +37,6 @@ Key columns:
 - `title TEXT NOT NULL`
 - `content_hash TEXT NOT NULL`
 - `frontmatter_json TEXT NOT NULL`
-- `body_markdown TEXT NOT NULL`
 - `created_at TEXT NOT NULL`
 - `updated_at TEXT NOT NULL`
 - `trashed_at TEXT`
@@ -46,6 +45,8 @@ Key columns:
 - `is_deleted INTEGER NOT NULL`
 - `last_editor_device_id TEXT`
 - `server_revision INTEGER`
+
+Note: `body_markdown` is NOT stored locally. The filesystem is the sole authority for note body content. See ADR 0013.
 
 ### `note_sync_state`
 
@@ -101,6 +102,19 @@ Key columns:
 
 - `note_id TEXT NOT NULL`
 - `alias TEXT NOT NULL`
+
+### `note_sources`
+
+Provenance tracking: which source notes a wiki page was derived from.
+
+Key columns:
+
+- `note_id TEXT NOT NULL` -- the derived wiki page
+- `source_note_id TEXT NOT NULL` -- the raw source it was derived from
+
+Composite unique:
+
+- `(note_id, source_note_id)`
 
 ### `assets_index`
 
@@ -250,7 +264,7 @@ The server schema mirrors some local concepts but remains authoritative for shar
 ### `device_sync_cursors`
 
 - `device_id TEXT PRIMARY KEY`
-- `last_cursor TEXT`
+- `last_cursor INTEGER` -- event_seq from ADR 0012
 - `updated_at TEXT NOT NULL`
 
 ### `delete_records`
@@ -304,16 +318,17 @@ The server schema mirrors some local concepts but remains authoritative for shar
 
 ### `sync_events`
 
-Optional but strongly recommended.
+Required. This table drives sync ordering. See ADR 0012.
 
-- `event_id INTEGER PRIMARY KEY AUTOINCREMENT`
-- `cursor TEXT NOT NULL UNIQUE`
+- `event_seq INTEGER PRIMARY KEY AUTOINCREMENT`
 - `item_id TEXT NOT NULL`
 - `item_type TEXT NOT NULL`
 - `event_type TEXT NOT NULL`
 - `server_revision INTEGER`
 - `device_id TEXT`
 - `created_at TEXT NOT NULL`
+
+The `event_seq` is the global monotonic counter. The sync cursor returned to clients is the `event_seq` of the last event in each pull batch.
 
 ## Recommended Indexes
 

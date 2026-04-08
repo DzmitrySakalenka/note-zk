@@ -1,6 +1,6 @@
 # ADR 0009: Reliability and Security Prioritize Canonical Data, Encrypted Backups, and Secure Remote Access
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-03
 
 ## Decision

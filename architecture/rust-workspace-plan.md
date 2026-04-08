@@ -190,6 +190,13 @@ Examples:
 - `sync_now()`
 - `create_backup()`
 - `rebuild_index()`
+- `create_note(path, frontmatter, body)`
+- `update_note(note_id, frontmatter, body)`
+- `batch_write(creates, updates)`
+
+Write operations use atomic temp-file-then-rename. They respect per-folder
+policies (immutable folders reject writes). Batch writes are the primary API
+for LLM Wiki ingest workflows that touch multiple files per source.
 
 This crate is likely the main service layer used by server and CLI.
 

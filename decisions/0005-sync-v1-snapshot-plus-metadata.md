@@ -1,6 +1,6 @@
 # ADR 0005: Sync V1 Uses Snapshot Transfer Plus Explicit Metadata
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-02
 
 ## Decision

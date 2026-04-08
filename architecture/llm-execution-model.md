@@ -158,6 +158,46 @@ Then create execution backends:
 
 Clients choose backend by policy and availability, not by special-case feature code.
 
+## LLM Wiki Workflows
+
+The system supports LLM-maintained wiki generation as described in the LLM Wiki pattern.
+This adds three workflows to the AI layer:
+
+### Ingest
+
+LLM reads a raw source note, extracts key information, and creates or updates
+wiki pages across the vault. A single ingest may touch 10-15 files.
+
+- runs as a `zk-worker` background job (`IngestSource`)
+- uses `zk-app` batch write API to create/update wiki pages
+- updates wiki index and log meta-files
+- sets `sources` frontmatter on generated pages for provenance tracking
+
+### Query
+
+LLM searches wiki pages via index, reads relevant pages, synthesizes an answer.
+Valuable answers can be filed back into the wiki as new pages.
+
+- uses existing semantic search and chat provider abstractions
+- write-back uses `zk-app` create_note API
+
+### Lint
+
+LLM health-checks the wiki: finds contradictions, stale claims, orphan pages,
+missing cross-references, data gaps.
+
+- runs as a `zk-worker` background job (`LintWiki`)
+- produces a diagnostic report (can be a wiki page or CLI output)
+
+### Folder policies for wiki vaults
+
+Wiki vaults use per-folder config policies:
+
+- `raw/` folder: `immutable = true` -- sources are never modified
+- `wiki/meta/` folder: `derived = true` -- index/log files use last-write-wins sync
+
+See config-model.md for per-folder policy details.
+
 ## MVP Recommendation
 
 Start with:
@@ -166,5 +206,6 @@ Start with:
 - server-side embeddings
 - local keyword search always
 - local semantic search later as an offline enhancement
+- wiki ingest/query/lint workflows in Phase 3 (AI layer)
 
 This keeps the first implementation simpler while preserving a path to stronger offline support.

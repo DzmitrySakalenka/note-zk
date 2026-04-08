@@ -52,6 +52,7 @@ status: active
 - `updated`
 - `source`
 - `status`
+- `sources` -- list of note IDs this page was derived from (LLM Wiki provenance)
 
 ## 5. Supported Tag Syntax In Frontmatter
 

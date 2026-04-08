@@ -134,6 +134,16 @@ link_precedence = ["title", "alias", "basename", "path"]
 derive_title_from_h1 = true
 allow_insert_frontmatter = true
 allow_empty_tags_placeholder = false
+
+# Per-folder policy overrides.
+# Each key under [folders] is a vault-relative path prefix.
+
+[folders."raw"]
+immutable = true              # scan --write skips these files entirely
+normalize_frontmatter = false # no ID injection, no field reordering
+
+[folders."wiki/meta"]
+derived = true                # sync uses last-write-wins, not conflict copies
 ```
 
 ## 6. Recommendation On Config Format
@@ -158,11 +168,26 @@ These should be explicitly supported in Phase 1:
 - whether title derivation from H1 is enabled
 - allowed note extensions
 
-## 8. V1 Deferred Config
+## 8. Per-Folder Policy
+
+Folders can override vault-wide behavior. This supports use cases like LLM Wiki
+where raw sources are immutable and generated meta-files are derived.
+
+Supported per-folder overrides:
+
+- `immutable` -- normalization and write operations skip files in this folder
+- `normalize_frontmatter` -- whether frontmatter normalization applies (default: true)
+- `derived` -- marks folder contents as regenerable; sync uses last-write-wins instead of conflict copies
+
+Per-folder rules are matched by vault-relative path prefix. More specific paths take precedence.
+
+This is needed in Phase 1 for the `immutable` flag (affects `scan --write`).
+The `derived` flag is needed in Phase 2 when sync is built.
+
+## 9. V1 Deferred Config
 
 These can come later:
 
-- advanced per-folder rules
 - multiple profile support
 - role-based web auth policy
 - AI provider model routing
@@ -171,3 +196,4 @@ These can come later:
 
 - whether multiple vaults should share one global config from day one
 - whether vault config should support inheritance from global templates
+- whether per-folder policy should support regex patterns in addition to path prefixes

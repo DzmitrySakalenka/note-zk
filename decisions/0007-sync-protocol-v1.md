@@ -1,6 +1,6 @@
 # ADR 0007: Sync Protocol V1 Uses Registration, Push/Pull, Cursors, and Conflict Copies
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-02
 
 ## Decision

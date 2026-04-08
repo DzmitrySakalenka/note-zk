@@ -203,8 +203,10 @@ Expose high-level use cases through `zk-app`.
 2. Implement `rebuild_index()`
 3. Implement `status_summary()`
 4. Implement `doctor_report()`
-5. Implement configuration/bootstrap helpers
-6. Add integration tests across vault + DB
+5. Implement `create_note()`, `update_note()`, `batch_write()`
+6. Implement per-folder immutability checks in write path
+7. Implement configuration/bootstrap helpers
+8. Add integration tests across vault + DB
 
 ## Task Group 9: CLI MVP
 
@@ -350,6 +352,33 @@ Add server-first chat over indexed knowledge.
 5. Implement streaming responses if desired
 6. Add offline/local fallback hooks for future use
 
+## Task Group 17b: LLM Wiki Workflows
+
+### Goal
+
+Support LLM-maintained wiki generation over raw source documents.
+
+### Subtasks
+
+1. Implement `zk-app` write API: `create_note`, `update_note`, `batch_write`
+2. Implement per-folder immutability checks in vault write path
+3. Implement `sources` frontmatter field indexing into `note_sources` table
+4. Implement `IngestSource` worker job:
+   - read source note
+   - call LLM to produce wiki page creates/updates
+   - apply via batch_write
+   - update wiki index and log meta-files
+5. Implement `LintWiki` worker job:
+   - scan wiki pages for orphans, contradictions, stale claims
+   - produce diagnostic output
+6. Implement query write-back: file LLM answers as new wiki pages
+7. Add tests for ingest, lint, and provenance tracking
+
+### Dependencies
+
+- requires Task Groups 16 and 17 (AI foundations and chat/retrieval)
+- write API (#1-2) is independently useful and can be built earlier
+
 ## Task Group 18: Operational Security
 
 ### Goal
@@ -430,10 +459,12 @@ Outcome:
 Includes:
 
 - Task Groups 11 to 13
+- Stub auth layer (shared secret or config-provided token) to gate sync endpoints
 
 Outcome:
 
 - multi-device sync works
+- sync endpoints are not publicly accessible without credentials
 
 ## Milestone D: Security and Backup
 
@@ -455,6 +486,18 @@ Outcome:
 
 - semantic search and chat
 
+## Milestone E2: LLM Wiki
+
+Includes:
+
+- Task Group 17b
+
+Outcome:
+
+- LLM-maintained wiki generation over raw sources
+- ingest, query, and lint workflows
+- provenance tracking via `sources` frontmatter
+
 ## Milestone F: Rich Clients
 
 Includes:
@@ -467,14 +510,32 @@ Outcome:
 
 ## Recommended Immediate Start
 
+Updated 2026-04-07 per review findings. Validation and link resolution rules
+must be finalized before schema design to avoid wrong schema or immediate migrations.
+
 Start with these exact tasks:
 
-1. Task Group 1
-2. Task Group 2
-3. Task Group 3
-4. Task Group 4
-5. Task Group 7
-6. Task Group 8
-7. Task Group 9
+1. Task Group 1 (project bootstrap)
+2. Task Group 2 (domain model)
+3. Task Group 3 (config system)
+4. Task Group 4 (vault parsing and normalization)
+5. Task Group 5 (validation engine) -- moved earlier
+6. Task Group 6 (link and asset resolution) -- moved earlier
+7. Task Group 7 (local SQLite index) -- schema now informed by validation/link rules
+8. Task Group 8 (local application facade)
+9. Task Group 9 (CLI MVP)
 
 That is the shortest path to a trustworthy first product.
+
+## Roadmap Adjustments From Architecture Review (2026-04-07)
+
+Key changes based on review feedback (see ADRs 0011-0014):
+
+- **Validation before schema**: Task Groups 5 and 6 moved before Task Group 7
+- **body_markdown removed from local SQLite**: see ADR 0013
+- **Asset identity is index-only**: see ADR 0011
+- **Sync ordering uses global event_seq**: see ADR 0012
+- **Default `untagged` tag for imports**: see ADR 0014
+- **Auth stub required for Milestone C**: Milestone C must include minimal auth (shared secret or stub token validation) before sync endpoints are exposed. Full auth system remains in Milestone D.
+- **Crash-safe normalization**: `scan --write` must use temp-file + atomic rename pattern
+- **File watcher deferred**: Phase 1 is scan/poll only. File watching is Phase 2+ and requires a concurrency/coordination design.

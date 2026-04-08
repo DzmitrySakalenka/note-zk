@@ -351,20 +351,29 @@ Recommendation:
 - use stable `asset_id` from V1 if attachments are expected to move
 - otherwise you will repeat note-identity problems for media
 
-## 11. Suggested Sync Cursor Model
+## 11. Sync Ordering Model
 
-V1 can use a server-generated cursor representing ordered change batches.
+See ADR 0012 for the full rationale.
 
-Client stores:
+The server maintains a global monotonic `event_seq` counter. Every accepted change gets the next `event_seq`. The sync cursor IS the `event_seq` of the last event the client processed.
 
-- last successfully applied cursor
+### Sync cycle
 
-Pull returns:
+1. **Push** local changes. Server returns per-item results (accept/conflict/reject). Push does NOT advance the cursor.
+2. **Pull** from cursor. Server returns events with `event_seq > cursor`, ordered by `event_seq`. Client sees its own accepted changes here.
+3. **Update cursor** only after pull-apply completes.
 
-- ordered changes after that cursor
-- next cursor
+### Invariants
 
-This avoids requiring per-table polling heuristics.
+- `event_seq` provides total ordering of all server-side changes
+- push is per-item: partial batch failure does not corrupt state
+- pull is ordered, resumable, and idempotent
+- applying the same event twice is a no-op (same content_hash)
+- crash during pull: restart from last persisted cursor
+
+### Per-item `server_revision`
+
+Retained for conflict detection on push (client sends `base_server_revision` to prove it's updating from a known version). Not used for ordering or cursor logic.
 
 ## 12. Error Handling
 

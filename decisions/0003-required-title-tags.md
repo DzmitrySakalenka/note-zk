@@ -1,6 +1,6 @@
 # ADR 0003: Title and Tags Are Required
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-02
 
 ## Decision

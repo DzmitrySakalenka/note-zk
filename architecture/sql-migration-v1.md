@@ -27,13 +27,13 @@ No auth or remote server tables are required for the first local-only milestone.
 ### `notes_index`
 
 ```sql
+-- Note: body_markdown is NOT stored. Filesystem is sole authority. See ADR 0013.
 CREATE TABLE notes_index (
   note_id TEXT PRIMARY KEY,
   current_path TEXT NOT NULL UNIQUE,
   title TEXT NOT NULL,
   content_hash TEXT NOT NULL,
   frontmatter_json TEXT NOT NULL,
-  body_markdown TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   trashed_at TEXT,
@@ -83,6 +83,16 @@ CREATE TABLE external_links (
   source_note_id TEXT NOT NULL,
   url TEXT NOT NULL,
   link_text TEXT
+);
+```
+
+### `note_sources`
+
+```sql
+CREATE TABLE note_sources (
+  note_id TEXT NOT NULL,
+  source_note_id TEXT NOT NULL,
+  PRIMARY KEY (note_id, source_note_id)
 );
 ```
 
@@ -172,7 +182,7 @@ CREATE TABLE devices (
   capabilities_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
   last_seen_at TEXT NOT NULL,
-  last_sync_cursor TEXT
+  last_sync_cursor INTEGER
 );
 ```
 

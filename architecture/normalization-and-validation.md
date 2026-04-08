@@ -21,6 +21,14 @@ The tool may auto-fix only low-risk structural issues.
 
 It must not silently rewrite user prose or semantic content.
 
+## Folder Immutability
+
+Files in folders marked `immutable = true` in per-vault config are skipped entirely
+by `scan --write`. They are still scanned and indexed for read purposes (link extraction,
+search), but never modified. See config-model.md for per-folder policy details.
+
+This supports the LLM Wiki pattern where raw source documents must not be altered.
+
 ## Normalization Rules
 
 ## Allowed Automatic Normalization
@@ -32,6 +40,7 @@ If a markdown note has no frontmatter, the tool may add a frontmatter block at t
 Only if:
 
 - the file is recognized as a note candidate
+- the file is not in an immutable folder
 - the operation is explicitly allowed by command mode or config
 
 ### 2. Generate missing `id`
@@ -108,16 +117,26 @@ Recommended precedence:
 
 If title is derived from H1 or filename, write it into frontmatter during normalization.
 
+## Crash Safety Rule
+
+All file writes during normalization (`scan --write`) must use atomic rename:
+
+1. write normalized content to `<note>.md.tmp`
+2. fsync the temp file
+3. rename `<note>.md.tmp` over `<note>.md`
+
+This ensures a crash mid-normalization never leaves a half-written file.
+
 ## Tags Normalization Rule
 
-Tags are required, but tags should not be guessed automatically in Phase 1.
+Tags are required (ADR 0003), but missing tags are handled gracefully.
 
-If tags are missing:
+If tags are missing during import or normalization:
 
-- report validation issue
-- optionally allow interactive/manual fix later
+- inject `tags: [untagged]` as the default (see ADR 0014)
+- report as info-level diagnostic, not error
 
-If configured, the app may apply a default tag template, but this should not be the default behavior.
+This allows existing vaults to be imported without manual bulk-tagging. Users can filter by `untagged` later and assign proper tags at their own pace.
 
 ## Asset Handling During Normalization
 

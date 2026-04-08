@@ -1,6 +1,6 @@
 # ADR 0002: Stable Note IDs in Frontmatter
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-02
 
 ## Decision

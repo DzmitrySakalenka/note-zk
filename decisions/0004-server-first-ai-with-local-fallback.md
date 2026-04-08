@@ -1,6 +1,6 @@
 # ADR 0004: Server-First AI With Optional Local Fallback
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-02
 
 ## Decision

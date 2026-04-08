@@ -122,6 +122,13 @@ Their job is to present and edit notes, call sync/search/chat APIs, and show bac
 - complex rich-text editing
 - deep SaaS-style account management
 
+## Phase 1 Constraints
+
+- scan/poll only for vault discovery (no file watcher)
+- file watching is deferred to Phase 2+ and requires a concurrency/coordination design
+- local SQLite index stores metadata only, not note bodies (ADR 0013)
+- asset identity lives in index only, not in files (ADR 0011)
+
 ## Early Implementation Bias
 
 Prefer:
