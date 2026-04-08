@@ -5,3 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+zk-domain = { path = "../zk-domain" }
+zk-vault  = { path = "../zk-vault" }
+zk-index  = { path = "../zk-index" }
+zk-sync   = { path = "../zk-sync" }
