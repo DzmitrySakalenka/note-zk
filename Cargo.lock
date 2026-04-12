@@ -489,6 +489,8 @@ dependencies = [
 name = "zk-app"
 version = "0.1.0"
 dependencies = [
+ "thiserror",
+ "toml",
  "zk-domain",
  "zk-index",
  "zk-sync",
