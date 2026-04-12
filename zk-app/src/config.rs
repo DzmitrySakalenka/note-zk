@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use serde::de::DeserializeOwned;
 use thiserror::Error;
 use zk_domain::config::{
     CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, NormalizationConfig, VaultConfig,
@@ -94,23 +95,11 @@ pub fn resolve_vault_config_path(vault_root: &Path) -> PathBuf {
 /// than file-not-found, and returns [`GlobalConfigError::Parse`] when file
 /// contents are not valid TOML for [`GlobalConfig`].
 pub fn load_global_config(path: &Path) -> Result<GlobalConfig, GlobalConfigError> {
-    let raw_config = match fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(source) if source.kind() == ErrorKind::NotFound => {
-            return Ok(GlobalConfig::default());
-        }
-        Err(source) => {
-            return Err(GlobalConfigError::Io {
-                path: path.to_path_buf(),
-                source,
-            });
-        }
-    };
-
-    toml::from_str(&raw_config).map_err(|source| GlobalConfigError::Parse {
-        path: path.to_path_buf(),
-        source,
-    })
+    load_toml_config_or_default(
+        path,
+        |path, source| GlobalConfigError::Io { path, source },
+        |path, source| GlobalConfigError::Parse { path, source },
+    )
 }
 
 /// Loads per-vault configuration from `path`.
@@ -124,23 +113,34 @@ pub fn load_global_config(path: &Path) -> Result<GlobalConfig, GlobalConfigError
 /// than file-not-found, and returns [`VaultConfigError::Parse`] when file
 /// contents are not valid TOML for [`VaultConfig`].
 pub fn load_vault_config(path: &Path) -> Result<VaultConfig, VaultConfigError> {
+    load_toml_config_or_default(
+        path,
+        |path, source| VaultConfigError::Io { path, source },
+        |path, source| VaultConfigError::Parse { path, source },
+    )
+}
+
+fn load_toml_config_or_default<T, E, FI, FP>(
+    path: &Path,
+    map_io_error: FI,
+    map_parse_error: FP,
+) -> Result<T, E>
+where
+    T: Default + DeserializeOwned,
+    FI: Fn(PathBuf, std::io::Error) -> E,
+    FP: Fn(PathBuf, toml::de::Error) -> E,
+{
     let raw_config = match fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(source) if source.kind() == ErrorKind::NotFound => {
-            return Ok(VaultConfig::default());
+            return Ok(T::default());
         }
         Err(source) => {
-            return Err(VaultConfigError::Io {
-                path: path.to_path_buf(),
-                source,
-            });
+            return Err(map_io_error(path.to_path_buf(), source));
         }
     };
 
-    toml::from_str(&raw_config).map_err(|source| VaultConfigError::Parse {
-        path: path.to_path_buf(),
-        source,
-    })
+    toml::from_str(&raw_config).map_err(|source| map_parse_error(path.to_path_buf(), source))
 }
 
 /// Merges global, vault, and CLI config values into an effective runtime config.

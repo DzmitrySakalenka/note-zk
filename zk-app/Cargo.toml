@@ -15,3 +15,4 @@ zk-index  = { path = "../zk-index" }
 zk-sync   = { path = "../zk-sync" }
 toml = "1.1.2"
 thiserror = "2.0.18"
+serde = "1.0.228"
