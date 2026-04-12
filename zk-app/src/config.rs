@@ -5,7 +5,7 @@ use std::{
 };
 
 use thiserror::Error;
-use zk_domain::config::GlobalConfig;
+use zk_domain::config::{GlobalConfig, VaultConfig};
 
 const APP_NAME: &str = "note-zk";
 const CONFIG_FILE_NAME: &str = "config.toml";
@@ -35,6 +35,23 @@ pub enum GlobalConfigError {
     },
 }
 
+// Error returned while loading per-vault configuration from disk.
+#[derive(Debug, Error)]
+pub enum VaultConfigError {
+    #[error("while attempting to read vault config at {path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("while attempting to parse vault config at {path}: {source}")]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+}
+
 // Resolves the global config file path for a given platform.
 #[must_use]
 pub fn resolve_global_config_path(
@@ -54,6 +71,12 @@ pub fn resolve_global_config_path(
             .join(CONFIG_FILE_NAME),
         ConfigPlatform::Windows => appdata_dir.join(APP_NAME).join(CONFIG_FILE_NAME),
     }
+}
+
+// Resolves the per-vault config file path.
+#[must_use]
+pub fn resolve_vault_config_path(vault_root: &Path) -> PathBuf {
+    vault_root.join(".zk").join(CONFIG_FILE_NAME)
 }
 
 /// Loads global configuration from `path`.
@@ -81,6 +104,36 @@ pub fn load_global_config(path: &Path) -> Result<GlobalConfig, GlobalConfigError
     };
 
     toml::from_str(&raw_config).map_err(|source| GlobalConfigError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+/// Loads per-vault configuration from `path`.
+///
+/// Missing files are treated as an empty configuration and return
+/// [`VaultConfig::default()`].
+///
+/// # Errors
+///
+/// Returns [`VaultConfigError::Io`] when file reading fails for reasons other
+/// than file-not-found, and returns [`VaultConfigError::Parse`] when file
+/// contents are not valid TOML for [`VaultConfig`].
+pub fn load_vault_config(path: &Path) -> Result<VaultConfig, VaultConfigError> {
+    let raw_config = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(source) if source.kind() == ErrorKind::NotFound => {
+            return Ok(VaultConfig::default());
+        }
+        Err(source) => {
+            return Err(VaultConfigError::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+
+    toml::from_str(&raw_config).map_err(|source| VaultConfigError::Parse {
         path: path.to_path_buf(),
         source,
     })
