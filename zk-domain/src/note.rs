@@ -24,11 +24,15 @@ where
     }
 }
 
+fn default_tags() -> Vec<String> {
+    vec!["untagged".to_string()]
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct NoteFrontmatter {
     pub id: NoteId,    // required
     pub title: String, // required
-    #[serde(deserialize_with = "string_or_list")]
+    #[serde(default = "default_tags", deserialize_with = "string_or_list")]
     pub tags: Vec<String>, // required, default `["untagged"]`
     #[serde(rename = "type")]
     pub note_type: Option<String>,

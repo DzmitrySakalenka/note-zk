@@ -135,6 +135,16 @@ tags:
 }
 
 #[test]
+fn frontmatter_missing_tags_defaults_to_untagged() {
+    let yaml = r#"
+id: "01TEST"
+title: "No Tags"
+"#;
+    let fm: NoteFrontmatter = serde_yaml::from_str(yaml).expect("deserialize");
+    assert_eq!(fm.tags, vec!["untagged"]);
+}
+
+#[test]
 fn frontmatter_serialize_tags_always_as_list() {
     let fm = NoteFrontmatter {
         id: NoteId::from("01TEST"),

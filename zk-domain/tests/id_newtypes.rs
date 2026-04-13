@@ -228,6 +228,24 @@ fn relative_path_collapses_repeated_slashes() {
 }
 
 #[test]
+fn relative_path_drops_current_directory_segments() {
+    let p = RelativePath::new("notes/./daily/./file.md");
+    assert_eq!(p.to_string(), "notes/daily/file.md");
+}
+
+#[test]
+fn relative_path_resolves_parent_segments() {
+    let p = RelativePath::new("notes/daily/../file.md");
+    assert_eq!(p.to_string(), "notes/file.md");
+}
+
+#[test]
+fn relative_path_clamps_parent_segments_at_root() {
+    let p = RelativePath::new("../notes/../../daily/file.md");
+    assert_eq!(p.to_string(), "daily/file.md");
+}
+
+#[test]
 fn relative_path_strips_trailing_slash() {
     let p = RelativePath::new("notes/daily/");
     assert_eq!(p.to_string(), "notes/daily");

@@ -152,14 +152,24 @@ impl RelativePath {
     }
 
     fn normalize_path(s: &str) -> String {
-        let unified = s.replace('\\', "/"); // 1. unify separators
-        unified
-            .strip_prefix("./")  // 2. strip leading ./
-            .unwrap_or(&unified)
-            .split('/')  // 3. split on /
-            .filter(|c| !c.is_empty())  // 4. drop empty segments
-            .collect::<Vec<_>>()
-            .join("/")
+        let unified = s.replace('\\', "/");
+        let without_dot_prefix = unified.strip_prefix("./").unwrap_or(&unified);
+        let mut segments: Vec<&str> = Vec::new();
+
+        for segment in without_dot_prefix.split('/') {
+            if segment.is_empty() || segment == "." {
+                continue;
+            }
+            if segment == ".." {
+                if !segments.is_empty() {
+                    let _ = segments.pop();
+                }
+                continue;
+            }
+            segments.push(segment);
+        }
+
+        segments.join("/")
     }
 }
 

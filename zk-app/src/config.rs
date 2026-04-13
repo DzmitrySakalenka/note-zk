@@ -336,6 +336,7 @@ fn validate_folder_prefixes(
 }
 
 fn validate_folder_prefix(prefix: &str) -> Result<(), ConfigValidationError> {
+    let unified = prefix.replace('\\', "/");
     let normalized = RelativePath::new(prefix).to_string();
 
     if prefix.starts_with('/') || prefix.starts_with('\\') {
@@ -350,16 +351,16 @@ fn validate_folder_prefix(prefix: &str) -> Result<(), ConfigValidationError> {
             reason: "windows drive prefixes are not allowed".to_string(),
         });
     }
+    if unified.split('/').any(|segment| segment == "..") {
+        return Err(ConfigValidationError::InvalidFolderPrefix {
+            prefix: prefix.to_string(),
+            reason: "parent-directory segments ('..') are not allowed".to_string(),
+        });
+    }
     if normalized.is_empty() {
         return Err(ConfigValidationError::InvalidFolderPrefix {
             prefix: prefix.to_string(),
             reason: "prefix must not be empty".to_string(),
-        });
-    }
-    if normalized.split('/').any(|segment| segment == "..") {
-        return Err(ConfigValidationError::InvalidFolderPrefix {
-            prefix: prefix.to_string(),
-            reason: "parent-directory segments ('..') are not allowed".to_string(),
         });
     }
 
