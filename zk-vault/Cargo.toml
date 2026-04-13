@@ -11,4 +11,8 @@ workspace = true
 [dependencies]
 serde_yaml = "0.9.34"
 thiserror = "2.0.18"
+walkdir = "2.5.0"
 zk-domain = { path = "../zk-domain" }
+
+[dev-dependencies]
+tempfile = "3.27.0"
