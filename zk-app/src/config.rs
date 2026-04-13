@@ -57,6 +57,23 @@ pub enum VaultConfigError {
     },
 }
 
+// Error returned while validating merged effective configuration.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ConfigValidationError {
+    #[error("invalid retention_days value: {value}; expected value greater than zero")]
+    InvalidRetentionDays { value: u32 },
+    #[error("invalid allowed_note_extensions: {reason}")]
+    InvalidNoteExtensions { reason: String },
+    #[error("invalid {field} path '{path}': {reason}")]
+    InvalidPath {
+        field: &'static str,
+        path: PathBuf,
+        reason: String,
+    },
+    #[error("invalid folder prefix '{prefix}': {reason}")]
+    InvalidFolderPrefix { prefix: String, reason: String },
+}
+
 // Resolves the global config file path for a given platform.
 #[must_use]
 pub fn resolve_global_config_path(
@@ -206,6 +223,26 @@ pub fn merge_effective_config(
     merged
 }
 
+/// Validates merged runtime configuration.
+///
+/// # Errors
+///
+/// Returns [`ConfigValidationError`] when any critical field contains an
+/// unusable value (retention days, note extensions, critical paths, or folder
+/// policy prefixes).
+pub fn validate_effective_config(config: &EffectiveConfig) -> Result<(), ConfigValidationError> {
+    if config.retention_days == 0 {
+        return Err(ConfigValidationError::InvalidRetentionDays { value: 0 });
+    }
+
+    validate_note_extensions(&config.allowed_note_extensions)?;
+    validate_non_empty_path("vault_path", &config.vault_path)?;
+    validate_non_empty_path("local_db_path", &config.local_db_path)?;
+    validate_folder_prefixes(&config.folders)?;
+
+    Ok(())
+}
+
 /// Resolves folder policy for a vault-relative path by longest matching prefix.
 #[must_use]
 pub fn resolve_folder_policy(
@@ -247,4 +284,84 @@ fn path_has_prefix(path: &str, prefix: &str) -> bool {
         || path
             .strip_prefix(prefix)
             .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn validate_note_extensions(extensions: &[String]) -> Result<(), ConfigValidationError> {
+    if extensions.is_empty() {
+        return Err(ConfigValidationError::InvalidNoteExtensions {
+            reason: "extension list must not be empty".to_string(),
+        });
+    }
+
+    for extension in extensions {
+        let trimmed = extension.trim();
+        if trimmed.is_empty() {
+            return Err(ConfigValidationError::InvalidNoteExtensions {
+                reason: "extension entries must not be blank".to_string(),
+            });
+        }
+        if !trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+        {
+            return Err(ConfigValidationError::InvalidNoteExtensions {
+                reason: format!(
+                    "extension '{trimmed}' contains unsupported characters; only [a-zA-Z0-9_-] are allowed"
+                ),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_non_empty_path(field: &'static str, path: &Path) -> Result<(), ConfigValidationError> {
+    if path.as_os_str().is_empty() {
+        return Err(ConfigValidationError::InvalidPath {
+            field,
+            path: path.to_path_buf(),
+            reason: "path must not be empty".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_folder_prefixes(
+    folders: &BTreeMap<String, FolderPolicy>,
+) -> Result<(), ConfigValidationError> {
+    for prefix in folders.keys() {
+        validate_folder_prefix(prefix)?;
+    }
+    Ok(())
+}
+
+fn validate_folder_prefix(prefix: &str) -> Result<(), ConfigValidationError> {
+    let normalized = RelativePath::new(prefix).to_string();
+
+    if prefix.starts_with('/') || prefix.starts_with('\\') {
+        return Err(ConfigValidationError::InvalidFolderPrefix {
+            prefix: prefix.to_string(),
+            reason: "prefix must be vault-relative, not absolute".to_string(),
+        });
+    }
+    if prefix.as_bytes().get(1).is_some_and(|byte| *byte == b':') {
+        return Err(ConfigValidationError::InvalidFolderPrefix {
+            prefix: prefix.to_string(),
+            reason: "windows drive prefixes are not allowed".to_string(),
+        });
+    }
+    if normalized.is_empty() {
+        return Err(ConfigValidationError::InvalidFolderPrefix {
+            prefix: prefix.to_string(),
+            reason: "prefix must not be empty".to_string(),
+        });
+    }
+    if normalized.split('/').any(|segment| segment == "..") {
+        return Err(ConfigValidationError::InvalidFolderPrefix {
+            prefix: prefix.to_string(),
+            reason: "parent-directory segments ('..') are not allowed".to_string(),
+        });
+    }
+
+    Ok(())
 }
