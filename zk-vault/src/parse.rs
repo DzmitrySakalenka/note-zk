@@ -1,8 +1,12 @@
 use std::{fs, path::Path};
 
-use zk_domain::note::RawNoteFrontmatter;
+use zk_domain::{
+    config::EffectiveConfig,
+    id::{NoteId, RelativePath},
+    note::{DiagnosticLevel, NoteFrontmatter, RawNoteFrontmatter, ScanDiagnostic},
+};
 
-use crate::error::VaultError;
+use crate::{error::VaultError, scan::NoteCandidate};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawNoteDocument {
@@ -16,6 +20,33 @@ pub struct RawNoteDocument {
 pub struct BodyAnalysis {
     pub first_h1: Option<String>,
     pub has_mermaid: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TitleSource {
+    Frontmatter,
+    H1,
+    FilenameStem,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NormalizationContext<'a> {
+    pub relative_path: &'a RelativePath,
+    pub body_analysis: &'a BodyAnalysis,
+    pub config: &'a EffectiveConfig,
+    pub is_immutable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct NormalizationPlan {
+    pub needs_id_injection: bool,
+    pub needs_title_derivation: bool,
+    pub title_source: TitleSource,
+    pub needs_frontmatter_insertion: bool,
+    pub needs_field_reorder: bool,
+    pub is_immutable: bool,
+    pub diagnostics: Vec<ScanDiagnostic>,
 }
 
 /// Parses a markdown file into raw frontmatter and body sections.
@@ -75,6 +106,130 @@ pub fn analyze_body(body: &str) -> BodyAnalysis {
     analyze_body_internal(body)
 }
 
+#[must_use]
+pub fn normalize_frontmatter(
+    raw: RawNoteFrontmatter,
+    ctx: &NormalizationContext<'_>,
+) -> (NoteFrontmatter, Vec<ScanDiagnostic>) {
+    normalize_frontmatter_with_id_generator(raw, ctx, NoteId::generate)
+}
+
+pub fn normalize_frontmatter_with_id_generator<F>(
+    raw: RawNoteFrontmatter,
+    ctx: &NormalizationContext<'_>,
+    generate_id: F,
+) -> (NoteFrontmatter, Vec<ScanDiagnostic>)
+where
+    F: Fn() -> NoteId,
+{
+    let mut diagnostics = Vec::new();
+
+    let note_id = if let Some(existing_id) = raw.id.clone() {
+        existing_id
+    } else {
+        diagnostics.push(ScanDiagnostic {
+            level: DiagnosticLevel::Info,
+            path: ctx.relative_path.clone(),
+            message: "injected missing id into frontmatter".to_string(),
+        });
+        generate_id()
+    };
+
+    let (title, title_source) = derive_title(&raw, ctx);
+    if title_source != TitleSource::Frontmatter {
+        diagnostics.push(ScanDiagnostic {
+            level: DiagnosticLevel::Info,
+            path: ctx.relative_path.clone(),
+            message: format!(
+                "derived missing title from {}",
+                title_source_label(title_source)
+            ),
+        });
+    }
+
+    if is_untagged_default(&raw.tags) {
+        diagnostics.push(ScanDiagnostic {
+            level: DiagnosticLevel::Info,
+            path: ctx.relative_path.clone(),
+            message: "note uses default untagged tag".to_string(),
+        });
+    }
+
+    (
+        NoteFrontmatter {
+            id: note_id,
+            title,
+            tags: raw.tags,
+            note_type: raw.note_type,
+            aliases: raw.aliases,
+            created: raw.created,
+            updated: raw.updated,
+            source: raw.source,
+            status: raw.status,
+            sources: raw.sources,
+            extra: raw.extra,
+        },
+        diagnostics,
+    )
+}
+
+#[must_use]
+pub fn plan_normalization(
+    raw_doc: &RawNoteDocument,
+    candidate: &NoteCandidate,
+    config: &EffectiveConfig,
+) -> NormalizationPlan {
+    if raw_doc.frontmatter.is_none() && !config.allow_insert_frontmatter {
+        return NormalizationPlan {
+            needs_id_injection: false,
+            needs_title_derivation: false,
+            title_source: TitleSource::Frontmatter,
+            needs_frontmatter_insertion: false,
+            needs_field_reorder: false,
+            is_immutable: candidate.is_immutable,
+            diagnostics: vec![ScanDiagnostic {
+                level: DiagnosticLevel::Warning,
+                path: candidate.relative_path.clone(),
+                message: "cannot insert frontmatter because allow_insert_frontmatter=false"
+                    .to_string(),
+            }],
+        };
+    }
+
+    let body_analysis = analyze_body(&raw_doc.body_markdown);
+    let ctx = NormalizationContext {
+        relative_path: &candidate.relative_path,
+        body_analysis: &body_analysis,
+        config,
+        is_immutable: candidate.is_immutable,
+    };
+
+    let raw_frontmatter = raw_doc
+        .frontmatter
+        .clone()
+        .unwrap_or_else(empty_raw_frontmatter);
+    let (_, diagnostics) =
+        normalize_frontmatter_with_id_generator(raw_frontmatter.clone(), &ctx, || {
+            NoteId::from("PLAN_GENERATED_ID")
+        });
+
+    let title_source = choose_title_source(&raw_frontmatter, &ctx);
+    let needs_title_derivation = title_source != TitleSource::Frontmatter;
+
+    NormalizationPlan {
+        needs_id_injection: raw_frontmatter.id.is_none(),
+        needs_title_derivation,
+        title_source,
+        needs_frontmatter_insertion: raw_doc.frontmatter.is_none(),
+        needs_field_reorder: raw_doc
+            .raw_frontmatter_yaml
+            .as_deref()
+            .is_some_and(requires_field_reorder),
+        is_immutable: candidate.is_immutable,
+        diagnostics,
+    }
+}
+
 fn split_frontmatter_sections(file_content: &str) -> Option<(&str, &str)> {
     const OPENING_DELIMITER: &str = "---\n";
     if !file_content.starts_with(OPENING_DELIMITER) {
@@ -105,6 +260,180 @@ fn split_frontmatter_sections(file_content: &str) -> Option<(&str, &str)> {
     }
 
     None
+}
+
+fn derive_title(raw: &RawNoteFrontmatter, ctx: &NormalizationContext<'_>) -> (String, TitleSource) {
+    match choose_title_source(raw, ctx) {
+        TitleSource::Frontmatter => (
+            raw.title
+                .clone()
+                .expect("frontmatter title source requires title"),
+            TitleSource::Frontmatter,
+        ),
+        TitleSource::H1 => (
+            ctx.body_analysis
+                .first_h1
+                .clone()
+                .expect("H1 title source requires first_h1"),
+            TitleSource::H1,
+        ),
+        TitleSource::FilenameStem => (
+            derive_title_from_filename_stem(ctx.relative_path),
+            TitleSource::FilenameStem,
+        ),
+    }
+}
+
+fn choose_title_source(raw: &RawNoteFrontmatter, ctx: &NormalizationContext<'_>) -> TitleSource {
+    if raw.title.as_deref().is_some_and(has_non_whitespace_content) {
+        return TitleSource::Frontmatter;
+    }
+
+    if ctx.config.derive_title_from_h1
+        && ctx
+            .body_analysis
+            .first_h1
+            .as_deref()
+            .is_some_and(has_non_whitespace_content)
+    {
+        return TitleSource::H1;
+    }
+
+    TitleSource::FilenameStem
+}
+
+fn derive_title_from_filename_stem(path: &RelativePath) -> String {
+    let relative_text = path.as_str();
+    let filename = relative_text.rsplit('/').next().unwrap_or(relative_text);
+    let stem =
+        filename.rsplit_once('.').map_or(
+            filename,
+            |(head, _)| if head.is_empty() { filename } else { head },
+        );
+    let normalized = stem.replace(['-', '_'], " ");
+    let words: Vec<String> = normalized
+        .split_whitespace()
+        .map(title_case_word)
+        .filter(|word| !word.is_empty())
+        .collect();
+
+    if words.is_empty() {
+        return "Untitled".to_string();
+    }
+    words.join(" ")
+}
+
+fn title_case_word(word: &str) -> String {
+    let mut chars = word.chars();
+    let Some(first_char) = chars.next() else {
+        return String::new();
+    };
+
+    let mut title_cased = String::new();
+    title_cased.extend(first_char.to_uppercase());
+    title_cased.push_str(chars.as_str());
+    title_cased
+}
+
+fn title_source_label(source: TitleSource) -> &'static str {
+    match source {
+        TitleSource::Frontmatter => "frontmatter",
+        TitleSource::H1 => "h1",
+        TitleSource::FilenameStem => "filename",
+    }
+}
+
+fn has_non_whitespace_content(value: &str) -> bool {
+    !value.trim().is_empty()
+}
+
+fn is_untagged_default(tags: &[String]) -> bool {
+    tags.len() == 1 && tags.first().is_some_and(|tag| tag == "untagged")
+}
+
+fn empty_raw_frontmatter() -> RawNoteFrontmatter {
+    RawNoteFrontmatter {
+        id: None,
+        title: None,
+        tags: vec!["untagged".to_string()],
+        note_type: None,
+        aliases: Vec::new(),
+        created: None,
+        updated: None,
+        source: None,
+        status: None,
+        sources: Vec::new(),
+        extra: std::collections::BTreeMap::default(),
+    }
+}
+
+fn requires_field_reorder(raw_frontmatter_yaml: &str) -> bool {
+    let observed = collect_top_level_yaml_keys(raw_frontmatter_yaml);
+    if observed.len() < 2 {
+        return false;
+    }
+
+    let mut expected = observed.clone();
+    expected.sort_by(|left, right| {
+        let left_rank = canonical_key_rank(left);
+        let right_rank = canonical_key_rank(right);
+        left_rank.cmp(&right_rank).then_with(|| left.cmp(right))
+    });
+
+    observed != expected
+}
+
+fn collect_top_level_yaml_keys(raw_frontmatter_yaml: &str) -> Vec<String> {
+    raw_frontmatter_yaml
+        .lines()
+        .filter_map(extract_top_level_key)
+        .collect()
+}
+
+fn extract_top_level_key(line: &str) -> Option<String> {
+    let indent = line.chars().take_while(|ch| *ch == ' ').count();
+    if indent != 0 {
+        return None;
+    }
+
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('-') {
+        return None;
+    }
+
+    let colon_index = trimmed.find(':')?;
+    let key = trimmed[..colon_index].trim();
+    if key.is_empty() {
+        return None;
+    }
+
+    Some(strip_yaml_quotes(key))
+}
+
+fn strip_yaml_quotes(key: &str) -> String {
+    if key.len() >= 2
+        && ((key.starts_with('"') && key.ends_with('"'))
+            || (key.starts_with('\'') && key.ends_with('\'')))
+    {
+        return key[1..key.len() - 1].to_string();
+    }
+    key.to_string()
+}
+
+fn canonical_key_rank(key: &str) -> usize {
+    match key {
+        "id" => 0,
+        "title" => 1,
+        "tags" => 2,
+        "type" => 3,
+        "aliases" => 4,
+        "created" => 5,
+        "updated" => 6,
+        "source" => 7,
+        "status" => 8,
+        "sources" => 9,
+        _ => 10,
+    }
 }
 
 fn analyze_body_internal(body: &str) -> BodyAnalysis {
