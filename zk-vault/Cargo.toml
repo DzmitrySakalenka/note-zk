@@ -9,4 +9,6 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+serde_yaml = "0.9.34"
+thiserror = "2.0.18"
 zk-domain = { path = "../zk-domain" }

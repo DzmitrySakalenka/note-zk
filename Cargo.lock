@@ -544,6 +544,8 @@ dependencies = [
 name = "zk-vault"
 version = "0.1.0"
 dependencies = [
+ "serde_yaml",
+ "thiserror",
  "zk-domain",
 ]
 

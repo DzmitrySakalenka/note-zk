@@ -1,1 +1,1 @@
-pub const fn placeholder() {}
+pub mod error;
