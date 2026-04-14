@@ -1,0 +1,12 @@
+---
+source: zk-vault/tests/vault_regression_snapshot.rs
+expression: "&output"
+---
+---
+id: 01FIXEDSNAPSHOTTESTID0000000001
+title: Inserted Title
+tags:
+  - untagged
+---
+# Inserted Title
+Body

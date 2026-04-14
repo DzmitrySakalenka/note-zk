@@ -25,3 +25,7 @@ target
 tmp/
 .vscode/*
 .tasks/*
+
+# App-generated
+*.pending-snap
+*.snap.new

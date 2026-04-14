@@ -171,7 +171,6 @@ Examples:
 
 - invalid YAML frontmatter
 - missing `title` after derivation attempts fail
-- missing `tags`
 - duplicate `id` in multiple notes
 - unreadable file
 
@@ -215,11 +214,12 @@ They are common during drafting and refactoring.
 
 ## Missing Tags Handling
 
-Because tags are required by the chosen model:
+Tags remain required by the model, but missing tags are normalized gracefully
+during import/normalization (ADR 0014):
 
-- missing tags should be an error
-
-This is stricter than many note apps, but it matches the intended workflow.
+- inject `tags: [untagged]`
+- report as info-level diagnostic
+- do not treat missing tags as an error at scan time
 
 ## CLI UX
 

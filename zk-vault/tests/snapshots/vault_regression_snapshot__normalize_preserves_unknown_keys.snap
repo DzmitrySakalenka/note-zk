@@ -1,0 +1,13 @@
+---
+source: zk-vault/tests/vault_regression_snapshot.rs
+expression: "&output"
+---
+---
+id: 01UNKNOWNSNAPSHOT000000000001
+title: Title
+tags:
+  - rust
+a_key: alpha
+z_key: zed
+---
+# Title

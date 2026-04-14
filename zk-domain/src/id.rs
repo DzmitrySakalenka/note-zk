@@ -2,6 +2,70 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 
+macro_rules! impl_string_newtype {
+    ($name:ident) => {
+        impl $name {
+            pub fn from(s: &str) -> Self {
+                Self(s.to_string())
+            }
+        }
+
+        impl From<String> for $name {
+            fn from(s: String) -> Self {
+                Self(s)
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+    };
+}
+
+macro_rules! impl_generated_string_newtype {
+    ($name:ident) => {
+        impl $name {
+            pub fn generate() -> Self {
+                Self(ulid::Ulid::new().to_string())
+            }
+
+            pub fn from(s: &str) -> Self {
+                Self(s.to_string())
+            }
+        }
+
+        impl From<String> for $name {
+            fn from(s: String) -> Self {
+                Self(s)
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+    };
+}
+
+macro_rules! impl_from_string_via_new_and_display {
+    ($name:ident) => {
+        impl From<String> for $name {
+            fn from(s: String) -> Self {
+                Self::new(&s)
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+    };
+}
+
 // ==========================================================================
 // NoteId
 // ==========================================================================
@@ -9,27 +73,7 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct NoteId(String);
 
-impl NoteId {
-    pub fn generate() -> Self {
-        Self(ulid::Ulid::new().to_string())
-    }
-
-    pub fn from(s: &str) -> Self {
-        Self(s.to_string())
-    }
-}
-
-impl From<String> for NoteId {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-impl fmt::Display for NoteId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+impl_generated_string_newtype!(NoteId);
 
 // ==========================================================================
 // AssetId
@@ -38,27 +82,7 @@ impl fmt::Display for NoteId {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct AssetId(String);
 
-impl AssetId {
-    pub fn generate() -> Self {
-        Self(ulid::Ulid::new().to_string())
-    }
-
-    pub fn from(s: &str) -> Self {
-        Self(s.to_string())
-    }
-}
-
-impl From<String> for AssetId {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-impl fmt::Display for AssetId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+impl_generated_string_newtype!(AssetId);
 
 // ==========================================================================
 // DeviceId
@@ -67,23 +91,7 @@ impl fmt::Display for AssetId {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct DeviceId(String);
 
-impl DeviceId {
-    pub fn from(s: &str) -> Self {
-        Self(s.to_string())
-    }
-}
-
-impl From<String> for DeviceId {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-impl fmt::Display for DeviceId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+impl_string_newtype!(DeviceId);
 
 // ==========================================================================
 // ContentHash
@@ -99,23 +107,9 @@ impl ContentHash {
         let result = hasher.finalize();
         Self(hex::encode(result))
     }
-
-    pub fn from(s: &str) -> Self {
-        Self(s.to_string())
-    }
 }
 
-impl From<String> for ContentHash {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-impl fmt::Display for ContentHash {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+impl_string_newtype!(ContentHash);
 
 // ==========================================================================
 // ServerRevision
@@ -158,25 +152,25 @@ impl RelativePath {
     }
 
     fn normalize_path(s: &str) -> String {
-        let unified = s.replace('\\', "/"); // 1. unify separators
-        unified
-            .strip_prefix("./")  // 2. strip leading ./
-            .unwrap_or(&unified)
-            .split('/')  // 3. split on /
-            .filter(|c| !c.is_empty())  // 4. drop empty segments
-            .collect::<Vec<_>>()
-            .join("/")
+        let unified = s.replace('\\', "/");
+        let without_dot_prefix = unified.strip_prefix("./").unwrap_or(&unified);
+        let mut segments: Vec<&str> = Vec::new();
+
+        for segment in without_dot_prefix.split('/') {
+            if segment.is_empty() || segment == "." {
+                continue;
+            }
+            if segment == ".." {
+                if !segments.is_empty() {
+                    let _ = segments.pop();
+                }
+                continue;
+            }
+            segments.push(segment);
+        }
+
+        segments.join("/")
     }
 }
 
-impl From<String> for RelativePath {
-    fn from(s: String) -> Self {
-        Self::new(&s)
-    }
-}
-
-impl fmt::Display for RelativePath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+impl_from_string_via_new_and_display!(RelativePath);

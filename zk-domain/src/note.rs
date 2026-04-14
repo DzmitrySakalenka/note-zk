@@ -24,11 +24,15 @@ where
     }
 }
 
+fn default_tags() -> Vec<String> {
+    vec!["untagged".to_string()]
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct NoteFrontmatter {
     pub id: NoteId,    // required
     pub title: String, // required
-    #[serde(deserialize_with = "string_or_list")]
+    #[serde(default = "default_tags", deserialize_with = "string_or_list")]
     pub tags: Vec<String>, // required, default `["untagged"]`
     #[serde(rename = "type")]
     pub note_type: Option<String>,
@@ -42,6 +46,44 @@ pub struct NoteFrontmatter {
     pub sources: Vec<NoteId>, // LLM Wiki provenance
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_yaml::Value>, // preserve unknown keys
+}
+
+// ==========================================================================
+// RawNoteFrontmatter
+// ==========================================================================
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct RawNoteFrontmatter {
+    pub id: Option<NoteId>,
+    pub title: Option<String>,
+    #[serde(default = "default_tags", deserialize_with = "string_or_list")]
+    pub tags: Vec<String>,
+    #[serde(rename = "type")]
+    pub note_type: Option<String>,
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub aliases: Vec<String>,
+    pub created: Option<String>,
+    pub updated: Option<String>,
+    pub source: Option<String>,
+    pub status: Option<String>,
+    #[serde(default)]
+    pub sources: Vec<NoteId>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_yaml::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiagnosticLevel {
+    Error,
+    Warning,
+    Info,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanDiagnostic {
+    pub level: DiagnosticLevel,
+    pub path: RelativePath,
+    pub message: String,
 }
 
 // ==========================================================================

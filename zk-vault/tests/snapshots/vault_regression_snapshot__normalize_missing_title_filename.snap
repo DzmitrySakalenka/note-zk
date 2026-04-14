@@ -1,0 +1,11 @@
+---
+source: zk-vault/tests/vault_regression_snapshot.rs
+expression: "&output"
+---
+---
+id: 01FILENAMETITLE0000000000001
+title: Filename Derived Title
+tags:
+  - rust
+---
+Body
