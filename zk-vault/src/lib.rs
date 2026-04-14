@@ -5,6 +5,7 @@ mod scan;
 pub use parse::{
     BodyAnalysis, NormalizationContext, NormalizationPlan, RawNoteDocument, TitleSource,
     analyze_body, detect_mermaid, extract_first_h1, normalize_frontmatter,
-    normalize_frontmatter_with_id_generator, parse_note_file, plan_normalization,
+    normalize_frontmatter_with_id_generator, parse_note_file, plan_normalization, render_note_file,
+    serialize_frontmatter,
 };
 pub use scan::{AssetCandidate, NoteCandidate, VaultFileSet, scan_vault_files};
