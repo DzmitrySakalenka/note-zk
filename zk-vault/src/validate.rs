@@ -638,7 +638,7 @@ fn build_summary(findings: &[ValidationFinding]) -> ValidationSummary {
     let mut error_count: u32 = 0;
     let mut warning_count: u32 = 0;
     let mut info_count: u32 = 0;
-    let mut by_rule: BTreeMap<&'static str, (RuleId, u32)> = BTreeMap::new();
+    let mut by_rule: HashMap<RuleId, u32> = HashMap::new();
 
     for finding in findings {
         match finding.level {
@@ -647,12 +647,13 @@ fn build_summary(findings: &[ValidationFinding]) -> ValidationSummary {
             DiagnosticLevel::Info => info_count += 1,
         }
 
-        let rule_name = rule_name_key(finding.rule);
-        let (_, count) = by_rule.entry(rule_name).or_insert((finding.rule, 0));
+        let count = by_rule.entry(finding.rule).or_insert(0);
         *count += 1;
     }
 
-    let rules_triggered = by_rule.into_values().collect();
+    let mut rules_triggered: Vec<(RuleId, u32)> = by_rule.into_iter().collect();
+    rules_triggered.sort_by_key(|(rule, _)| rule_sort_key(*rule));
+
     ValidationSummary {
         error_count,
         warning_count,
@@ -661,22 +662,22 @@ fn build_summary(findings: &[ValidationFinding]) -> ValidationSummary {
     }
 }
 
-fn rule_name_key(rule: RuleId) -> &'static str {
+fn rule_sort_key(rule: RuleId) -> u8 {
     match rule {
-        RuleId::InvalidFrontmatter => "InvalidFrontmatter",
-        RuleId::MissingTitle => "MissingTitle",
-        RuleId::DuplicateId => "DuplicateId",
-        RuleId::EmptyBody => "EmptyBody",
-        RuleId::NoH1InBody => "NoH1InBody",
-        RuleId::TitleH1Mismatch => "TitleH1Mismatch",
-        RuleId::SuspiciousPathNaming => "SuspiciousPathNaming",
-        RuleId::MermaidBlockDetected => "MermaidBlockDetected",
-        RuleId::TitleDerivedFromH1 => "TitleDerivedFromH1",
-        RuleId::TitleDerivedFromFilename => "TitleDerivedFromFilename",
-        RuleId::IdInjected => "IdInjected",
-        RuleId::DefaultUntaggedTag => "DefaultUntaggedTag",
-        RuleId::FrontmatterInserted => "FrontmatterInserted",
-        RuleId::IdFormatSuspicious => "IdFormatSuspicious",
-        _ => "UnknownRuleId",
+        RuleId::InvalidFrontmatter => 0,
+        RuleId::MissingTitle => 1,
+        RuleId::DuplicateId => 2,
+        RuleId::EmptyBody => 3,
+        RuleId::NoH1InBody => 4,
+        RuleId::TitleH1Mismatch => 5,
+        RuleId::SuspiciousPathNaming => 6,
+        RuleId::MermaidBlockDetected => 7,
+        RuleId::TitleDerivedFromH1 => 8,
+        RuleId::TitleDerivedFromFilename => 9,
+        RuleId::IdInjected => 10,
+        RuleId::DefaultUntaggedTag => 11,
+        RuleId::FrontmatterInserted => 12,
+        RuleId::IdFormatSuspicious => 13,
+        _ => u8::MAX,
     }
 }

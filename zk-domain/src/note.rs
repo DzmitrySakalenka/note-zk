@@ -150,6 +150,30 @@ pub struct ValidationReport {
     pub scan_diagnostics: Vec<ScanDiagnostic>,
 }
 
+impl ValidationReport {
+    /// Serializes this report as pretty JSON.
+    ///
+    /// # Panics
+    ///
+    /// Panics if serialization fails.
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        serde_json::to_string_pretty(self)
+            .expect("validation report should always serialize to pretty json")
+    }
+
+    /// Serializes this report as compact JSON.
+    ///
+    /// # Panics
+    ///
+    /// Panics if serialization fails.
+    #[must_use]
+    pub fn to_json_compact(&self) -> String {
+        serde_json::to_string(self)
+            .expect("validation report should always serialize to compact json")
+    }
+}
+
 // ==========================================================================
 // NoteDocument
 // ==========================================================================
