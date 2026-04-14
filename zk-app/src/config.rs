@@ -72,6 +72,8 @@ pub enum ConfigValidationError {
     },
     #[error("invalid folder prefix '{prefix}': {reason}")]
     InvalidFolderPrefix { prefix: String, reason: String },
+    #[error("invalid trash_dir '{trash_dir}': {reason}")]
+    InvalidTrashDir { trash_dir: String, reason: String },
 }
 
 // Resolves the global config file path for a given platform.
@@ -229,7 +231,7 @@ pub fn merge_effective_config(
 ///
 /// Returns [`ConfigValidationError`] when any critical field contains an
 /// unusable value (retention days, note extensions, critical paths, or folder
-/// policy prefixes).
+/// policy prefixes/trash directory).
 pub fn validate_effective_config(config: &EffectiveConfig) -> Result<(), ConfigValidationError> {
     if config.retention_days == 0 {
         return Err(ConfigValidationError::InvalidRetentionDays { value: 0 });
@@ -238,6 +240,7 @@ pub fn validate_effective_config(config: &EffectiveConfig) -> Result<(), ConfigV
     validate_note_extensions(&config.allowed_note_extensions)?;
     validate_non_empty_path("vault_path", &config.vault_path)?;
     validate_non_empty_path("local_db_path", &config.local_db_path)?;
+    validate_trash_dir(&config.trash_dir)?;
     validate_folder_prefixes(&config.folders)?;
 
     Ok(())
@@ -361,6 +364,48 @@ fn validate_folder_prefix(prefix: &str) -> Result<(), ConfigValidationError> {
         return Err(ConfigValidationError::InvalidFolderPrefix {
             prefix: prefix.to_string(),
             reason: "prefix must not be empty".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_trash_dir(trash_dir: &str) -> Result<(), ConfigValidationError> {
+    let unified = trash_dir.replace('\\', "/");
+    let normalized = RelativePath::new(trash_dir).to_string();
+
+    if trash_dir.trim().is_empty() {
+        return Err(ConfigValidationError::InvalidTrashDir {
+            trash_dir: trash_dir.to_string(),
+            reason: "trash_dir must not be empty".to_string(),
+        });
+    }
+    if trash_dir.starts_with('/') || trash_dir.starts_with('\\') {
+        return Err(ConfigValidationError::InvalidTrashDir {
+            trash_dir: trash_dir.to_string(),
+            reason: "trash_dir must be vault-relative, not absolute".to_string(),
+        });
+    }
+    if trash_dir
+        .as_bytes()
+        .get(1)
+        .is_some_and(|byte| *byte == b':')
+    {
+        return Err(ConfigValidationError::InvalidTrashDir {
+            trash_dir: trash_dir.to_string(),
+            reason: "windows drive prefixes are not allowed".to_string(),
+        });
+    }
+    if unified.split('/').any(|segment| segment == "..") {
+        return Err(ConfigValidationError::InvalidTrashDir {
+            trash_dir: trash_dir.to_string(),
+            reason: "parent-directory segments ('..') are not allowed".to_string(),
+        });
+    }
+    if normalized.is_empty() {
+        return Err(ConfigValidationError::InvalidTrashDir {
+            trash_dir: trash_dir.to_string(),
+            reason: "trash_dir must not be empty".to_string(),
         });
     }
 

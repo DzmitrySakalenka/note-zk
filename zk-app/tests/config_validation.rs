@@ -194,6 +194,60 @@ fn resolve_folder_policy_matches_exact_prefix_and_nested_paths() {
 }
 
 // ==========================================================================
+// Trash dir validation
+// ==========================================================================
+
+#[test]
+fn validate_effective_config_rejects_empty_trash_dir() {
+    let mut config = EffectiveConfig::default();
+    config.trash_dir = String::new();
+
+    let err = validate_effective_config(&config).expect_err("empty trash_dir should fail");
+    match err {
+        ConfigValidationError::InvalidTrashDir { trash_dir, .. } => {
+            assert_eq!(trash_dir, String::new());
+        }
+        other => panic!("expected InvalidTrashDir, got {other:?}"),
+    }
+}
+
+#[test]
+fn validate_effective_config_rejects_trash_dir_path_traversal() {
+    let mut config = EffectiveConfig::default();
+    config.trash_dir = "../escape".to_string();
+
+    let err = validate_effective_config(&config).expect_err("path traversal trash_dir should fail");
+    match err {
+        ConfigValidationError::InvalidTrashDir { trash_dir, .. } => {
+            assert_eq!(trash_dir, "../escape".to_string());
+        }
+        other => panic!("expected InvalidTrashDir, got {other:?}"),
+    }
+}
+
+#[test]
+fn validate_effective_config_rejects_absolute_trash_dir() {
+    let mut config = EffectiveConfig::default();
+    config.trash_dir = "/absolute/path".to_string();
+
+    let err = validate_effective_config(&config).expect_err("absolute trash_dir should fail");
+    match err {
+        ConfigValidationError::InvalidTrashDir { trash_dir, .. } => {
+            assert_eq!(trash_dir, "/absolute/path".to_string());
+        }
+        other => panic!("expected InvalidTrashDir, got {other:?}"),
+    }
+}
+
+#[test]
+fn validate_effective_config_accepts_valid_trash_dir() {
+    let mut config = EffectiveConfig::default();
+    config.trash_dir = "99_trash".to_string();
+
+    validate_effective_config(&config).expect("valid trash_dir should pass validation");
+}
+
+// ==========================================================================
 // Merge-flow integration
 // ==========================================================================
 
