@@ -1,6 +1,8 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
-use zk_app::config::{ConfigValidationError, merge_effective_config, validate_effective_config};
+use zk_app::config::{
+    ConfigValidationError, merge_effective_config, resolve_folder_policy, validate_effective_config,
+};
 use zk_domain::config::{CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, VaultConfig};
 
 // ==========================================================================
@@ -60,6 +62,28 @@ fn validate_effective_config_rejects_blank_extension_entry() {
     }
 }
 
+#[test]
+fn validate_effective_config_rejects_extensions_with_invalid_characters() {
+    let invalid_extensions = ["md!", "m d", "md/x"];
+
+    for invalid_extension in invalid_extensions {
+        let mut config = EffectiveConfig::default();
+        config.allowed_note_extensions = vec![invalid_extension.to_string()];
+
+        let err = validate_effective_config(&config)
+            .expect_err("extensions with invalid characters should be rejected");
+        match err {
+            ConfigValidationError::InvalidNoteExtensions { reason } => {
+                assert!(
+                    reason.contains(invalid_extension.trim()),
+                    "error reason should reference invalid extension: {invalid_extension}"
+                );
+            }
+            other => panic!("expected InvalidNoteExtensions, got {other:?}"),
+        }
+    }
+}
+
 // ==========================================================================
 // Critical path validation
 // ==========================================================================
@@ -114,6 +138,59 @@ fn validate_effective_config_rejects_invalid_folder_prefix() {
         }
         other => panic!("expected InvalidFolderPrefix, got {other:?}"),
     }
+}
+
+#[test]
+fn validate_effective_config_rejects_absolute_folder_prefix_variants() {
+    let invalid_prefixes = ["/raw", "\\raw"];
+
+    for invalid_prefix in invalid_prefixes {
+        let mut config = EffectiveConfig::default();
+        config.folders = BTreeMap::from([(
+            invalid_prefix.to_string(),
+            FolderPolicy {
+                immutable: Some(true),
+            },
+        )]);
+
+        let err = validate_effective_config(&config)
+            .expect_err("absolute folder prefix should fail validation");
+        match err {
+            ConfigValidationError::InvalidFolderPrefix { prefix, .. } => {
+                assert_eq!(prefix, invalid_prefix.to_string());
+            }
+            other => panic!("expected InvalidFolderPrefix, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn resolve_folder_policy_matches_exact_prefix_and_nested_paths() {
+    let folders = BTreeMap::from([(
+        "raw".to_string(),
+        FolderPolicy {
+            immutable: Some(true),
+        },
+    )]);
+
+    let exact_match = resolve_folder_policy("raw", &folders);
+    let nested_match = resolve_folder_policy("raw/note.md", &folders);
+    let non_match = resolve_folder_policy("rawx/note.md", &folders);
+
+    assert_eq!(
+        exact_match.expect("exact prefix should match").immutable,
+        Some(true)
+    );
+    assert_eq!(
+        nested_match
+            .expect("nested path should match prefix")
+            .immutable,
+        Some(true)
+    );
+    assert!(
+        non_match.is_none(),
+        "path with only partial segment overlap should not match"
+    );
 }
 
 // ==========================================================================

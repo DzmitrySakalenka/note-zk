@@ -117,6 +117,48 @@ fn scan_vault_collects_authoritative_normalization_diagnostics() {
 }
 
 #[test]
+fn scan_vault_records_parse_error_for_invalid_yaml_and_continues_processing() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let vault_root = tempdir.path();
+    let config = base_config(vault_root);
+    let valid_note_path = vault_root.join("notes/valid.md");
+    let invalid_note_path = vault_root.join("notes/invalid.md");
+
+    write_text_file(
+        &valid_note_path,
+        "---\nid: 01VALIDNOTEID00000000000001\ntitle: Valid\ntags:\n  - rust\n---\nBody\n",
+    );
+    write_text_file(&invalid_note_path, "---\ninvalid: [yaml\n---\nBody\n");
+
+    let scan_result = scan_vault(vault_root, &config).expect("scan should succeed");
+    let valid_note = find_note_result(&scan_result.notes, "notes/valid.md");
+    let invalid_note = find_note_result(&scan_result.notes, "notes/invalid.md");
+
+    assert!(
+        valid_note.document.is_some(),
+        "valid note should still be parsed and normalized"
+    );
+    assert!(
+        invalid_note.frontmatter.is_none(),
+        "invalid note frontmatter should be absent after parse error"
+    );
+    assert!(
+        invalid_note.document.is_none(),
+        "invalid note document should be absent after parse error"
+    );
+    assert!(
+        scan_result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.level == DiagnosticLevel::Error
+                && diagnostic.path == RelativePath::new("notes/invalid.md")
+                && diagnostic
+                    .message
+                    .contains("failed to parse note during vault scan")
+        }),
+        "scan should report parse failure diagnostic for invalid YAML note"
+    );
+}
+
+#[test]
 fn scan_vault_skips_normalization_when_frontmatter_insert_is_disabled() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let vault_root = tempdir.path();

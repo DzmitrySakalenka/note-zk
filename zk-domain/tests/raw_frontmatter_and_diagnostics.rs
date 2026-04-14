@@ -35,6 +35,16 @@ fn raw_frontmatter_allows_missing_id_and_title_and_defaults_tags() {
 }
 
 #[test]
+fn raw_frontmatter_explicit_empty_tags_stays_empty() {
+    let raw = parse_frontmatter("tags: []\n");
+
+    assert!(
+        raw.tags.is_empty(),
+        "explicit empty tags should remain empty; default_tags applies only when the field is absent"
+    );
+}
+
+#[test]
 fn raw_frontmatter_parses_all_known_fields() {
     let yaml = r#"
 id: 01J7ABCDEF1234567890ABCDEF
