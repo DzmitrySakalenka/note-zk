@@ -72,6 +72,84 @@ fn scan_vault_is_dry_run_and_preserves_original_file_bytes() {
 }
 
 #[test]
+fn scan_vault_collects_authoritative_normalization_diagnostics() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let vault_root = tempdir.path();
+    let config = base_config(vault_root);
+    let note_path = vault_root.join("notes/diagnostics.md");
+
+    write_text_file(
+        &note_path,
+        "---\ntags:\n  - untagged\n---\n# Derived Title\nBody\n",
+    );
+
+    let scan_result = scan_vault(vault_root, &config).expect("scan should succeed");
+
+    assert!(
+        scan_result
+            .diagnostics
+            .iter()
+            .any(|d| d.level == DiagnosticLevel::Info && d.message.contains("injected missing id")),
+        "expected id-injection diagnostic from normalization"
+    );
+    assert!(
+        scan_result
+            .diagnostics
+            .iter()
+            .any(|d| d.level == DiagnosticLevel::Info
+                && d.message.contains("derived missing title from h1")),
+        "expected title-derivation diagnostic from normalization"
+    );
+    assert!(
+        scan_result
+            .diagnostics
+            .iter()
+            .any(|d| d.level == DiagnosticLevel::Info && d.message.contains("default untagged")),
+        "expected untagged diagnostic from normalization"
+    );
+    assert!(
+        !scan_result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("PLAN_GENERATED_ID")),
+        "diagnostics should never leak placeholder planning IDs"
+    );
+}
+
+#[test]
+fn scan_vault_skips_normalization_when_frontmatter_insert_is_disabled() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let vault_root = tempdir.path();
+    let mut config = base_config(vault_root);
+    config.allow_insert_frontmatter = false;
+    let note_path = vault_root.join("notes/no-frontmatter.md");
+    write_text_file(&note_path, "# No Frontmatter\nBody\n");
+
+    let scan_result = scan_vault(vault_root, &config).expect("scan should succeed");
+    let note_result = find_note_result(&scan_result.notes, "notes/no-frontmatter.md");
+
+    assert!(note_result.frontmatter.is_none());
+    assert!(note_result.document.is_none());
+    assert!(!note_result.plan.needs_id_injection);
+    assert!(!note_result.plan.needs_title_derivation);
+
+    let note_path = RelativePath::new("notes/no-frontmatter.md");
+    let warning_count = scan_result
+        .diagnostics
+        .iter()
+        .filter(|d| d.path == note_path && d.level == DiagnosticLevel::Warning)
+        .count();
+    let info_count = scan_result
+        .diagnostics
+        .iter()
+        .filter(|d| d.path == note_path && d.level == DiagnosticLevel::Info)
+        .count();
+
+    assert_eq!(warning_count, 1);
+    assert_eq!(info_count, 0);
+}
+
+#[test]
 fn scan_vault_computes_content_hash_from_original_file_bytes() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let vault_root = tempdir.path();
@@ -141,8 +219,7 @@ fn apply_normalization_writes_changed_notes_and_skips_no_change_notes() {
     let unchanged_before = read_file_bytes(&unchanged_path);
 
     let scan_result = scan_vault(vault_root, &config).expect("scan should succeed");
-    let summary =
-        apply_normalization(vault_root, &scan_result, &config).expect("apply should succeed");
+    let summary = apply_normalization(vault_root, &scan_result).expect("apply should succeed");
 
     assert_eq!(summary.files_written, 1);
     assert_eq!(summary.files_skipped_no_change, 1);
@@ -177,8 +254,7 @@ fn apply_normalization_skips_immutable_notes() {
     let immutable_before = read_file_bytes(&immutable_path);
 
     let scan_result = scan_vault(vault_root, &config).expect("scan should succeed");
-    let summary =
-        apply_normalization(vault_root, &scan_result, &config).expect("apply should succeed");
+    let summary = apply_normalization(vault_root, &scan_result).expect("apply should succeed");
 
     assert_eq!(summary.files_written, 0);
     assert_eq!(summary.files_skipped_immutable, 1);
@@ -207,8 +283,7 @@ fn apply_normalization_skips_notes_with_duplicate_ids() {
     let b_before = read_file_bytes(&b_path);
 
     let scan_result = scan_vault(vault_root, &config).expect("scan should succeed");
-    let summary =
-        apply_normalization(vault_root, &scan_result, &config).expect("apply should succeed");
+    let summary = apply_normalization(vault_root, &scan_result).expect("apply should succeed");
 
     assert_eq!(summary.files_written, 0);
     assert_eq!(summary.files_skipped_duplicate_id, 2);
@@ -267,8 +342,7 @@ fn apply_normalization_writes_valid_frontmatter_that_can_be_parsed_after_apply()
     );
 
     let scan_result = scan_vault(vault_root, &config).expect("scan should succeed");
-    let summary =
-        apply_normalization(vault_root, &scan_result, &config).expect("apply should succeed");
+    let summary = apply_normalization(vault_root, &scan_result).expect("apply should succeed");
 
     assert_eq!(summary.files_written, 1);
 

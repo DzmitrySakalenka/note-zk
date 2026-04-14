@@ -215,55 +215,8 @@ pub fn plan_normalization(
     candidate: &NoteCandidate,
     config: &EffectiveConfig,
 ) -> NormalizationPlan {
-    if raw_doc.frontmatter.is_none() && !config.allow_insert_frontmatter {
-        return NormalizationPlan {
-            needs_id_injection: false,
-            needs_title_derivation: false,
-            title_source: TitleSource::Frontmatter,
-            needs_frontmatter_insertion: false,
-            needs_field_reorder: false,
-            is_immutable: candidate.is_immutable,
-            diagnostics: vec![ScanDiagnostic {
-                level: DiagnosticLevel::Warning,
-                path: candidate.relative_path.clone(),
-                message: "cannot insert frontmatter because allow_insert_frontmatter=false"
-                    .to_string(),
-            }],
-        };
-    }
-
     let body_analysis = analyze_body(&raw_doc.body_markdown);
-    let ctx = NormalizationContext {
-        relative_path: &candidate.relative_path,
-        body_analysis: &body_analysis,
-        config,
-        is_immutable: candidate.is_immutable,
-    };
-
-    let raw_frontmatter = raw_doc
-        .frontmatter
-        .clone()
-        .unwrap_or_else(empty_raw_frontmatter);
-    let (_, diagnostics) =
-        normalize_frontmatter_with_id_generator(raw_frontmatter.clone(), &ctx, || {
-            NoteId::from("PLAN_GENERATED_ID")
-        });
-
-    let title_source = choose_title_source(&raw_frontmatter, &ctx);
-    let needs_title_derivation = title_source != TitleSource::Frontmatter;
-
-    NormalizationPlan {
-        needs_id_injection: raw_frontmatter.id.is_none(),
-        needs_title_derivation,
-        title_source,
-        needs_frontmatter_insertion: raw_doc.frontmatter.is_none(),
-        needs_field_reorder: raw_doc
-            .raw_frontmatter_yaml
-            .as_deref()
-            .is_some_and(requires_field_reorder),
-        is_immutable: candidate.is_immutable,
-        diagnostics,
-    }
+    plan_normalization_with_body_analysis(raw_doc, candidate, config, &body_analysis)
 }
 
 #[must_use]
@@ -394,10 +347,26 @@ pub fn scan_vault(
 
         match parse_note_file(&candidate.absolute_path) {
             Ok(raw_document) => {
-                let plan = plan_normalization(&raw_document, candidate, config);
+                let body_analysis = analyze_body(&raw_document.body_markdown);
+                let plan = plan_normalization_with_body_analysis(
+                    &raw_document,
+                    candidate,
+                    config,
+                    &body_analysis,
+                );
                 diagnostics.extend(plan.diagnostics.clone());
 
-                let body_analysis = analyze_body(&raw_document.body_markdown);
+                if raw_document.frontmatter.is_none() && !config.allow_insert_frontmatter {
+                    notes.push(NormalizationResult {
+                        relative_path: candidate.relative_path.clone(),
+                        plan,
+                        frontmatter: None,
+                        document: None,
+                        content_hash,
+                    });
+                    continue;
+                }
+
                 let normalization_context = NormalizationContext {
                     relative_path: &candidate.relative_path,
                     body_analysis: &body_analysis,
@@ -407,8 +376,9 @@ pub fn scan_vault(
                 let raw_frontmatter = raw_document
                     .frontmatter
                     .unwrap_or_else(empty_raw_frontmatter);
-                let (normalized_frontmatter, _normalize_diagnostics) =
+                let (normalized_frontmatter, normalize_diagnostics) =
                     normalize_frontmatter(raw_frontmatter, &normalization_context);
+                diagnostics.extend(normalize_diagnostics);
                 let document = NoteDocument {
                     frontmatter: normalized_frontmatter.clone(),
                     body_markdown: raw_document.body_markdown,
@@ -466,7 +436,6 @@ pub fn scan_vault(
 pub fn apply_normalization(
     vault_root: &Path,
     result: &VaultScanResult,
-    _config: &EffectiveConfig,
 ) -> Result<NormalizationSummary, VaultError> {
     let root_metadata = fs::metadata(vault_root).map_err(|source| VaultError::Io {
         path: vault_root.to_path_buf(),
@@ -589,16 +558,17 @@ fn split_frontmatter_sections(file_content: &str) -> Option<(&str, &str)> {
 fn derive_title(raw: &RawNoteFrontmatter, ctx: &NormalizationContext<'_>) -> (String, TitleSource) {
     match choose_title_source(raw, ctx) {
         TitleSource::Frontmatter => (
-            raw.title
-                .clone()
-                .expect("frontmatter title source requires title"),
+            raw.title.clone().unwrap_or_else(|| {
+                unreachable!(
+                    "choose_title_source returned Frontmatter without a non-empty raw title"
+                )
+            }),
             TitleSource::Frontmatter,
         ),
         TitleSource::H1 => (
-            ctx.body_analysis
-                .first_h1
-                .clone()
-                .expect("H1 title source requires first_h1"),
+            ctx.body_analysis.first_h1.clone().unwrap_or_else(|| {
+                unreachable!("choose_title_source returned H1 without a non-empty first heading")
+            }),
             TitleSource::H1,
         ),
         TitleSource::FilenameStem => (
@@ -688,6 +658,58 @@ fn empty_raw_frontmatter() -> RawNoteFrontmatter {
         status: None,
         sources: Vec::new(),
         extra: std::collections::BTreeMap::default(),
+    }
+}
+
+fn plan_normalization_with_body_analysis(
+    raw_doc: &RawNoteDocument,
+    candidate: &NoteCandidate,
+    config: &EffectiveConfig,
+    body_analysis: &BodyAnalysis,
+) -> NormalizationPlan {
+    if raw_doc.frontmatter.is_none() && !config.allow_insert_frontmatter {
+        return NormalizationPlan {
+            needs_id_injection: false,
+            needs_title_derivation: false,
+            title_source: TitleSource::Frontmatter,
+            needs_frontmatter_insertion: false,
+            needs_field_reorder: false,
+            is_immutable: candidate.is_immutable,
+            diagnostics: vec![ScanDiagnostic {
+                level: DiagnosticLevel::Warning,
+                path: candidate.relative_path.clone(),
+                message: "cannot insert frontmatter because allow_insert_frontmatter=false"
+                    .to_string(),
+            }],
+        };
+    }
+
+    let normalized_default_frontmatter;
+    let raw_frontmatter = if let Some(raw_frontmatter) = raw_doc.frontmatter.as_ref() {
+        raw_frontmatter
+    } else {
+        normalized_default_frontmatter = empty_raw_frontmatter();
+        &normalized_default_frontmatter
+    };
+    let ctx = NormalizationContext {
+        relative_path: &candidate.relative_path,
+        body_analysis,
+        config,
+        is_immutable: candidate.is_immutable,
+    };
+    let title_source = choose_title_source(raw_frontmatter, &ctx);
+
+    NormalizationPlan {
+        needs_id_injection: raw_frontmatter.id.is_none(),
+        needs_title_derivation: title_source != TitleSource::Frontmatter,
+        title_source,
+        needs_frontmatter_insertion: raw_doc.frontmatter.is_none(),
+        needs_field_reorder: raw_doc
+            .raw_frontmatter_yaml
+            .as_deref()
+            .is_some_and(requires_field_reorder),
+        is_immutable: candidate.is_immutable,
+        diagnostics: Vec::new(),
     }
 }
 

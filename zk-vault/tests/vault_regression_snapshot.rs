@@ -307,8 +307,7 @@ fn multi_file_vault_regression_scan_and_apply() {
     assert!(!find_note("notes/already.md").plan.needs_id_injection);
     assert_eq!(scan_result.duplicate_ids.len(), 1);
 
-    let summary =
-        apply_normalization(vault_root, &scan_result, &config).expect("apply should succeed");
+    let summary = apply_normalization(vault_root, &scan_result).expect("apply should succeed");
     assert_eq!(summary.files_written, 3);
     assert_eq!(summary.files_skipped_immutable, 1);
     assert_eq!(summary.files_skipped_no_change, 1);

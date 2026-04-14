@@ -293,6 +293,11 @@ fn plan_reports_warning_and_skips_when_frontmatter_insertion_is_disabled() {
         has_diagnostic(&plan.diagnostics, DiagnosticLevel::Warning, "frontmatter"),
         "expected warning when insertion is disabled"
     );
+    assert_eq!(
+        plan.diagnostics.len(),
+        1,
+        "plan should only emit the insertion-disabled warning"
+    );
     assert!(!plan.needs_id_injection);
     assert!(!plan.needs_title_derivation);
 }
@@ -309,6 +314,28 @@ fn plan_marks_frontmatter_insertion_when_missing_and_allowed() {
     assert!(plan.needs_id_injection);
     assert!(plan.needs_title_derivation);
     assert_eq!(plan.title_source, TitleSource::H1);
+}
+
+#[test]
+fn plan_does_not_emit_normalization_info_diagnostics_for_normalizable_notes() {
+    let raw_doc = raw_doc(
+        Some(raw_frontmatter()),
+        Some("tags:\n  - untagged\n"),
+        "# Derived Heading\n",
+        true,
+    );
+    let candidate = note_candidate("notes/normalizable.md", false);
+    let config = base_config();
+
+    let plan = plan_normalization(&raw_doc, &candidate, &config);
+
+    assert!(plan.needs_id_injection);
+    assert!(plan.needs_title_derivation);
+    assert_eq!(plan.title_source, TitleSource::H1);
+    assert!(
+        plan.diagnostics.is_empty(),
+        "plan should not emit normalization diagnostics"
+    );
 }
 
 #[test]
