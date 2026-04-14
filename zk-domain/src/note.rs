@@ -72,18 +72,82 @@ pub struct RawNoteFrontmatter {
     pub extra: BTreeMap<String, serde_yaml::Value>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub enum DiagnosticLevel {
     Error,
     Warning,
     Info,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ScanDiagnostic {
     pub level: DiagnosticLevel,
     pub path: RelativePath,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[non_exhaustive]
+pub enum RuleId {
+    InvalidFrontmatter,
+    MissingTitle,
+    DuplicateId,
+    EmptyBody,
+    NoH1InBody,
+    TitleH1Mismatch,
+    SuspiciousPathNaming,
+    MermaidBlockDetected,
+    TitleDerivedFromH1,
+    TitleDerivedFromFilename,
+    IdInjected,
+    DefaultUntaggedTag,
+    FrontmatterInserted,
+    IdFormatSuspicious,
+}
+
+impl RuleId {
+    #[must_use]
+    pub fn description(&self) -> &'static str {
+        match self {
+            RuleId::InvalidFrontmatter => "invalid frontmatter",
+            RuleId::MissingTitle => "missing title after derivation",
+            RuleId::DuplicateId => "duplicate note id",
+            RuleId::EmptyBody => "empty note body",
+            RuleId::NoH1InBody => "missing h1 in body",
+            RuleId::TitleH1Mismatch => "frontmatter title and h1 mismatch",
+            RuleId::SuspiciousPathNaming => "suspicious path naming",
+            RuleId::MermaidBlockDetected => "mermaid block detected",
+            RuleId::TitleDerivedFromH1 => "title derived from h1",
+            RuleId::TitleDerivedFromFilename => "title derived from filename",
+            RuleId::IdInjected => "id injected",
+            RuleId::DefaultUntaggedTag => "default untagged tag",
+            RuleId::FrontmatterInserted => "frontmatter inserted",
+            RuleId::IdFormatSuspicious => "suspicious id format",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ValidationFinding {
+    pub rule: RuleId,
+    pub level: DiagnosticLevel,
+    pub path: RelativePath,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ValidationSummary {
+    pub error_count: u32,
+    pub warning_count: u32,
+    pub info_count: u32,
+    pub rules_triggered: Vec<(RuleId, u32)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct ValidationReport {
+    pub findings: Vec<ValidationFinding>,
+    pub summary: ValidationSummary,
+    pub scan_diagnostics: Vec<ScanDiagnostic>,
 }
 
 // ==========================================================================
