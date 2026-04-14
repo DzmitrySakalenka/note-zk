@@ -6,7 +6,7 @@ use zk_domain::{
     note::{DiagnosticLevel, RuleId, ValidationFinding, ValidationReport, ValidationSummary},
 };
 
-use crate::{NormalizationResult, VaultScanResult, analyze_body};
+use crate::{NormalizationResult, TitleSource, VaultScanResult, analyze_body};
 
 #[allow(dead_code)]
 pub(crate) struct ValidationContext<'a> {
@@ -43,6 +43,11 @@ fn register_rules() -> Vec<Box<dyn ValidationRule>> {
         Box::new(TitleH1MismatchRule),
         Box::new(SuspiciousPathNamingRule),
         Box::new(IdFormatSuspiciousRule),
+        Box::new(TitleDerivedRule),
+        Box::new(IdInjectedRule),
+        Box::new(DefaultUntaggedTagRule),
+        Box::new(FrontmatterInsertedRule),
+        Box::new(MermaidBlockDetectedRule),
     ]
 }
 
@@ -62,29 +67,26 @@ pub(crate) fn validate_vault_with_rules(
 
     for rule in rules {
         let rule_id = rule.id();
-        if disabled_rules.contains(&rule_id) {
-            continue;
-        }
-
-        let effective_level = severity_overrides
-            .get(&rule_id)
-            .cloned()
-            .unwrap_or_else(|| rule.default_level());
+        let default_level = rule.default_level();
 
         for note in &scan_result.notes {
             let note_findings = rule.check_note(note, &context);
-            findings.extend(apply_finding_level(
-                rule_id,
-                &effective_level,
+            findings.extend(normalize_findings(
                 note_findings,
+                &disabled_rules,
+                &severity_overrides,
+                rule_id,
+                &default_level,
             ));
         }
 
         let vault_findings = rule.check_vault(&context);
-        findings.extend(apply_finding_level(
-            rule_id,
-            &effective_level,
+        findings.extend(normalize_findings(
             vault_findings,
+            &disabled_rules,
+            &severity_overrides,
+            rule_id,
+            &default_level,
         ));
     }
 
@@ -392,6 +394,195 @@ impl ValidationRule for IdFormatSuspiciousRule {
     }
 }
 
+struct TitleDerivedRule;
+
+impl ValidationRule for TitleDerivedRule {
+    fn id(&self) -> RuleId {
+        RuleId::TitleDerivedFromH1
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Info
+    }
+
+    fn check_note(
+        &self,
+        note: &NormalizationResult,
+        _ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        if !note.plan.needs_title_derivation {
+            return Vec::new();
+        }
+
+        let (rule, message) = match note.plan.title_source {
+            TitleSource::H1 => (RuleId::TitleDerivedFromH1, "title derived from h1"),
+            TitleSource::FilenameStem => (
+                RuleId::TitleDerivedFromFilename,
+                "title derived from filename",
+            ),
+            TitleSource::Frontmatter => return Vec::new(),
+        };
+
+        vec![new_finding(
+            rule,
+            DiagnosticLevel::Info,
+            note.relative_path.clone(),
+            message,
+        )]
+    }
+}
+
+fn normalize_findings(
+    findings: Vec<ValidationFinding>,
+    disabled_rules: &HashSet<RuleId>,
+    severity_overrides: &HashMap<RuleId, DiagnosticLevel>,
+    default_rule_id: RuleId,
+    default_level: &DiagnosticLevel,
+) -> Vec<ValidationFinding> {
+    let mut normalized = Vec::with_capacity(findings.len());
+    for mut finding in findings {
+        if disabled_rules.contains(&finding.rule) {
+            continue;
+        }
+
+        if finding.rule == default_rule_id {
+            finding.level = default_level.clone();
+        }
+
+        if let Some(level_override) = severity_overrides.get(&finding.rule) {
+            finding.level = level_override.clone();
+        }
+        normalized.push(finding);
+    }
+    normalized
+}
+
+struct IdInjectedRule;
+
+impl ValidationRule for IdInjectedRule {
+    fn id(&self) -> RuleId {
+        RuleId::IdInjected
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Info
+    }
+
+    fn check_note(
+        &self,
+        note: &NormalizationResult,
+        _ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        if !note.plan.needs_id_injection {
+            return Vec::new();
+        }
+
+        vec![new_finding(
+            RuleId::IdInjected,
+            DiagnosticLevel::Info,
+            note.relative_path.clone(),
+            "id injected",
+        )]
+    }
+}
+
+struct DefaultUntaggedTagRule;
+
+impl ValidationRule for DefaultUntaggedTagRule {
+    fn id(&self) -> RuleId {
+        RuleId::DefaultUntaggedTag
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Info
+    }
+
+    fn check_note(
+        &self,
+        note: &NormalizationResult,
+        _ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        let Some(frontmatter) = note.frontmatter.as_ref() else {
+            return Vec::new();
+        };
+
+        if frontmatter.tags.len() != 1
+            || frontmatter.tags.first().is_none_or(|tag| tag != "untagged")
+        {
+            return Vec::new();
+        }
+
+        vec![new_finding(
+            RuleId::DefaultUntaggedTag,
+            DiagnosticLevel::Info,
+            note.relative_path.clone(),
+            "default untagged tag",
+        )]
+    }
+}
+
+struct FrontmatterInsertedRule;
+
+impl ValidationRule for FrontmatterInsertedRule {
+    fn id(&self) -> RuleId {
+        RuleId::FrontmatterInserted
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Info
+    }
+
+    fn check_note(
+        &self,
+        note: &NormalizationResult,
+        _ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        if !note.plan.needs_frontmatter_insertion {
+            return Vec::new();
+        }
+
+        vec![new_finding(
+            RuleId::FrontmatterInserted,
+            DiagnosticLevel::Info,
+            note.relative_path.clone(),
+            "frontmatter inserted",
+        )]
+    }
+}
+
+struct MermaidBlockDetectedRule;
+
+impl ValidationRule for MermaidBlockDetectedRule {
+    fn id(&self) -> RuleId {
+        RuleId::MermaidBlockDetected
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Info
+    }
+
+    fn check_note(
+        &self,
+        note: &NormalizationResult,
+        _ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        let Some(document) = note.document.as_ref() else {
+            return Vec::new();
+        };
+        let analysis = analyze_body(&document.body_markdown);
+        if !analysis.has_mermaid {
+            return Vec::new();
+        }
+
+        vec![new_finding(
+            RuleId::MermaidBlockDetected,
+            DiagnosticLevel::Info,
+            note.relative_path.clone(),
+            "mermaid block detected",
+        )]
+    }
+}
+
 fn new_finding(
     rule: RuleId,
     level: DiagnosticLevel,
@@ -429,20 +620,6 @@ fn is_valid_ulid_crockford_text(value: &str) -> bool {
         .as_bytes()
         .iter()
         .all(|byte| matches!(byte, b'0'..=b'9' | b'A'..=b'H' | b'J'..=b'K' | b'M'..=b'N' | b'P'..=b'T' | b'V'..=b'Z'))
-}
-
-fn apply_finding_level(
-    rule_id: RuleId,
-    level: &DiagnosticLevel,
-    findings: Vec<ValidationFinding>,
-) -> Vec<ValidationFinding> {
-    let mut normalized = Vec::with_capacity(findings.len());
-    for mut finding in findings {
-        finding.rule = rule_id;
-        finding.level = level.clone();
-        normalized.push(finding);
-    }
-    normalized
 }
 
 fn collect_duplicate_path_set(
