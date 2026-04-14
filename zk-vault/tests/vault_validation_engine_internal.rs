@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-pub use zk_vault::{NormalizationPlan, NormalizationResult, TitleSource, VaultScanResult};
+pub use zk_vault::{
+    NormalizationPlan, NormalizationResult, TitleSource, VaultScanResult, analyze_body,
+};
 
 #[allow(dead_code)]
 mod validate_impl {

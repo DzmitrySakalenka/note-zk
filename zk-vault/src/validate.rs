@@ -6,7 +6,7 @@ use zk_domain::{
     note::{DiagnosticLevel, RuleId, ValidationFinding, ValidationReport, ValidationSummary},
 };
 
-use crate::{NormalizationResult, VaultScanResult};
+use crate::{NormalizationResult, VaultScanResult, analyze_body};
 
 #[allow(dead_code)]
 pub(crate) struct ValidationContext<'a> {
@@ -35,7 +35,15 @@ pub fn validate_vault(scan_result: &VaultScanResult, config: &EffectiveConfig) -
 }
 
 fn register_rules() -> Vec<Box<dyn ValidationRule>> {
-    Vec::new()
+    vec![
+        Box::new(MissingTitleRule),
+        Box::new(DuplicateIdRule),
+        Box::new(EmptyBodyRule),
+        Box::new(NoH1InBodyRule),
+        Box::new(TitleH1MismatchRule),
+        Box::new(SuspiciousPathNamingRule),
+        Box::new(IdFormatSuspiciousRule),
+    ]
 }
 
 pub(crate) fn validate_vault_with_rules(
@@ -144,6 +152,283 @@ fn parse_level_override(name: &str) -> Option<DiagnosticLevel> {
         return Some(DiagnosticLevel::Info);
     }
     None
+}
+
+struct MissingTitleRule;
+
+impl ValidationRule for MissingTitleRule {
+    fn id(&self) -> RuleId {
+        RuleId::MissingTitle
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Error
+    }
+
+    fn check_note(
+        &self,
+        note: &NormalizationResult,
+        _ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        let Some(frontmatter) = note.frontmatter.as_ref() else {
+            return Vec::new();
+        };
+        if !frontmatter.title.trim().is_empty() {
+            return Vec::new();
+        }
+        vec![new_finding(
+            RuleId::MissingTitle,
+            DiagnosticLevel::Error,
+            note.relative_path.clone(),
+            "missing title after derivation",
+        )]
+    }
+}
+
+struct DuplicateIdRule;
+
+impl ValidationRule for DuplicateIdRule {
+    fn id(&self) -> RuleId {
+        RuleId::DuplicateId
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Error
+    }
+
+    fn check_note(
+        &self,
+        _note: &NormalizationResult,
+        _ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        Vec::new()
+    }
+
+    fn check_vault(&self, ctx: &ValidationContext<'_>) -> Vec<ValidationFinding> {
+        let mut findings = Vec::new();
+        for (duplicate_id, paths) in &ctx.scan_result.duplicate_ids {
+            for path in paths {
+                findings.push(new_finding(
+                    RuleId::DuplicateId,
+                    DiagnosticLevel::Error,
+                    path.clone(),
+                    format!("duplicate note id detected: {duplicate_id}"),
+                ));
+            }
+        }
+        findings
+    }
+}
+
+struct EmptyBodyRule;
+
+impl ValidationRule for EmptyBodyRule {
+    fn id(&self) -> RuleId {
+        RuleId::EmptyBody
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Warning
+    }
+
+    fn check_note(
+        &self,
+        note: &NormalizationResult,
+        _ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        let Some(document) = note.document.as_ref() else {
+            return Vec::new();
+        };
+        if !document.body_markdown.trim().is_empty() {
+            return Vec::new();
+        }
+        vec![new_finding(
+            RuleId::EmptyBody,
+            DiagnosticLevel::Warning,
+            note.relative_path.clone(),
+            "empty note body",
+        )]
+    }
+}
+
+struct NoH1InBodyRule;
+
+impl ValidationRule for NoH1InBodyRule {
+    fn id(&self) -> RuleId {
+        RuleId::NoH1InBody
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Warning
+    }
+
+    fn check_note(
+        &self,
+        note: &NormalizationResult,
+        _ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        let Some(document) = note.document.as_ref() else {
+            return Vec::new();
+        };
+        let analysis = analyze_body(&document.body_markdown);
+        if analysis.first_h1.is_some() {
+            return Vec::new();
+        }
+        vec![new_finding(
+            RuleId::NoH1InBody,
+            DiagnosticLevel::Warning,
+            note.relative_path.clone(),
+            "missing h1 in body",
+        )]
+    }
+}
+
+struct TitleH1MismatchRule;
+
+impl ValidationRule for TitleH1MismatchRule {
+    fn id(&self) -> RuleId {
+        RuleId::TitleH1Mismatch
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Warning
+    }
+
+    fn check_note(
+        &self,
+        note: &NormalizationResult,
+        _ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        let Some(frontmatter) = note.frontmatter.as_ref() else {
+            return Vec::new();
+        };
+        let Some(document) = note.document.as_ref() else {
+            return Vec::new();
+        };
+
+        let Some(normalized_title) = normalize_nonempty_text(&frontmatter.title) else {
+            return Vec::new();
+        };
+        let analysis = analyze_body(&document.body_markdown);
+        let Some(first_h1) = analysis.first_h1.as_deref() else {
+            return Vec::new();
+        };
+        let Some(normalized_h1) = normalize_nonempty_text(first_h1) else {
+            return Vec::new();
+        };
+        if normalized_title == normalized_h1 {
+            return Vec::new();
+        }
+        vec![new_finding(
+            RuleId::TitleH1Mismatch,
+            DiagnosticLevel::Warning,
+            note.relative_path.clone(),
+            "frontmatter title and h1 mismatch",
+        )]
+    }
+}
+
+struct SuspiciousPathNamingRule;
+
+impl ValidationRule for SuspiciousPathNamingRule {
+    fn id(&self) -> RuleId {
+        RuleId::SuspiciousPathNaming
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Warning
+    }
+
+    fn check_note(
+        &self,
+        note: &NormalizationResult,
+        _ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        let filename = file_name_component(&note.relative_path);
+        let has_non_ascii = !filename.is_ascii();
+        let has_control_chars = filename.chars().any(char::is_control);
+        let has_consecutive_dots = filename.contains("..");
+
+        if !has_non_ascii && !has_control_chars && !has_consecutive_dots {
+            return Vec::new();
+        }
+        vec![new_finding(
+            RuleId::SuspiciousPathNaming,
+            DiagnosticLevel::Warning,
+            note.relative_path.clone(),
+            "suspicious path naming",
+        )]
+    }
+}
+
+struct IdFormatSuspiciousRule;
+
+impl ValidationRule for IdFormatSuspiciousRule {
+    fn id(&self) -> RuleId {
+        RuleId::IdFormatSuspicious
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Warning
+    }
+
+    fn check_note(
+        &self,
+        note: &NormalizationResult,
+        _ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        let Some(frontmatter) = note.frontmatter.as_ref() else {
+            return Vec::new();
+        };
+        if is_valid_ulid_crockford_text(&frontmatter.id.to_string()) {
+            return Vec::new();
+        }
+        vec![new_finding(
+            RuleId::IdFormatSuspicious,
+            DiagnosticLevel::Warning,
+            note.relative_path.clone(),
+            "suspicious id format",
+        )]
+    }
+}
+
+fn new_finding(
+    rule: RuleId,
+    level: DiagnosticLevel,
+    path: RelativePath,
+    message: impl Into<String>,
+) -> ValidationFinding {
+    ValidationFinding {
+        rule,
+        level,
+        path,
+        message: message.into(),
+    }
+}
+
+fn file_name_component(path: &RelativePath) -> &str {
+    let full_path = path.as_str();
+    full_path.rsplit('/').next().unwrap_or(full_path)
+}
+
+fn normalize_nonempty_text(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_lowercase())
+}
+
+fn is_valid_ulid_crockford_text(value: &str) -> bool {
+    const ULID_LEN: usize = 26;
+    if value.len() != ULID_LEN {
+        return false;
+    }
+
+    value
+        .as_bytes()
+        .iter()
+        .all(|byte| matches!(byte, b'0'..=b'9' | b'A'..=b'H' | b'J'..=b'K' | b'M'..=b'N' | b'P'..=b'T' | b'V'..=b'Z'))
 }
 
 fn apply_finding_level(
