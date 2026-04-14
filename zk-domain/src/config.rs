@@ -17,6 +17,7 @@ pub struct VaultConfig {
     pub retention_days: Option<u32>,
     pub allowed_note_extensions: Option<Vec<String>>,
     pub normalization: Option<NormalizationConfig>,
+    pub validation: Option<ValidationConfig>,
     #[serde(default)]
     pub folders: BTreeMap<String, FolderPolicy>,
 }
@@ -30,6 +31,12 @@ pub struct FolderPolicy {
 pub struct NormalizationConfig {
     pub allow_insert_frontmatter: Option<bool>,
     pub derive_title_from_h1: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+pub struct ValidationConfig {
+    pub disabled_rules: Vec<String>,
+    pub severity_overrides: BTreeMap<String, String>,
 }
 
 // ==========================================================================
@@ -56,6 +63,7 @@ pub struct EffectiveConfig {
     pub allow_insert_frontmatter: bool,
     pub derive_title_from_h1: bool,
     pub allowed_note_extensions: Vec<String>,
+    pub validation: ValidationConfig,
     pub folders: BTreeMap<String, FolderPolicy>,
 }
 
@@ -69,6 +77,7 @@ impl Default for EffectiveConfig {
             allow_insert_frontmatter: true,
             derive_title_from_h1: true,
             allowed_note_extensions: vec!["md".to_string()],
+            validation: ValidationConfig::default(),
             folders: BTreeMap::new(),
         }
     }

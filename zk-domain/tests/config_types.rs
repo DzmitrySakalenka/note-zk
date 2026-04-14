@@ -2,7 +2,8 @@ use std::fmt::Debug;
 
 use serde::{Serialize, de::DeserializeOwned};
 use zk_domain::config::{
-    CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, NormalizationConfig, VaultConfig,
+    CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, NormalizationConfig,
+    ValidationConfig, VaultConfig,
 };
 
 // ==========================================================================
@@ -21,6 +22,7 @@ fn config_types_implement_required_common_traits() {
     assert_common_traits::<VaultConfig>();
     assert_common_traits::<FolderPolicy>();
     assert_common_traits::<NormalizationConfig>();
+    assert_common_traits::<ValidationConfig>();
     assert_common_traits::<CliOverrides>();
     assert_common_traits::<EffectiveConfig>();
 }
@@ -91,6 +93,36 @@ immutable = true
     assert_eq!(raw_policy.immutable, Some(true));
 }
 
+#[test]
+fn vault_config_deserializes_validation_section() {
+    let input = r#"
+[validation]
+disabled_rules = ["MissingTitle", "IdInjected"]
+
+[validation.severity_overrides]
+NoH1InBody = "error"
+MermaidBlockDetected = "warning"
+"#;
+
+    let parsed: VaultConfig = toml::from_str(input).expect("parse VaultConfig from TOML");
+    let validation = parsed
+        .validation
+        .expect("validation table should deserialize");
+
+    assert_eq!(
+        validation.disabled_rules,
+        vec!["MissingTitle".to_string(), "IdInjected".to_string()]
+    );
+    assert_eq!(
+        validation.severity_overrides.get("NoH1InBody"),
+        Some(&"error".to_string())
+    );
+    assert_eq!(
+        validation.severity_overrides.get("MermaidBlockDetected"),
+        Some(&"warning".to_string())
+    );
+}
+
 // ==========================================================================
 // Runtime override values
 // ==========================================================================
@@ -147,5 +179,19 @@ fn effective_config_default_is_safe_for_phase1() {
             .iter()
             .any(|ext| ext == "md"),
         "markdown extension should be enabled by default"
+    );
+}
+
+#[test]
+fn effective_config_default_has_empty_validation_config() {
+    let effective = EffectiveConfig::default();
+
+    assert!(
+        effective.validation.disabled_rules.is_empty(),
+        "default disabled_rules should be empty"
+    );
+    assert!(
+        effective.validation.severity_overrides.is_empty(),
+        "default severity_overrides should be empty"
     );
 }
