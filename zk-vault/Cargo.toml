@@ -16,3 +16,6 @@ walkdir = "2.5.0"
 zk-domain = { path = "../zk-domain" }
 
 [dev-dependencies]
+insta = "1.43.2"
+quickcheck = "1.0.3"
+quickcheck_macros = "1.1.0"

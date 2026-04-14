@@ -1,0 +1,11 @@
+---
+source: zk-vault/tests/vault_regression_snapshot.rs
+expression: "&output"
+---
+---
+id: 01ORDEREDSNAPSHOT0000000000001
+title: Reordered
+tags:
+  - rust
+---
+Body

@@ -1,0 +1,11 @@
+---
+source: zk-vault/tests/vault_regression_snapshot.rs
+expression: "&serialized"
+---
+id: 01MINIMALSNAPSHOTNOTEID000001
+title: Minimal Snapshot
+tags:
+  - rust
+type: note
+created: 2026-04-14T09:00:00Z
+status: draft

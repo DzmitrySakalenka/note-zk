@@ -1,0 +1,12 @@
+---
+source: zk-vault/tests/vault_regression_snapshot.rs
+expression: "&output"
+---
+---
+id: 01H1TITLE00000000000000000001
+title: H1 Derived
+tags:
+  - rust
+---
+# H1 Derived
+Body

@@ -1,0 +1,22 @@
+---
+source: zk-vault/tests/vault_regression_snapshot.rs
+expression: "&serialized"
+---
+id: 01FULLSNAPSHOTNOTEID0000000001
+title: Full Snapshot
+tags:
+  - rust
+  - project/zk
+type: concept
+aliases:
+  - Alias One
+  - Alias Two
+created: 2026-04-14T12:00:00Z
+updated: 2026-04-14T13:00:00Z
+source: source_ref
+status: active
+sources:
+  - 01SOURCEA000000000000000001
+  - 01SOURCEB000000000000000002
+custom_alpha: alpha
+custom_beta: true
