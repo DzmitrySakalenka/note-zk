@@ -10,7 +10,7 @@ mod serialize;
 mod validate;
 mod write;
 
-pub use link_extract::{ExtractedLinks, RawLink};
+pub use link_extract::{ExtractedLinks, RawLink, extract_links};
 pub use link_resolve::ClassifiedLink;
 pub use normalize::{
     NormalizationContext, NormalizationPlan, TitleSource, normalize_frontmatter,
