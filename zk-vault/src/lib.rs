@@ -1,4 +1,6 @@
 pub mod error;
+mod link_extract;
+mod link_resolve;
 mod normalize;
 mod normalize_reorder;
 mod parse;
@@ -8,6 +10,8 @@ mod serialize;
 mod validate;
 mod write;
 
+pub use link_extract::{ExtractedLinks, RawLink};
+pub use link_resolve::ClassifiedLink;
 pub use normalize::{
     NormalizationContext, NormalizationPlan, TitleSource, normalize_frontmatter,
     normalize_frontmatter_with_id_generator, plan_normalization,
