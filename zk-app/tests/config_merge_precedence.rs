@@ -2,7 +2,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use zk_app::config::{merge_effective_config, resolve_folder_policy};
 use zk_domain::config::{
-    CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, NormalizationConfig, VaultConfig,
+    CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, NormalizationConfig,
+    ValidationConfig, VaultConfig,
 };
 
 // ==========================================================================
@@ -42,6 +43,7 @@ fn merge_uses_vault_for_vault_scoped_fields_when_cli_missing() {
             allow_insert_frontmatter: Some(false),
             derive_title_from_h1: Some(false),
         }),
+        validation: None,
         folders: BTreeMap::from([
             (
                 "raw".to_string(),
@@ -85,6 +87,7 @@ fn merge_cli_overrides_vault_and_global() {
             allow_insert_frontmatter: Some(true),
             derive_title_from_h1: Some(true),
         }),
+        validation: None,
         folders: BTreeMap::from([(
             "raw".to_string(),
             FolderPolicy {
@@ -130,6 +133,7 @@ fn merge_is_deterministic_for_identical_inputs() {
             allow_insert_frontmatter: Some(true),
             derive_title_from_h1: Some(true),
         }),
+        validation: None,
         folders: BTreeMap::from([(
             "raw".to_string(),
             FolderPolicy {
@@ -151,6 +155,77 @@ fn merge_is_deterministic_for_identical_inputs() {
     let second = merge_effective_config(&global, &vault, &cli);
 
     assert_eq!(first, second);
+}
+
+#[test]
+fn merge_uses_vault_validation_config_when_present() {
+    let vault = VaultConfig {
+        validation: Some(ValidationConfig {
+            disabled_rules: vec!["MissingTitle".to_string(), "IdInjected".to_string()],
+            severity_overrides: BTreeMap::from([
+                ("NoH1InBody".to_string(), "error".to_string()),
+                ("MermaidBlockDetected".to_string(), "warning".to_string()),
+            ]),
+        }),
+        ..VaultConfig::default()
+    };
+
+    let merged = merge_effective_config(&GlobalConfig::default(), &vault, &CliOverrides::default());
+
+    assert_eq!(
+        merged.validation.disabled_rules,
+        vec!["MissingTitle".to_string(), "IdInjected".to_string()]
+    );
+    assert_eq!(
+        merged.validation.severity_overrides.get("NoH1InBody"),
+        Some(&"error".to_string())
+    );
+    assert_eq!(
+        merged
+            .validation
+            .severity_overrides
+            .get("MermaidBlockDetected"),
+        Some(&"warning".to_string())
+    );
+}
+
+#[test]
+fn merge_keeps_default_validation_when_vault_validation_missing() {
+    let merged = merge_effective_config(
+        &GlobalConfig::default(),
+        &VaultConfig::default(),
+        &CliOverrides::default(),
+    );
+
+    assert!(
+        merged.validation.disabled_rules.is_empty(),
+        "default disabled_rules should remain empty when vault config omits validation table"
+    );
+    assert!(
+        merged.validation.severity_overrides.is_empty(),
+        "default severity_overrides should remain empty when vault config omits validation table"
+    );
+}
+
+#[test]
+fn merge_is_deterministic_for_validation_config() {
+    let vault = VaultConfig {
+        validation: Some(ValidationConfig {
+            disabled_rules: vec!["NoH1InBody".to_string()],
+            severity_overrides: BTreeMap::from([(
+                "TitleH1Mismatch".to_string(),
+                "info".to_string(),
+            )]),
+        }),
+        ..VaultConfig::default()
+    };
+    let global = GlobalConfig::default();
+    let cli = CliOverrides::default();
+
+    let first = merge_effective_config(&global, &vault, &cli);
+    let second = merge_effective_config(&global, &vault, &cli);
+
+    assert_eq!(first.validation, second.validation);
 }
 
 // ==========================================================================

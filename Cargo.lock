@@ -992,6 +992,7 @@ dependencies = [
  "insta",
  "quickcheck",
  "quickcheck_macros",
+ "serde_json",
  "serde_yaml",
  "tempfile",
  "thiserror",

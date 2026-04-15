@@ -5,6 +5,7 @@ mod parse;
 mod pipeline;
 mod scan;
 mod serialize;
+mod validate;
 mod write;
 
 pub use normalize::{
@@ -19,4 +20,5 @@ pub use pipeline::{
 };
 pub use scan::{AssetCandidate, NoteCandidate, VaultFileSet, scan_vault_files};
 pub use serialize::{render_note_file, serialize_frontmatter};
+pub use validate::validate_vault;
 pub use write::atomic_write_file;

@@ -196,6 +196,9 @@ pub fn merge_effective_config(
     if let Some(normalization) = &vault.normalization {
         apply_normalization_overrides(normalization, &mut merged);
     }
+    if let Some(validation) = &vault.validation {
+        merged.validation.clone_from(validation);
+    }
     if !vault.folders.is_empty() {
         merged.folders.clone_from(&vault.folders);
     }
