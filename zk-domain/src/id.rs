@@ -9,6 +9,11 @@ macro_rules! impl_string_newtype {
             pub fn from(s: &str) -> Self {
                 Self(s.to_string())
             }
+
+            /// Returns the identifier as a borrowed string slice.
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
         }
 
         impl From<String> for $name {
@@ -36,6 +41,11 @@ macro_rules! impl_generated_string_newtype {
             /// Creates an identifier wrapper from an existing string value.
             pub fn from(s: &str) -> Self {
                 Self(s.to_string())
+            }
+
+            /// Returns the identifier as a borrowed string slice.
+            pub fn as_str(&self) -> &str {
+                &self.0
             }
         }
 
