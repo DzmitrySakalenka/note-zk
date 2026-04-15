@@ -11,7 +11,9 @@ mod validate;
 mod write;
 
 pub use link_extract::{ExtractedLinks, RawLink, extract_links};
-pub use link_resolve::{ClassifiedLink, classify_links};
+pub use link_resolve::{
+    ClassifiedLink, NoteLookupIndex, ResolveResult, build_from_scan, classify_links,
+};
 pub use normalize::{
     NormalizationContext, NormalizationPlan, TitleSource, normalize_frontmatter,
     normalize_frontmatter_with_id_generator, plan_normalization,

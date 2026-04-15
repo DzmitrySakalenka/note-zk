@@ -1,6 +1,10 @@
 //! Internal link-classification and resolution types for the vault-aware pass.
 
-use crate::link_extract::{ExtractedLinks, RawLink};
+use std::collections::{HashMap, HashSet};
+
+use zk_domain::id::{NoteId, RelativePath};
+
+use crate::{ExtractedLinks, NormalizationResult, RawLink, VaultScanResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClassifiedLink {
@@ -20,6 +24,91 @@ pub enum ClassifiedLink {
         raw_path: String,
         link_text: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct NoteLookupIndex {
+    pub titles: HashMap<String, Vec<NoteId>>,
+    pub aliases: HashMap<String, Vec<NoteId>>,
+    pub basenames: HashMap<String, Vec<NoteId>>,
+    pub paths: HashMap<String, Vec<NoteId>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolveResult {
+    Resolved(NoteId),
+    Ambiguous,
+    NotFound,
+}
+
+#[must_use]
+pub fn build_from_scan(scan_result: &VaultScanResult) -> NoteLookupIndex {
+    let duplicate_ids: HashSet<NoteId> = scan_result
+        .duplicate_ids
+        .iter()
+        .map(|(note_id, _)| note_id.clone())
+        .collect();
+
+    let mut index = NoteLookupIndex::default();
+
+    for note in &scan_result.notes {
+        if note.document.is_none() {
+            continue;
+        }
+
+        let Some(frontmatter) = note.frontmatter.as_ref() else {
+            continue;
+        };
+        if duplicate_ids.contains(&frontmatter.id) {
+            continue;
+        }
+
+        insert_unique(
+            &mut index.titles,
+            normalize_lookup_key(&frontmatter.title),
+            frontmatter.id.clone(),
+        );
+
+        for alias in &frontmatter.aliases {
+            insert_unique(
+                &mut index.aliases,
+                normalize_lookup_key(alias),
+                frontmatter.id.clone(),
+            );
+        }
+
+        if let Some(basename) = basename_key(&note.relative_path) {
+            insert_unique(&mut index.basenames, basename, frontmatter.id.clone());
+        }
+
+        insert_path_keys(&mut index.paths, note, &frontmatter.id);
+    }
+
+    index
+}
+
+impl NoteLookupIndex {
+    #[must_use]
+    pub fn resolve_target(&self, raw_target: &str) -> ResolveResult {
+        let normalized_key = normalize_lookup_key(raw_target);
+
+        if let Some(result) = resolve_bucket(self.titles.get(&normalized_key)) {
+            return result;
+        }
+        if let Some(result) = resolve_bucket(self.aliases.get(&normalized_key)) {
+            return result;
+        }
+        if let Some(result) = resolve_bucket(self.basenames.get(&normalized_key)) {
+            return result;
+        }
+
+        let normalized_path = normalize_path_key(raw_target);
+        if let Some(result) = resolve_bucket(self.paths.get(&normalized_path)) {
+            return result;
+        }
+
+        ResolveResult::NotFound
+    }
 }
 
 #[must_use]
@@ -106,4 +195,66 @@ fn is_note_extension(extension: &str, note_extensions: &[String]) -> bool {
         let normalized = allowed_extension.trim_start_matches('.');
         normalized.eq_ignore_ascii_case(extension)
     })
+}
+
+fn insert_path_keys(
+    paths: &mut HashMap<String, Vec<NoteId>>,
+    note: &NormalizationResult,
+    note_id: &NoteId,
+) {
+    let with_extension = normalize_path_key(note.relative_path.as_str());
+    insert_unique(paths, with_extension.clone(), note_id.clone());
+
+    if let Some(without_extension) = path_without_extension(&with_extension) {
+        insert_unique(paths, without_extension, note_id.clone());
+    }
+}
+
+fn insert_unique(map: &mut HashMap<String, Vec<NoteId>>, key: String, note_id: NoteId) {
+    let bucket = map.entry(key).or_default();
+    if bucket.iter().any(|existing_id| *existing_id == note_id) {
+        return;
+    }
+    bucket.push(note_id);
+}
+
+fn normalize_lookup_key(raw_target: &str) -> String {
+    raw_target.to_ascii_lowercase()
+}
+
+fn normalize_path_key(raw_target: &str) -> String {
+    RelativePath::new(raw_target).as_str().to_ascii_lowercase()
+}
+
+fn basename_key(path: &RelativePath) -> Option<String> {
+    let filename = path.as_str().rsplit('/').next()?;
+    let basename = filename.rsplit_once('.').map_or(filename, |(stem, _)| stem);
+
+    if basename.is_empty() {
+        return None;
+    }
+
+    Some(basename.to_ascii_lowercase())
+}
+
+fn path_without_extension(path: &str) -> Option<String> {
+    let filename = path.rsplit('/').next()?;
+    let (stem, _) = filename.rsplit_once('.')?;
+    if stem.is_empty() {
+        return None;
+    }
+
+    let parent = path
+        .strip_suffix(filename)
+        .expect("filename should be a suffix of the path");
+    Some(format!("{parent}{stem}"))
+}
+
+fn resolve_bucket(bucket: Option<&Vec<NoteId>>) -> Option<ResolveResult> {
+    let note_ids = bucket?;
+    match note_ids.len() {
+        0 => None,
+        1 => Some(ResolveResult::Resolved(note_ids[0].clone())),
+        _ => Some(ResolveResult::Ambiguous),
+    }
 }
