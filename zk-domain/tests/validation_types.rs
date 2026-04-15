@@ -20,6 +20,9 @@ fn all_rule_ids() -> Vec<RuleId> {
         RuleId::DefaultUntaggedTag,
         RuleId::FrontmatterInserted,
         RuleId::IdFormatSuspicious,
+        RuleId::UnresolvedLink,
+        RuleId::AmbiguousLink,
+        RuleId::BrokenAssetRef,
     ]
 }
 
@@ -39,7 +42,10 @@ fn description_for(rule: RuleId) -> &'static str {
         RuleId::DefaultUntaggedTag => "default untagged tag",
         RuleId::FrontmatterInserted => "frontmatter inserted",
         RuleId::IdFormatSuspicious => "suspicious id format",
-        _ => panic!("unexpected RuleId variant outside TG5-001 coverage: {rule:?}"),
+        RuleId::UnresolvedLink => "unresolved note link",
+        RuleId::AmbiguousLink => "ambiguous note link",
+        RuleId::BrokenAssetRef => "broken asset reference",
+        _ => panic!("unexpected RuleId variant outside TG6-006 coverage: {rule:?}"),
     }
 }
 

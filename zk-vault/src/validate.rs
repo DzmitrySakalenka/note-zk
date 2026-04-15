@@ -139,6 +139,9 @@ fn parse_rule_id(name: &str) -> Option<RuleId> {
         "DefaultUntaggedTag" => Some(RuleId::DefaultUntaggedTag),
         "FrontmatterInserted" => Some(RuleId::FrontmatterInserted),
         "IdFormatSuspicious" => Some(RuleId::IdFormatSuspicious),
+        "UnresolvedLink" => Some(RuleId::UnresolvedLink),
+        "AmbiguousLink" => Some(RuleId::AmbiguousLink),
+        "BrokenAssetRef" => Some(RuleId::BrokenAssetRef),
         _ => None,
     }
 }
@@ -678,6 +681,9 @@ fn rule_sort_key(rule: RuleId) -> u8 {
         RuleId::DefaultUntaggedTag => 11,
         RuleId::FrontmatterInserted => 12,
         RuleId::IdFormatSuspicious => 13,
+        RuleId::UnresolvedLink => 14,
+        RuleId::AmbiguousLink => 15,
+        RuleId::BrokenAssetRef => 16,
         _ => u8::MAX,
     }
 }

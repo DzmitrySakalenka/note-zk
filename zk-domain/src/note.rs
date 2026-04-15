@@ -150,6 +150,12 @@ pub enum RuleId {
     FrontmatterInserted,
     /// ID format is suspicious for ULID/Crockford expectations.
     IdFormatSuspicious,
+    /// Outbound note link could not be resolved to any note.
+    UnresolvedLink,
+    /// Outbound note link matches more than one possible target.
+    AmbiguousLink,
+    /// Outbound asset reference points at a missing or invalid asset.
+    BrokenAssetRef,
 }
 
 impl RuleId {
@@ -171,6 +177,9 @@ impl RuleId {
             RuleId::DefaultUntaggedTag => "default untagged tag",
             RuleId::FrontmatterInserted => "frontmatter inserted",
             RuleId::IdFormatSuspicious => "suspicious id format",
+            RuleId::UnresolvedLink => "unresolved note link",
+            RuleId::AmbiguousLink => "ambiguous note link",
+            RuleId::BrokenAssetRef => "broken asset reference",
         }
     }
 }
