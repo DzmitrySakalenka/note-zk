@@ -2,9 +2,15 @@
 
 use std::collections::{HashMap, HashSet};
 
-use zk_domain::id::{NoteId, RelativePath};
+use zk_domain::{
+    config::EffectiveConfig,
+    derived::{AssetReference, ExternalLink, ParsedNoteIndex, ResolvedNoteLink},
+    id::{NoteId, RelativePath},
+};
 
-use crate::{ExtractedLinks, NormalizationResult, RawLink, VaultScanResult};
+use crate::{
+    ExtractedLinks, NormalizationResult, RawLink, VaultScanResult, analyze_body, extract_links,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClassifiedLink {
@@ -112,6 +118,51 @@ impl NoteLookupIndex {
 }
 
 #[must_use]
+pub fn resolve_vault_links(
+    scan_result: &VaultScanResult,
+    config: &EffectiveConfig,
+) -> Vec<ParsedNoteIndex> {
+    let duplicate_ids: HashSet<NoteId> = scan_result
+        .duplicate_ids
+        .iter()
+        .map(|(note_id, _)| note_id.clone())
+        .collect();
+    let lookup_index = build_from_scan(scan_result);
+    let mut parsed_indexes = Vec::with_capacity(scan_result.notes.len());
+
+    for note in &scan_result.notes {
+        let Some(frontmatter) = note.frontmatter.as_ref() else {
+            continue;
+        };
+        let Some(document) = note.document.as_ref() else {
+            continue;
+        };
+        if duplicate_ids.contains(&frontmatter.id) {
+            continue;
+        }
+
+        let extracted_links = extract_links(&document.body_markdown);
+        let classified_links = classify_links(&extracted_links, &config.allowed_note_extensions);
+        let (outbound_note_links, outbound_external_links, asset_references) =
+            assemble_note_outputs(&frontmatter.id, &classified_links, &lookup_index);
+        let body_analysis = analyze_body(&document.body_markdown);
+
+        parsed_indexes.push(ParsedNoteIndex {
+            note_id: frontmatter.id.clone(),
+            title: frontmatter.title.clone(),
+            tags: frontmatter.tags.clone(),
+            aliases: frontmatter.aliases.clone(),
+            outbound_note_links,
+            outbound_external_links,
+            asset_references,
+            has_mermaid: body_analysis.has_mermaid,
+        });
+    }
+
+    parsed_indexes
+}
+
+#[must_use]
 pub fn classify_links(
     extracted: &ExtractedLinks,
     note_extensions: &[String],
@@ -212,7 +263,7 @@ fn insert_path_keys(
 
 fn insert_unique(map: &mut HashMap<String, Vec<NoteId>>, key: String, note_id: NoteId) {
     let bucket = map.entry(key).or_default();
-    if bucket.iter().any(|existing_id| *existing_id == note_id) {
+    if bucket.contains(&note_id) {
         return;
     }
     bucket.push(note_id);
@@ -256,5 +307,96 @@ fn resolve_bucket(bucket: Option<&Vec<NoteId>>) -> Option<ResolveResult> {
         0 => None,
         1 => Some(ResolveResult::Resolved(note_ids[0].clone())),
         _ => Some(ResolveResult::Ambiguous),
+    }
+}
+
+fn assemble_note_outputs(
+    source_note_id: &NoteId,
+    classified_links: &[ClassifiedLink],
+    lookup_index: &NoteLookupIndex,
+) -> (
+    Vec<ResolvedNoteLink>,
+    Vec<ExternalLink>,
+    Vec<AssetReference>,
+) {
+    let mut outbound_note_links = Vec::new();
+    let mut outbound_external_links = Vec::new();
+    let mut asset_references = Vec::new();
+
+    for classified_link in classified_links {
+        match classified_link {
+            ClassifiedLink::NoteLink {
+                raw_target,
+                link_text,
+            } => outbound_note_links.push(resolve_note_link(
+                source_note_id,
+                raw_target,
+                link_text.clone(),
+                lookup_index,
+            )),
+            ClassifiedLink::LocalNotePathLink {
+                raw_path,
+                link_text,
+            } => outbound_note_links.push(resolve_note_link(
+                source_note_id,
+                raw_path,
+                link_text.clone(),
+                lookup_index,
+            )),
+            ClassifiedLink::ExternalUrl { url, link_text } => {
+                outbound_external_links.push(ExternalLink {
+                    source_note_id: source_note_id.clone(),
+                    url: url.clone(),
+                    link_text: link_text.clone(),
+                });
+            }
+            ClassifiedLink::AssetPath {
+                raw_path,
+                link_text: _,
+            } => {
+                asset_references.push(AssetReference {
+                    source_note_id: source_note_id.clone(),
+                    raw_path: raw_path.clone(),
+                    target_asset_id: None,
+                });
+            }
+        }
+    }
+
+    (
+        outbound_note_links,
+        outbound_external_links,
+        asset_references,
+    )
+}
+
+fn resolve_note_link(
+    source_note_id: &NoteId,
+    raw_target: &str,
+    link_text: Option<String>,
+    lookup_index: &NoteLookupIndex,
+) -> ResolvedNoteLink {
+    match lookup_index.resolve_target(raw_target) {
+        ResolveResult::Resolved(target_note_id) => ResolvedNoteLink {
+            source_note_id: source_note_id.clone(),
+            raw_target: raw_target.to_string(),
+            target_note_id: Some(target_note_id),
+            link_text,
+            is_ambiguous: false,
+        },
+        ResolveResult::Ambiguous => ResolvedNoteLink {
+            source_note_id: source_note_id.clone(),
+            raw_target: raw_target.to_string(),
+            target_note_id: None,
+            link_text,
+            is_ambiguous: true,
+        },
+        ResolveResult::NotFound => ResolvedNoteLink {
+            source_note_id: source_note_id.clone(),
+            raw_target: raw_target.to_string(),
+            target_note_id: None,
+            link_text,
+            is_ambiguous: false,
+        },
     }
 }

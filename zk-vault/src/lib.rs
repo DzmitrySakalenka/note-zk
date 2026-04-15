@@ -13,6 +13,7 @@ mod write;
 pub use link_extract::{ExtractedLinks, RawLink, extract_links};
 pub use link_resolve::{
     ClassifiedLink, NoteLookupIndex, ResolveResult, build_from_scan, classify_links,
+    resolve_vault_links,
 };
 pub use normalize::{
     NormalizationContext, NormalizationPlan, TitleSource, normalize_frontmatter,
