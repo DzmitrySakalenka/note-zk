@@ -1,5 +1,5 @@
 use tempfile::TempDir;
-use zk_index::{open_memory, open_or_create};
+use zk_index::{ensure_schema, open_memory, open_or_create};
 
 fn query_pragma_int(conn: &rusqlite::Connection, pragma_name: &str) -> i64 {
     let statement = format!("PRAGMA {pragma_name}");
@@ -75,4 +75,27 @@ fn open_or_create_applies_expected_pragmas() {
     assert_eq!(query_pragma_int(&connection, "foreign_keys"), 1);
     assert_eq!(query_pragma_int(&connection, "busy_timeout"), 5_000);
     assert_eq!(query_pragma_text(&connection, "journal_mode"), "wal");
+}
+
+#[test]
+fn open_or_create_and_ensure_schema_leave_database_file_on_disk() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let database_path = tempdir.path().join("zk-index.db");
+    let connection = open_or_create(&database_path).expect("database should open");
+
+    ensure_schema(&connection).expect("schema should be created");
+
+    assert!(
+        database_path.exists(),
+        "database file should exist after schema migration"
+    );
+
+    let schema_version_exists: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("schema-version query should succeed");
+    assert_eq!(schema_version_exists, 1);
 }
