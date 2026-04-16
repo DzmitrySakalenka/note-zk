@@ -12,6 +12,7 @@ workspace = true
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 serde_json = "1.0.149"
 thiserror = "2.0.18"
+time = { version = "0.3.45", features = ["formatting"] }
 zk-domain = { path = "../zk-domain" }
 
 [dev-dependencies]
