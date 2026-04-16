@@ -8,11 +8,8 @@ use zk_domain::{
 
 use crate::{NormalizationResult, TitleSource, VaultScanResult, analyze_body};
 
-#[allow(dead_code)]
 pub(crate) struct ValidationContext<'a> {
     pub(crate) scan_result: &'a VaultScanResult,
-    pub(crate) config: &'a EffectiveConfig,
-    pub(crate) duplicate_id_paths: HashSet<RelativePath>,
 }
 
 pub(crate) trait ValidationRule {
@@ -56,11 +53,7 @@ pub(crate) fn validate_vault_with_rules(
     config: &EffectiveConfig,
     rules: Vec<Box<dyn ValidationRule>>,
 ) -> ValidationReport {
-    let context = ValidationContext {
-        scan_result,
-        config,
-        duplicate_id_paths: collect_duplicate_path_set(&scan_result.duplicate_ids),
-    };
+    let context = ValidationContext { scan_result };
     let disabled_rules = parse_disabled_rules(&config.validation.disabled_rules);
     let severity_overrides = parse_severity_overrides(&config.validation.severity_overrides);
     let mut findings = Vec::new();
@@ -139,6 +132,9 @@ fn parse_rule_id(name: &str) -> Option<RuleId> {
         "DefaultUntaggedTag" => Some(RuleId::DefaultUntaggedTag),
         "FrontmatterInserted" => Some(RuleId::FrontmatterInserted),
         "IdFormatSuspicious" => Some(RuleId::IdFormatSuspicious),
+        "UnresolvedLink" => Some(RuleId::UnresolvedLink),
+        "AmbiguousLink" => Some(RuleId::AmbiguousLink),
+        "BrokenAssetRef" => Some(RuleId::BrokenAssetRef),
         _ => None,
     }
 }
@@ -622,18 +618,6 @@ fn is_valid_ulid_crockford_text(value: &str) -> bool {
         .all(|byte| matches!(byte, b'0'..=b'9' | b'A'..=b'H' | b'J'..=b'K' | b'M'..=b'N' | b'P'..=b'T' | b'V'..=b'Z'))
 }
 
-fn collect_duplicate_path_set(
-    duplicate_ids: &[(zk_domain::id::NoteId, Vec<RelativePath>)],
-) -> HashSet<RelativePath> {
-    let mut duplicate_paths = HashSet::new();
-    for (_, paths) in duplicate_ids {
-        for path in paths {
-            let _ = duplicate_paths.insert(path.clone());
-        }
-    }
-    duplicate_paths
-}
-
 fn build_summary(findings: &[ValidationFinding]) -> ValidationSummary {
     let mut error_count: u32 = 0;
     let mut warning_count: u32 = 0;
@@ -678,6 +662,9 @@ fn rule_sort_key(rule: RuleId) -> u8 {
         RuleId::DefaultUntaggedTag => 11,
         RuleId::FrontmatterInserted => 12,
         RuleId::IdFormatSuspicious => 13,
+        RuleId::UnresolvedLink => 14,
+        RuleId::AmbiguousLink => 15,
+        RuleId::BrokenAssetRef => 16,
         _ => u8::MAX,
     }
 }

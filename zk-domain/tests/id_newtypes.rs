@@ -58,6 +58,12 @@ fn note_id_serde_roundtrip() {
     assert_eq!(id, back);
 }
 
+#[test]
+fn note_id_as_str_returns_inner_value() {
+    let id = NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
+    assert_eq!(id.as_str(), "01HZ3KQBFG9T2R5XJ4N8VW6YMP");
+}
+
 // ==========================================================================
 // AssetId
 // ==========================================================================
@@ -78,6 +84,12 @@ fn asset_id_serde_roundtrip() {
     assert_eq!(id, back);
 }
 
+#[test]
+fn asset_id_as_str_returns_inner_value() {
+    let id = AssetId::from("ASSET001");
+    assert_eq!(id.as_str(), "ASSET001");
+}
+
 // ==========================================================================
 // DeviceId
 // ==========================================================================
@@ -96,6 +108,12 @@ fn device_id_serde_roundtrip() {
     let json = serde_json::to_string(&id).expect("serialize");
     let back: DeviceId = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(id, back);
+}
+
+#[test]
+fn device_id_as_str_returns_inner_value() {
+    let id = DeviceId::from("device-macbook-2026");
+    assert_eq!(id.as_str(), "device-macbook-2026");
 }
 
 // ==========================================================================
@@ -155,6 +173,13 @@ fn content_hash_from_str() {
     let hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     let hash = ContentHash::from(hex);
     assert_eq!(hash.to_string(), hex);
+}
+
+#[test]
+fn content_hash_as_str_returns_inner_value() {
+    let hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    let hash = ContentHash::from(hex);
+    assert_eq!(hash.as_str(), hex);
 }
 
 // ==========================================================================

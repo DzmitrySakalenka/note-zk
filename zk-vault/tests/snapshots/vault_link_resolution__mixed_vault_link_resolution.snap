@@ -1,0 +1,212 @@
+---
+source: zk-vault/tests/vault_link_resolution.rs
+assertion_line: 481
+expression: resolved
+---
+[
+    ParsedNoteIndex {
+        note_id: NoteId(
+            "01ARZ3NDEKTSV4RRFFQ69G6S01",
+        ),
+        title: "Source Note",
+        tags: [
+            "rust",
+        ],
+        aliases: [],
+        outbound_note_links: [
+            ResolvedNoteLink {
+                source_note_id: NoteId(
+                    "01ARZ3NDEKTSV4RRFFQ69G6S01",
+                ),
+                raw_target: "Title Match",
+                target_note_id: Some(
+                    NoteId(
+                        "01ARZ3NDEKTSV4RRFFQ69G6S02",
+                    ),
+                ),
+                link_text: None,
+                is_ambiguous: false,
+            },
+            ResolvedNoteLink {
+                source_note_id: NoteId(
+                    "01ARZ3NDEKTSV4RRFFQ69G6S01",
+                ),
+                raw_target: "Alias Match",
+                target_note_id: Some(
+                    NoteId(
+                        "01ARZ3NDEKTSV4RRFFQ69G6S03",
+                    ),
+                ),
+                link_text: None,
+                is_ambiguous: false,
+            },
+            ResolvedNoteLink {
+                source_note_id: NoteId(
+                    "01ARZ3NDEKTSV4RRFFQ69G6S01",
+                ),
+                raw_target: "basename-match",
+                target_note_id: Some(
+                    NoteId(
+                        "01ARZ3NDEKTSV4RRFFQ69G6S04",
+                    ),
+                ),
+                link_text: None,
+                is_ambiguous: false,
+            },
+            ResolvedNoteLink {
+                source_note_id: NoteId(
+                    "01ARZ3NDEKTSV4RRFFQ69G6S01",
+                ),
+                raw_target: "refs/path-match",
+                target_note_id: Some(
+                    NoteId(
+                        "01ARZ3NDEKTSV4RRFFQ69G6S05",
+                    ),
+                ),
+                link_text: None,
+                is_ambiguous: false,
+            },
+            ResolvedNoteLink {
+                source_note_id: NoteId(
+                    "01ARZ3NDEKTSV4RRFFQ69G6S01",
+                ),
+                raw_target: "Ambiguous Title",
+                target_note_id: None,
+                link_text: None,
+                is_ambiguous: true,
+            },
+            ResolvedNoteLink {
+                source_note_id: NoteId(
+                    "01ARZ3NDEKTSV4RRFFQ69G6S01",
+                ),
+                raw_target: "Missing Target",
+                target_note_id: None,
+                link_text: None,
+                is_ambiguous: false,
+            },
+            ResolvedNoteLink {
+                source_note_id: NoteId(
+                    "01ARZ3NDEKTSV4RRFFQ69G6S01",
+                ),
+                raw_target: "Alias Display Target",
+                target_note_id: Some(
+                    NoteId(
+                        "01ARZ3NDEKTSV4RRFFQ69G6S03",
+                    ),
+                ),
+                link_text: Some(
+                    "Display Text",
+                ),
+                is_ambiguous: false,
+            },
+        ],
+        outbound_external_links: [
+            ExternalLink {
+                source_note_id: NoteId(
+                    "01ARZ3NDEKTSV4RRFFQ69G6S01",
+                ),
+                url: "https://example.com/docs",
+                link_text: Some(
+                    "Docs",
+                ),
+            },
+        ],
+        asset_references: [
+            AssetReference {
+                source_note_id: NoteId(
+                    "01ARZ3NDEKTSV4RRFFQ69G6S01",
+                ),
+                raw_path: "./assets/diagram.png",
+                target_asset_id: None,
+            },
+        ],
+        has_mermaid: false,
+    },
+    ParsedNoteIndex {
+        note_id: NoteId(
+            "01ARZ3NDEKTSV4RRFFQ69G6S02",
+        ),
+        title: "Title Match",
+        tags: [
+            "rust",
+        ],
+        aliases: [],
+        outbound_note_links: [],
+        outbound_external_links: [],
+        asset_references: [],
+        has_mermaid: false,
+    },
+    ParsedNoteIndex {
+        note_id: NoteId(
+            "01ARZ3NDEKTSV4RRFFQ69G6S03",
+        ),
+        title: "Alias Holder",
+        tags: [
+            "rust",
+        ],
+        aliases: [
+            "Alias Match",
+            "Alias Display Target",
+        ],
+        outbound_note_links: [],
+        outbound_external_links: [],
+        asset_references: [],
+        has_mermaid: false,
+    },
+    ParsedNoteIndex {
+        note_id: NoteId(
+            "01ARZ3NDEKTSV4RRFFQ69G6S06",
+        ),
+        title: "Ambiguous Title",
+        tags: [
+            "rust",
+        ],
+        aliases: [],
+        outbound_note_links: [],
+        outbound_external_links: [],
+        asset_references: [],
+        has_mermaid: false,
+    },
+    ParsedNoteIndex {
+        note_id: NoteId(
+            "01ARZ3NDEKTSV4RRFFQ69G6S07",
+        ),
+        title: "Ambiguous Title",
+        tags: [
+            "rust",
+        ],
+        aliases: [],
+        outbound_note_links: [],
+        outbound_external_links: [],
+        asset_references: [],
+        has_mermaid: false,
+    },
+    ParsedNoteIndex {
+        note_id: NoteId(
+            "01ARZ3NDEKTSV4RRFFQ69G6S04",
+        ),
+        title: "Basename Holder",
+        tags: [
+            "rust",
+        ],
+        aliases: [],
+        outbound_note_links: [],
+        outbound_external_links: [],
+        asset_references: [],
+        has_mermaid: false,
+    },
+    ParsedNoteIndex {
+        note_id: NoteId(
+            "01ARZ3NDEKTSV4RRFFQ69G6S05",
+        ),
+        title: "Path Holder",
+        tags: [
+            "rust",
+        ],
+        aliases: [],
+        outbound_note_links: [],
+        outbound_external_links: [],
+        asset_references: [],
+        has_mermaid: false,
+    },
+]

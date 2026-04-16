@@ -144,7 +144,7 @@ fn analyze_body_internal(body: &str) -> BodyAnalysis {
     }
 }
 
-fn parse_fence_line(line: &str) -> Option<(usize, &str)> {
+pub(crate) fn parse_fence_line(line: &str) -> Option<(usize, &str)> {
     let indent_width = line.chars().take_while(|ch| *ch == ' ').count();
     if indent_width > 3 {
         return None;
