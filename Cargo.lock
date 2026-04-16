@@ -1114,9 +1114,12 @@ name = "zk-app"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "thiserror",
  "toml",
  "zk-domain",
+ "zk-index",
+ "zk-vault",
 ]
 
 [[package]]
