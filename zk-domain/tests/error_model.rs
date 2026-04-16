@@ -79,7 +79,7 @@ fn domain_error_clone() {
 #[test]
 fn result_alias_ok() {
     let r: Result<i32> = Ok(42);
-    assert_eq!(r.unwrap(), 42);
+    assert_eq!(r.expect("result should be Ok"), 42);
 }
 
 #[test]

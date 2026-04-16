@@ -20,6 +20,25 @@ Everything else is derived or coordinated around it:
 - chat memory
 - sync metadata
 
+## Build and Test
+
+Use the workspace-level cargo commands from the repository root:
+
+```bash
+cargo build
+cargo test
+cargo fmt --check
+cargo clippy --workspace -- -D warnings
+```
+
+## Architecture Documentation
+
+Detailed design documents live under `docs/`:
+
+- `docs/architecture/` -- stable system design documents
+- `docs/decisions/` -- ADR-style decision records (0001-0014)
+- `docs/plans/` -- phased implementation plans and roadmaps
+
 ## High-Level Shape
 
 ```text

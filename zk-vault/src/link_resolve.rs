@@ -12,26 +12,35 @@ use crate::{
     ExtractedLinks, NormalizationResult, RawLink, VaultScanResult, analyze_body, extract_links,
 };
 
+/// A raw link classified by its likely target type, determined from syntax and
+/// file extension heuristics before any resolution against the vault index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClassifiedLink {
+    /// Wiki link or extensionless markdown link targeting another note by title/alias.
     NoteLink {
         raw_target: String,
         link_text: Option<String>,
     },
+    /// Markdown link with an `http://` or `https://` scheme.
     ExternalUrl {
         url: String,
         link_text: Option<String>,
     },
+    /// Markdown link whose extension does not match a known note extension.
     AssetPath {
         raw_path: String,
         link_text: Option<String>,
     },
+    /// Markdown link whose extension matches a known note extension (e.g. `.md`).
     LocalNotePathLink {
         raw_path: String,
         link_text: Option<String>,
     },
 }
 
+/// Case-insensitive lookup index built from a vault scan, used to resolve
+/// note link targets. Lookup precedence: exact title, then alias, then
+/// filename basename, then relative path (with or without extension).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct NoteLookupIndex {
     pub titles: HashMap<String, Vec<NoteId>>,
@@ -40,10 +49,14 @@ pub struct NoteLookupIndex {
     pub paths: HashMap<String, Vec<NoteId>>,
 }
 
+/// Outcome of resolving a single link target against the lookup index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolveResult {
+    /// Exactly one note matched the target.
     Resolved(NoteId),
+    /// Multiple notes matched at the same precedence level.
     Ambiguous,
+    /// No note matched at any precedence level.
     NotFound,
 }
 
@@ -225,8 +238,12 @@ fn classify_markdown_link(
 }
 
 fn has_http_scheme(destination: &str) -> bool {
-    let lowercased = destination.to_ascii_lowercase();
-    lowercased.starts_with("http://") || lowercased.starts_with("https://")
+    destination
+        .get(..7)
+        .is_some_and(|p| p.eq_ignore_ascii_case("http://"))
+        || destination
+            .get(..8)
+            .is_some_and(|p| p.eq_ignore_ascii_case("https://"))
 }
 
 fn path_extension(destination: &str) -> Option<&str> {

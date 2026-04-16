@@ -2,18 +2,19 @@
 
 use crate::parse::parse_fence_line;
 
+/// A single link extracted from markdown body text before classification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RawLink {
+    /// `[[target]]` or `[[target|alias]]` wiki-style link.
     WikiLink {
         raw_target: String,
         alias: Option<String>,
     },
-    MarkdownLink {
-        text: String,
-        destination: String,
-    },
+    /// Standard `[text](destination)` markdown link.
+    MarkdownLink { text: String, destination: String },
 }
 
+/// Accumulator for links extracted from a note body, separated by syntax type.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ExtractedLinks {
     pub wiki_links: Vec<RawLink>,
@@ -51,12 +52,29 @@ pub fn extract_links(body: &str) -> ExtractedLinks {
     extracted
 }
 
+// ==============================================================================
+// Inline Link Extraction State Machine
+// ==============================================================================
+//
+// Scans a single line left-to-right, tracking inline code spans so that links
+// inside backtick-delimited code are ignored. The state machine has two layers:
+//
+// 1. **Backtick tracking** -- counts consecutive backticks to handle both single
+//    (`code`) and multi-backtick (``code``) spans. An opening run of N backticks
+//    is only closed by exactly N closing backticks, matching CommonMark rules.
+//
+// 2. **Link dispatch** -- outside code spans, `[[` triggers wiki link parsing
+//    (checked first since it is a superset of `[`), then bare `[` triggers
+//    standard markdown link parsing. Both parsers return the index past the
+//    consumed link on success, or the original index on failure (no match).
+
 fn extract_links_from_line(line: &str, extracted: &mut ExtractedLinks) {
     let bytes = line.as_bytes();
     let mut index = 0usize;
     let mut inline_code_delimiter = None;
 
     while index < bytes.len() {
+        // Track inline code spans: match opening/closing backtick runs by count
         let backtick_count = count_repeated_byte(bytes, index, b'`');
         if backtick_count > 0 {
             match inline_code_delimiter {
@@ -68,11 +86,14 @@ fn extract_links_from_line(line: &str, extracted: &mut ExtractedLinks) {
             continue;
         }
 
+        // Inside a code span -- skip all non-backtick bytes
         if inline_code_delimiter.is_some() {
             index += 1;
             continue;
         }
 
+        // Try wiki link first: `[[` is a prefix of `[`, so it must be checked
+        // before the standard markdown link branch
         if bytes[index] == b'[' && line[index..].starts_with("[[") {
             let next_index = parse_wiki_link(line, index, bytes, extracted);
             if next_index != index {

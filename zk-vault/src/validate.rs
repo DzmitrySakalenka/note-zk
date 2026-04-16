@@ -8,11 +8,8 @@ use zk_domain::{
 
 use crate::{NormalizationResult, TitleSource, VaultScanResult, analyze_body};
 
-#[allow(dead_code)]
 pub(crate) struct ValidationContext<'a> {
     pub(crate) scan_result: &'a VaultScanResult,
-    pub(crate) config: &'a EffectiveConfig,
-    pub(crate) duplicate_id_paths: HashSet<RelativePath>,
 }
 
 pub(crate) trait ValidationRule {
@@ -56,11 +53,7 @@ pub(crate) fn validate_vault_with_rules(
     config: &EffectiveConfig,
     rules: Vec<Box<dyn ValidationRule>>,
 ) -> ValidationReport {
-    let context = ValidationContext {
-        scan_result,
-        config,
-        duplicate_id_paths: collect_duplicate_path_set(&scan_result.duplicate_ids),
-    };
+    let context = ValidationContext { scan_result };
     let disabled_rules = parse_disabled_rules(&config.validation.disabled_rules);
     let severity_overrides = parse_severity_overrides(&config.validation.severity_overrides);
     let mut findings = Vec::new();
@@ -623,18 +616,6 @@ fn is_valid_ulid_crockford_text(value: &str) -> bool {
         .as_bytes()
         .iter()
         .all(|byte| matches!(byte, b'0'..=b'9' | b'A'..=b'H' | b'J'..=b'K' | b'M'..=b'N' | b'P'..=b'T' | b'V'..=b'Z'))
-}
-
-fn collect_duplicate_path_set(
-    duplicate_ids: &[(zk_domain::id::NoteId, Vec<RelativePath>)],
-) -> HashSet<RelativePath> {
-    let mut duplicate_paths = HashSet::new();
-    for (_, paths) in duplicate_ids {
-        for path in paths {
-            let _ = duplicate_paths.insert(path.clone());
-        }
-    }
-    duplicate_paths
 }
 
 fn build_summary(findings: &[ValidationFinding]) -> ValidationSummary {
