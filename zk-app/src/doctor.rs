@@ -15,18 +15,27 @@ const SCAN_DIAGNOSTIC_RULE_ID: &str = "scan-diagnostic";
 const SYNTHETIC_UNRESOLVED_LINK_RULE_ID: &str = "unresolved-link";
 const SYNTHETIC_UNRESOLVED_ASSET_RULE_ID: &str = "unresolved-asset";
 
+/// Normalized issue entry emitted by [`doctor_report`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DoctorIssue {
+    /// Kebab-case rule identifier for the issue.
     pub rule_id: String,
+    /// Vault-relative note path when the issue can be mapped to a note.
     pub path: Option<RelativePath>,
+    /// Issue severity level.
     pub level: DiagnosticLevel,
+    /// Human-readable diagnostic message.
     pub message: String,
 }
 
+/// Severity-bucketed diagnostics report for a vault snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DoctorReport {
+    /// Error-level diagnostics.
     pub errors: Vec<DoctorIssue>,
+    /// Warning-level diagnostics.
     pub warnings: Vec<DoctorIssue>,
+    /// Info-level diagnostics.
     pub infos: Vec<DoctorIssue>,
 }
 

@@ -15,68 +15,107 @@ use zk_domain::id::RelativePath;
 const APP_NAME: &str = "note-zk";
 const CONFIG_FILE_NAME: &str = "config.toml";
 
-// Platform selector for global config path resolution.
+/// Platform selector used when resolving the global config path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigPlatform {
+    /// Linux family path layout (`$HOME/.config/note-zk/config.toml`).
     Linux,
+    /// macOS path layout (`$HOME/Library/Application Support/note-zk/config.toml`).
     MacOs,
+    /// Windows path layout (`%APPDATA%\\note-zk\\config.toml`).
     Windows,
 }
 
-// Error returned while loading global configuration from disk.
+/// Error returned while loading global configuration from disk.
 #[derive(Debug, Error)]
 pub enum GlobalConfigError {
+    /// Filesystem read failure while loading global config.
     #[error("while attempting to read global config at {path}: {source}")]
     Io {
+        /// Global config path that was being read.
         path: PathBuf,
+        /// Source I/O error.
         #[source]
         source: std::io::Error,
     },
+    /// TOML parse failure for global config contents.
     #[error("while attempting to parse global config at {path}: {source}")]
     Parse {
+        /// Global config path that failed to parse.
         path: PathBuf,
+        /// Source TOML parse error.
         #[source]
         source: toml::de::Error,
     },
 }
 
-// Error returned while loading per-vault configuration from disk.
+/// Error returned while loading per-vault configuration from disk.
 #[derive(Debug, Error)]
 pub enum VaultConfigError {
+    /// Filesystem read failure while loading vault config.
     #[error("while attempting to read vault config at {path}: {source}")]
     Io {
+        /// Vault config path that was being read.
         path: PathBuf,
+        /// Source I/O error.
         #[source]
         source: std::io::Error,
     },
+    /// TOML parse failure for vault config contents.
     #[error("while attempting to parse vault config at {path}: {source}")]
     Parse {
+        /// Vault config path that failed to parse.
         path: PathBuf,
+        /// Source TOML parse error.
         #[source]
         source: toml::de::Error,
     },
 }
 
-// Error returned while validating merged effective configuration.
+/// Error returned while validating merged effective configuration.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConfigValidationError {
+    /// `retention_days` was zero.
     #[error("invalid retention_days value: {value}; expected value greater than zero")]
-    InvalidRetentionDays { value: u32 },
+    InvalidRetentionDays {
+        /// Invalid retention-days value.
+        value: u32,
+    },
+    /// One or more note extensions were invalid.
     #[error("invalid allowed_note_extensions: {reason}")]
-    InvalidNoteExtensions { reason: String },
-    #[error("invalid {field} path '{path}': {reason}")]
-    InvalidPath {
-        field: &'static str,
-        path: PathBuf,
+    InvalidNoteExtensions {
+        /// Reason describing why extension validation failed.
         reason: String,
     },
+    /// A required path field was empty or malformed.
+    #[error("invalid {field} path '{path}': {reason}")]
+    InvalidPath {
+        /// Name of the invalid path field.
+        field: &'static str,
+        /// Path value that failed validation.
+        path: PathBuf,
+        /// Reason describing why the path was rejected.
+        reason: String,
+    },
+    /// A folder policy prefix was invalid.
     #[error("invalid folder prefix '{prefix}': {reason}")]
-    InvalidFolderPrefix { prefix: String, reason: String },
+    InvalidFolderPrefix {
+        /// Folder prefix that failed validation.
+        prefix: String,
+        /// Reason describing why the prefix was rejected.
+        reason: String,
+    },
+    /// The configured trash directory path was invalid.
     #[error("invalid trash_dir '{trash_dir}': {reason}")]
-    InvalidTrashDir { trash_dir: String, reason: String },
+    InvalidTrashDir {
+        /// Trash-directory value that failed validation.
+        trash_dir: String,
+        /// Reason describing why the trash directory was rejected.
+        reason: String,
+    },
 }
 
-// Resolves the global config file path for a given platform.
+/// Resolves the global config file path for a given platform.
 #[must_use]
 pub fn resolve_global_config_path(
     platform: ConfigPlatform,
@@ -97,7 +136,7 @@ pub fn resolve_global_config_path(
     }
 }
 
-// Resolves the per-vault config file path.
+/// Resolves the per-vault config file path.
 #[must_use]
 pub fn resolve_vault_config_path(vault_root: &Path) -> PathBuf {
     vault_root.join(".zk").join(CONFIG_FILE_NAME)

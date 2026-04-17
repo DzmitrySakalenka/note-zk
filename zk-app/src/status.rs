@@ -7,14 +7,22 @@ use zk_vault::VaultScanResult;
 
 use crate::{AppError, scan_vault};
 
+/// Read-only aggregate counters for vault and index health.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StatusSummary {
+    /// Number of note rows currently stored in `SQLite`.
     pub total_notes: u32,
+    /// Number of asset rows currently stored in `SQLite`.
     pub total_assets: u32,
+    /// Count of distinct note paths with error-level findings.
     pub notes_with_errors: u32,
+    /// Count of distinct note paths with warning-level findings.
     pub notes_with_warnings: u32,
+    /// Count of unresolved outbound note links across scanned notes.
     pub unresolved_link_count: u32,
+    /// Number of duplicate note IDs detected during scanning.
     pub duplicate_id_count: u32,
+    /// Number of notes currently located under the configured trash folder.
     pub trash_count: u32,
 }
 

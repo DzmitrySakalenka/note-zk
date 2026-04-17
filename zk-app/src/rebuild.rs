@@ -7,15 +7,21 @@ use zk_vault::NormalizationSummary;
 
 use crate::{AppError, ScanOutcome, build_asset_inputs, build_note_inputs, scan_vault};
 
+/// Options controlling rebuild orchestration behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RebuildOptions {
+    /// Enables write-back normalization before rebuilding the index.
     pub write_normalized: bool,
 }
 
+/// Aggregated outputs returned by [`rebuild_index`].
 #[derive(Debug, Clone)]
 pub struct RebuildOutcome {
+    /// Final scan outcome used as rebuild input.
     pub scan_outcome: ScanOutcome,
+    /// Index-layer rebuild statistics.
     pub index_stats: RebuildStats,
+    /// Normalization summary when write-back normalization was enabled.
     pub normalization: Option<NormalizationSummary>,
 }
 

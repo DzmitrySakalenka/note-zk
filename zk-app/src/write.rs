@@ -17,22 +17,33 @@ use crate::{AppError, Result, config::validate_effective_config, ensure_writable
 /// Callers are responsible for idempotency and for running a post-batch reindex.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum BatchWriteKind {
+    /// A `create_note` operation.
     Create,
+    /// An `update_note` operation.
     Update,
 }
 
+/// Captures one failed entry from [`batch_write`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BatchWriteFailure {
+    /// Zero-based position of the failed request within its input collection.
     pub request_index: usize,
+    /// Operation type that failed.
     pub kind: BatchWriteKind,
+    /// Rendered error message for the failed operation.
     pub error_message: String,
+    /// Candidate note ID associated with the failed request when available.
     pub note_id: Option<NoteId>,
 }
 
+/// Aggregated success/failure outcome for [`batch_write`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BatchWriteOutcome {
+    /// IDs successfully created in request order.
     pub created: Vec<NoteId>,
+    /// IDs successfully updated in request order.
     pub updated: Vec<NoteId>,
+    /// Failed create/update entries collected without rollback.
     pub failures: Vec<BatchWriteFailure>,
 }
 

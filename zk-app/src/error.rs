@@ -7,45 +7,72 @@ use zk_vault::error::VaultError;
 
 use crate::config::{ConfigValidationError, GlobalConfigError, VaultConfigError};
 
+/// Error type for `zk-app` facade operations.
 #[derive(Debug, Error)]
 pub enum AppError {
+    /// Vault scan/parse/write failure propagated from `zk-vault`.
     #[error("while attempting to access vault data: {0}")]
     Vault(#[from] VaultError),
+    /// SQLite/indexing failure propagated from `zk-index`.
     #[error("while attempting to access local index data: {0}")]
     Index(#[from] IndexError),
+    /// Global config load/parse failure.
     #[error("while attempting to load global config: {0}")]
     GlobalConfig(#[from] GlobalConfigError),
+    /// Per-vault config load/parse failure.
     #[error("while attempting to load vault config: {0}")]
     VaultConfig(#[from] VaultConfigError),
+    /// Effective config merge/validation failure.
     #[error("while attempting to validate effective config: {0}")]
     ConfigValidation(#[from] ConfigValidationError),
+    /// Generic path-scoped I/O failure.
     #[error(
         "while attempting to access path {path_display}: {source}",
         path_display = .path.display()
     )]
     Io {
+        /// Path involved in the failing I/O operation.
         path: PathBuf,
+        /// Source I/O error.
         #[source]
         source: io::Error,
     },
+    /// Write blocked by immutable folder policy.
     #[error("while attempting to write note at {path}: folder is immutable")]
-    ImmutableFolder { path: RelativePath },
+    ImmutableFolder {
+        /// Relative path that falls under an immutable folder policy.
+        path: RelativePath,
+    },
+    /// Requested note ID was not found in the vault.
     #[error("while attempting to update note {note_id}: note not found")]
-    NoteNotFound { note_id: NoteId },
+    NoteNotFound {
+        /// Note ID that could not be resolved to exactly one file.
+        note_id: NoteId,
+    },
+    /// Update request ID did not match the provided frontmatter ID.
     #[error(
         "while attempting to update note {request_note_id}: frontmatter id {frontmatter_note_id} does not match request id"
     )]
     NoteIdMismatch {
+        /// Note ID from the update request.
         request_note_id: NoteId,
+        /// Note ID present in supplied frontmatter.
         frontmatter_note_id: NoteId,
     },
+    /// Create request targeted an already existing vault path.
     #[error("while attempting to create note at {path}: path already exists")]
-    NotePathExists { path: RelativePath },
+    NotePathExists {
+        /// Relative path that already exists on disk.
+        path: RelativePath,
+    },
+    /// Note frontmatter could not be serialized for index input.
     #[error("while attempting to serialize note frontmatter to JSON: {source}")]
     FrontmatterSerialization {
+        /// Source JSON serialization error.
         #[source]
         source: serde_json::Error,
     },
 }
 
+/// `Result` alias used by `zk-app` public APIs.
 pub type Result<T> = std::result::Result<T, AppError>;

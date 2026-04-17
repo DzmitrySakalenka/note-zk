@@ -1,3 +1,13 @@
+//! Local application facade for TG8 workflows.
+//!
+//! `zk-app` orchestrates vault scanning/writing (`zk-vault`) and local
+//! indexing (`zk-index`) behind high-level use cases exposed to `zk-cli` and
+//! `zk-server`.
+//!
+//! Dependency direction follows the workspace architecture:
+//! `zk-domain` <- (`zk-vault`, `zk-index`) <- `zk-app`.
+//! For full workspace context, see `docs/architecture/rust-workspace-plan.md`.
+
 mod bootstrap;
 mod bridge;
 mod doctor;
@@ -8,6 +18,7 @@ mod status;
 mod write;
 mod write_policy;
 
+/// Config loading, merge, and validation helpers for facade entry points.
 pub mod config;
 
 pub use bootstrap::{
