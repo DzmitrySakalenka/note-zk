@@ -16,3 +16,5 @@ pub mod note;
 pub mod sync;
 /// Per-item sync-state records and device/delete tracking models.
 pub mod sync_state;
+/// Write-request models for create/update/batch note operations.
+pub mod write;
