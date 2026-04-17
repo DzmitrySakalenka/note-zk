@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+pub use zk_vault::resolve_vault_links;
 pub use zk_vault::{
     NormalizationPlan, NormalizationResult, TitleSource, VaultScanResult, analyze_body,
 };
@@ -75,20 +76,27 @@ fn sample_scan_result() -> VaultScanResult {
         notes: vec![sample_note("notes/a.md")],
         assets: Vec::new(),
         diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
     }
 }
 
 #[test]
-fn disabled_rules_parse_new_link_related_rule_ids() {
+fn disabled_rules_parse_new_rule_ids() {
     let mut config = base_config();
     config.validation.disabled_rules = vec![
+        "InvalidFrontmatter".to_string(),
         "UnresolvedLink".to_string(),
         "AmbiguousLink".to_string(),
         "BrokenAssetRef".to_string(),
     ];
 
     let rules: Vec<Box<dyn ValidationRule>> = vec![
+        Box::new(StubNoteRule {
+            id: RuleId::InvalidFrontmatter,
+            default_level: DiagnosticLevel::Error,
+            note_message: "invalid frontmatter",
+        }),
         Box::new(StubNoteRule {
             id: RuleId::UnresolvedLink,
             default_level: DiagnosticLevel::Warning,
@@ -113,15 +121,21 @@ fn disabled_rules_parse_new_link_related_rule_ids() {
 }
 
 #[test]
-fn severity_overrides_parse_new_link_related_rule_ids() {
+fn severity_overrides_parse_new_rule_ids() {
     let mut config = base_config();
     config.validation.severity_overrides = BTreeMap::from([
+        ("InvalidFrontmatter".to_string(), "info".to_string()),
         ("UnresolvedLink".to_string(), "error".to_string()),
         ("AmbiguousLink".to_string(), "error".to_string()),
         ("BrokenAssetRef".to_string(), "error".to_string()),
     ]);
 
     let rules: Vec<Box<dyn ValidationRule>> = vec![
+        Box::new(StubNoteRule {
+            id: RuleId::InvalidFrontmatter,
+            default_level: DiagnosticLevel::Error,
+            note_message: "invalid frontmatter",
+        }),
         Box::new(StubNoteRule {
             id: RuleId::UnresolvedLink,
             default_level: DiagnosticLevel::Warning,
@@ -141,21 +155,24 @@ fn severity_overrides_parse_new_link_related_rule_ids() {
 
     let report = validate_impl::validate_vault_with_rules(&sample_scan_result(), &config, rules);
 
-    assert_eq!(report.findings.len(), 3);
-    assert!(
-        report
-            .findings
-            .iter()
-            .all(|finding| finding.level == DiagnosticLevel::Error)
-    );
+    assert_eq!(report.findings.len(), 4);
+    assert!(report.findings.iter().any(|finding| {
+        finding.rule == RuleId::InvalidFrontmatter && finding.level == DiagnosticLevel::Info
+    }));
     assert_eq!(report.summary.error_count, 3);
     assert_eq!(report.summary.warning_count, 0);
+    assert_eq!(report.summary.info_count, 1);
 }
 
 #[test]
 fn summary_sort_order_places_new_rule_ids_after_id_format_suspicious() {
     let config = base_config();
     let rules: Vec<Box<dyn ValidationRule>> = vec![
+        Box::new(StubNoteRule {
+            id: RuleId::InvalidFrontmatter,
+            default_level: DiagnosticLevel::Error,
+            note_message: "invalid frontmatter",
+        }),
         Box::new(StubNoteRule {
             id: RuleId::BrokenAssetRef,
             default_level: DiagnosticLevel::Warning,
@@ -183,6 +200,7 @@ fn summary_sort_order_places_new_rule_ids_after_id_format_suspicious() {
     assert_eq!(
         report.summary.rules_triggered,
         vec![
+            (RuleId::InvalidFrontmatter, 1),
             (RuleId::IdFormatSuspicious, 1),
             (RuleId::UnresolvedLink, 1),
             (RuleId::AmbiguousLink, 1),

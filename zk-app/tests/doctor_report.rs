@@ -60,6 +60,10 @@ tags:
 ---
 "#,
     );
+    write_text(
+        &vault_root.join("invalid.md"),
+        "---\ninvalid: [yaml\n---\nBody\n",
+    );
 
     let mut config = EffectiveConfig::default();
     config.vault_path = vault_root.clone();
@@ -86,8 +90,8 @@ tags:
         report
             .warnings
             .iter()
-            .any(|issue| issue.rule_id == "unresolved-asset"),
-        "unresolved-asset should be present in warning bucket"
+            .any(|issue| issue.rule_id == "broken-asset-ref"),
+        "broken-asset-ref should be present in warning bucket"
     );
     assert!(
         report
@@ -95,5 +99,21 @@ tags:
             .iter()
             .any(|issue| issue.rule_id == "empty-body"),
         "empty-body should be present in warning bucket"
+    );
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|issue| issue.rule_id == "invalid-frontmatter"),
+        "invalid-frontmatter should be present in error bucket"
+    );
+    assert!(
+        report
+            .errors
+            .iter()
+            .chain(report.warnings.iter())
+            .chain(report.infos.iter())
+            .all(|issue| issue.rule_id != "scan-diagnostic"),
+        "doctor report should only emit enum-backed kebab-case rule ids"
     );
 }

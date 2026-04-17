@@ -1,3 +1,4 @@
+pub use zk_vault::resolve_vault_links;
 pub use zk_vault::{NormalizationResult, TitleSource, VaultScanResult, analyze_body};
 
 #[allow(dead_code)]
@@ -53,6 +54,7 @@ fn empty_scan_result() -> VaultScanResult {
         notes: Vec::new(),
         assets: Vec::new(),
         diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
     }
 }

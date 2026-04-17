@@ -18,7 +18,7 @@ use crate::{
         normalize_frontmatter, plan_normalization_with_body_analysis,
     },
     parse::{analyze_body, parse_note_file},
-    scan::{AssetCandidate, scan_vault_files},
+    scan::{AssetCandidate, NoteCandidate, scan_vault_files},
     serialize::render_note_file,
     write::atomic_write_file,
 };
@@ -37,7 +37,17 @@ pub struct VaultScanResult {
     pub notes: Vec<NormalizationResult>,
     pub assets: Vec<AssetCandidate>,
     pub diagnostics: Vec<ScanDiagnostic>,
+    pub frontmatter_parse_failures: Vec<FrontmatterParseFailure>,
     pub duplicate_ids: Vec<(NoteId, Vec<RelativePath>)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Structured frontmatter parse failure captured during vault scan.
+pub struct FrontmatterParseFailure {
+    /// Vault-relative path of the note whose frontmatter failed to parse.
+    pub path: RelativePath,
+    /// Human-readable YAML parser error message.
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,78 +72,15 @@ pub fn scan_vault(
     let file_set = scan_vault_files(vault_root, config)?;
     let mut notes = Vec::new();
     let mut diagnostics = file_set.diagnostics;
+    let mut frontmatter_parse_failures = Vec::new();
 
     for candidate in &file_set.notes {
-        let original_bytes =
-            fs::read(&candidate.absolute_path).map_err(|source| VaultError::Io {
-                path: candidate.absolute_path.clone(),
-                source,
-            })?;
-        let content_hash = ContentHash::from_bytes(&original_bytes);
-
-        match parse_note_file(&candidate.absolute_path) {
-            Ok(raw_document) => {
-                let body_analysis = analyze_body(&raw_document.body_markdown);
-                let plan = plan_normalization_with_body_analysis(
-                    &raw_document,
-                    candidate,
-                    config,
-                    &body_analysis,
-                );
-                diagnostics.extend(plan.diagnostics.clone());
-
-                if raw_document.frontmatter.is_none() && !config.allow_insert_frontmatter {
-                    notes.push(NormalizationResult {
-                        relative_path: candidate.relative_path.clone(),
-                        plan,
-                        frontmatter: None,
-                        document: None,
-                        content_hash,
-                    });
-                    continue;
-                }
-
-                let normalization_context = NormalizationContext {
-                    relative_path: &candidate.relative_path,
-                    body_analysis: &body_analysis,
-                    config,
-                    is_immutable: candidate.is_immutable,
-                };
-                let raw_frontmatter = raw_document
-                    .frontmatter
-                    .unwrap_or_else(empty_raw_frontmatter);
-                let (normalized_frontmatter, normalize_diagnostics) =
-                    normalize_frontmatter(raw_frontmatter, &normalization_context);
-                diagnostics.extend(normalize_diagnostics);
-
-                let document = NoteDocument {
-                    frontmatter: normalized_frontmatter.clone(),
-                    body_markdown: raw_document.body_markdown,
-                };
-
-                notes.push(NormalizationResult {
-                    relative_path: candidate.relative_path.clone(),
-                    plan,
-                    frontmatter: Some(normalized_frontmatter),
-                    document: Some(document),
-                    content_hash,
-                });
-            }
-            Err(parse_error) => {
-                diagnostics.push(ScanDiagnostic {
-                    level: DiagnosticLevel::Error,
-                    path: candidate.relative_path.clone(),
-                    message: format!("failed to parse note during vault scan: {parse_error}"),
-                });
-                notes.push(NormalizationResult {
-                    relative_path: candidate.relative_path.clone(),
-                    plan: empty_plan(candidate.is_immutable),
-                    frontmatter: None,
-                    document: None,
-                    content_hash,
-                });
-            }
+        let note_scan = scan_note_candidate(candidate, config)?;
+        diagnostics.extend(note_scan.diagnostics);
+        if let Some(frontmatter_parse_failure) = note_scan.frontmatter_parse_failure {
+            frontmatter_parse_failures.push(frontmatter_parse_failure);
         }
+        notes.push(note_scan.note);
     }
 
     let duplicate_ids = collect_duplicate_ids(&notes);
@@ -151,8 +98,102 @@ pub fn scan_vault(
         notes,
         assets: file_set.assets,
         diagnostics,
+        frontmatter_parse_failures,
         duplicate_ids,
     })
+}
+
+struct NoteScanOutcome {
+    note: NormalizationResult,
+    diagnostics: Vec<ScanDiagnostic>,
+    frontmatter_parse_failure: Option<FrontmatterParseFailure>,
+}
+
+fn scan_note_candidate(
+    candidate: &NoteCandidate,
+    config: &EffectiveConfig,
+) -> Result<NoteScanOutcome, VaultError> {
+    let original_bytes = fs::read(&candidate.absolute_path).map_err(|source| VaultError::Io {
+        path: candidate.absolute_path.clone(),
+        source,
+    })?;
+    let content_hash = ContentHash::from_bytes(&original_bytes);
+
+    match parse_note_file(&candidate.absolute_path) {
+        Ok(raw_document) => {
+            let body_analysis = analyze_body(&raw_document.body_markdown);
+            let plan = plan_normalization_with_body_analysis(
+                &raw_document,
+                candidate,
+                config,
+                &body_analysis,
+            );
+            let mut diagnostics = plan.diagnostics.clone();
+
+            if raw_document.frontmatter.is_none() && !config.allow_insert_frontmatter {
+                return Ok(NoteScanOutcome {
+                    note: empty_normalization_result(candidate, content_hash, plan),
+                    diagnostics,
+                    frontmatter_parse_failure: None,
+                });
+            }
+
+            let normalization_context = NormalizationContext {
+                relative_path: &candidate.relative_path,
+                body_analysis: &body_analysis,
+                config,
+                is_immutable: candidate.is_immutable,
+            };
+            let raw_frontmatter = raw_document
+                .frontmatter
+                .unwrap_or_else(empty_raw_frontmatter);
+            let (normalized_frontmatter, normalize_diagnostics) =
+                normalize_frontmatter(raw_frontmatter, &normalization_context);
+            diagnostics.extend(normalize_diagnostics);
+
+            let document = NoteDocument {
+                frontmatter: normalized_frontmatter.clone(),
+                body_markdown: raw_document.body_markdown,
+            };
+
+            Ok(NoteScanOutcome {
+                note: NormalizationResult {
+                    relative_path: candidate.relative_path.clone(),
+                    plan,
+                    frontmatter: Some(normalized_frontmatter),
+                    document: Some(document),
+                    content_hash,
+                },
+                diagnostics,
+                frontmatter_parse_failure: None,
+            })
+        }
+        Err(VaultError::FrontmatterParse { path: _, source }) => Ok(NoteScanOutcome {
+            note: empty_normalization_result(
+                candidate,
+                content_hash,
+                empty_plan(candidate.is_immutable),
+            ),
+            diagnostics: Vec::new(),
+            frontmatter_parse_failure: Some(FrontmatterParseFailure {
+                path: candidate.relative_path.clone(),
+                message: source.to_string(),
+            }),
+        }),
+        Err(parse_error) => Ok(NoteScanOutcome {
+            note: empty_normalization_result(
+                candidate,
+                content_hash,
+                empty_plan(candidate.is_immutable),
+            ),
+            diagnostics: vec![ScanDiagnostic {
+                level: DiagnosticLevel::Error,
+                path: candidate.relative_path.clone(),
+                message: format!("failed to parse note during vault scan: {parse_error}"),
+            }],
+            frontmatter_parse_failure: None,
+        }),
+    }
 }
 
 /// Applies planned normalization to notes and writes only changed files.
@@ -259,6 +300,20 @@ fn empty_plan(is_immutable: bool) -> NormalizationPlan {
         needs_field_reorder: false,
         is_immutable,
         diagnostics: Vec::new(),
+    }
+}
+
+fn empty_normalization_result(
+    candidate: &NoteCandidate,
+    content_hash: ContentHash,
+    plan: NormalizationPlan,
+) -> NormalizationResult {
+    NormalizationResult {
+        relative_path: candidate.relative_path.clone(),
+        plan,
+        frontmatter: None,
+        document: None,
+        content_hash,
     }
 }
 

@@ -4,7 +4,7 @@ use tempfile::TempDir;
 use zk_domain::{
     config::{EffectiveConfig, ValidationConfig},
     id::RelativePath,
-    note::{DiagnosticLevel, RuleId, ValidationReport},
+    note::{RuleId, ValidationReport},
 };
 use zk_vault::{scan_vault, validate_vault};
 
@@ -106,7 +106,7 @@ fn write_broken_fixture_vault(vault_root: &Path) {
 }
 
 #[test]
-fn invalid_yaml_scan_diagnostic_flows_to_validation_report() {
+fn invalid_yaml_emits_invalid_frontmatter_finding() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let vault_root = tempdir.path();
     let config = base_config(vault_root);
@@ -123,9 +123,13 @@ fn invalid_yaml_scan_diagnostic_flows_to_validation_report() {
 
     let report = run_validation(vault_root, &config);
 
-    assert!(report.scan_diagnostics.iter().any(|diagnostic| {
-        diagnostic.level == DiagnosticLevel::Error
-            && diagnostic.path == RelativePath::new("notes/invalid.md")
+    assert!(has_finding(
+        &report,
+        RuleId::InvalidFrontmatter,
+        "notes/invalid.md"
+    ));
+    assert!(!report.scan_diagnostics.iter().any(|diagnostic| {
+        diagnostic.path == RelativePath::new("notes/invalid.md")
             && diagnostic
                 .message
                 .contains("failed to parse note during vault scan")
@@ -141,6 +145,11 @@ fn mixed_broken_vault_emits_expected_rules_and_summary_counts() {
 
     let report = run_validation(vault_root, &config);
 
+    assert!(has_finding(
+        &report,
+        RuleId::InvalidFrontmatter,
+        "notes/invalid-yaml.md"
+    ));
     assert!(has_finding(&report, RuleId::DuplicateId, "notes/dup-a.md"));
     assert!(has_finding(&report, RuleId::DuplicateId, "notes/dup-b.md"));
     assert!(has_finding(
@@ -175,12 +184,13 @@ fn mixed_broken_vault_emits_expected_rules_and_summary_counts() {
         "notes/mermaid.md"
     ));
 
-    assert_eq!(report.summary.error_count, 2);
+    assert_eq!(report.summary.error_count, 3);
     assert_eq!(report.summary.warning_count, 5);
     assert_eq!(report.summary.info_count, 3);
     assert_eq!(
         report.summary.rules_triggered,
         vec![
+            (RuleId::InvalidFrontmatter, 1),
             (RuleId::DuplicateId, 2),
             (RuleId::EmptyBody, 1),
             (RuleId::NoH1InBody, 2),
@@ -191,6 +201,66 @@ fn mixed_broken_vault_emits_expected_rules_and_summary_counts() {
             (RuleId::IdFormatSuspicious, 1),
         ]
     );
+}
+
+#[test]
+fn link_and_asset_rules_emit_expected_findings_from_scan() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let vault_root = tempdir.path();
+    let config = base_config(vault_root);
+
+    write_valid_note(
+        &vault_root.join("notes/unresolved.md"),
+        "01ARZ3NDEKTSV4RRFFQ69G5FBA",
+        "Unresolved",
+        "# Unresolved\nSee [[Missing Note]]",
+    );
+    write_valid_note(
+        &vault_root.join("notes/ambiguous.md"),
+        "01ARZ3NDEKTSV4RRFFQ69G5FBB",
+        "Ambiguous",
+        "# Ambiguous\nSee [[Shared Target]]",
+    );
+    write_valid_note(
+        &vault_root.join("notes/shared-a.md"),
+        "01ARZ3NDEKTSV4RRFFQ69G5FBC",
+        "Shared Target",
+        "# Shared Target\nBody",
+    );
+    write_valid_note(
+        &vault_root.join("notes/shared-b.md"),
+        "01ARZ3NDEKTSV4RRFFQ69G5FBD",
+        "Shared Target",
+        "# Shared Target\nBody",
+    );
+    write_valid_note(
+        &vault_root.join("notes/assets.md"),
+        "01ARZ3NDEKTSV4RRFFQ69G5FBE",
+        "Assets",
+        "# Assets\n![Missing](./assets/missing.png)\n![Valid](./assets/existing.png)",
+    );
+    write_text_file(&vault_root.join("notes/assets/existing.png"), "png-bytes");
+
+    let report = run_validation(vault_root, &config);
+
+    assert_eq!(count_findings(&report, RuleId::UnresolvedLink), 1);
+    assert_eq!(count_findings(&report, RuleId::AmbiguousLink), 1);
+    assert_eq!(count_findings(&report, RuleId::BrokenAssetRef), 1);
+    assert!(has_finding(
+        &report,
+        RuleId::UnresolvedLink,
+        "notes/unresolved.md"
+    ));
+    assert!(has_finding(
+        &report,
+        RuleId::AmbiguousLink,
+        "notes/ambiguous.md"
+    ));
+    assert!(has_finding(
+        &report,
+        RuleId::BrokenAssetRef,
+        "notes/assets.md"
+    ));
 }
 
 #[test]

@@ -84,6 +84,7 @@ fn scan_with_notes(
         notes,
         assets: Vec::new(),
         diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
         duplicate_ids,
     }
 }

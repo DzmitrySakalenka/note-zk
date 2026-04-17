@@ -147,14 +147,21 @@ fn scan_vault_records_parse_error_for_invalid_yaml_and_continues_processing() {
         "invalid note document should be absent after parse error"
     );
     assert!(
-        scan_result.diagnostics.iter().any(|diagnostic| {
-            diagnostic.level == DiagnosticLevel::Error
-                && diagnostic.path == RelativePath::new("notes/invalid.md")
-                && diagnostic
-                    .message
-                    .contains("failed to parse note during vault scan")
-        }),
-        "scan should report parse failure diagnostic for invalid YAML note"
+        scan_result
+            .frontmatter_parse_failures
+            .iter()
+            .any(|failure| {
+                failure.path == RelativePath::new("notes/invalid.md")
+                    && failure.message.contains("did not find expected")
+            }),
+        "scan should capture structured parse failure for invalid YAML note"
+    );
+    assert!(
+        !scan_result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.path == RelativePath::new("notes/invalid.md")),
+        "frontmatter parse failures should not be duplicated as scan diagnostics"
     );
 }
 

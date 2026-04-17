@@ -81,6 +81,7 @@ fn scan_with_notes(notes: Vec<NormalizationResult>) -> VaultScanResult {
         notes,
         assets: Vec::new(),
         diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
     }
 }

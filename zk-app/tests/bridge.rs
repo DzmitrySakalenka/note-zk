@@ -26,6 +26,7 @@ fn build_note_inputs_populates_links_and_roundtrips_frontmatter() {
         )],
         assets: Vec::new(),
         diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
     };
     let parsed_indexes = vec![ParsedNoteIndex {
@@ -111,6 +112,7 @@ fn build_note_inputs_omits_notes_without_document() {
             path: RelativePath::new("notes/no-document.md"),
             message: "parse failed".to_string(),
         }],
+        frontmatter_parse_failures: Vec::new(),
         duplicate_ids: vec![(note_id, vec![RelativePath::new("notes/no-document.md")])],
     };
 
@@ -132,6 +134,7 @@ fn build_note_inputs_omits_duplicate_note_ids() {
         )],
         assets: Vec::new(),
         diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
         duplicate_ids: vec![(
             note_id.clone(),
             vec![RelativePath::new("notes/duplicate.md")],
@@ -172,6 +175,7 @@ fn build_asset_inputs_populates_hash_size_and_mime_type() {
             asset_candidate("assets/blob.unknown", &unknown_path),
         ],
         diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
     };
 
@@ -199,6 +203,7 @@ fn build_asset_inputs_surfaces_io_failures() {
         notes: Vec::new(),
         assets: vec![asset_candidate("assets/missing.png", &missing_path)],
         diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
     };
 
