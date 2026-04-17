@@ -1,4 +1,5 @@
 use rusqlite::Connection;
+use std::{thread, time::Duration};
 use zk_domain::{
     asset::AssetRecord,
     derived::{AssetReference, ExternalLink, ResolvedNoteLink},
@@ -366,7 +367,7 @@ fn asset_path_match_retains_existing_asset_id() {
         ContentHash::from("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
     );
     assert_eq!(actual.created_at, "2026-04-01T08:00:00Z");
-    assert_eq!(actual.updated_at, "2026-04-02T09:00:00Z");
+    assert!(actual.updated_at.as_str() > "2026-04-02T09:00:00Z");
 }
 
 #[test]
@@ -402,7 +403,7 @@ fn asset_hash_match_retains_existing_asset_id_after_path_change() {
             .expect("renamed asset should exist");
     assert_eq!(actual.asset_id, existing_asset_id());
     assert_eq!(actual.created_at, "2026-04-01T08:00:00Z");
-    assert_eq!(actual.updated_at, "2026-04-02T09:00:00Z");
+    assert!(actual.updated_at.as_str() > "2026-04-02T09:00:00Z");
 }
 
 #[test]
@@ -653,4 +654,82 @@ fn new_asset_timestamps_are_initialized_and_known_asset_timestamps_are_preserved
     assert!(!initialized.created_at.is_empty());
     assert_eq!(initialized.created_at, initialized.updated_at);
     assert!(initialized.created_at.ends_with('Z'));
+}
+
+#[test]
+fn existing_asset_updated_at_bumps_only_on_hash_path_or_size_change() {
+    let mut connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    let seeded = asset_record(
+        existing_asset_id(),
+        "assets/existing.png",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "2026-04-01T08:00:00Z",
+        "2026-04-02T09:00:00Z",
+    );
+    AssetRepo::upsert_asset(&connection, &seeded).expect("existing asset upsert should succeed");
+
+    rebuild_index(
+        &mut connection,
+        &[],
+        &[AssetInput {
+            path: RelativePath::new("assets/existing.png"),
+            content_hash: ContentHash::from(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ),
+            mime_type: Some("application/octet-stream".to_string()),
+            size_bytes: seeded.size_bytes,
+        }],
+    )
+    .expect("first rebuild should succeed");
+    let unchanged =
+        AssetRepo::get_asset_by_path(&connection, &RelativePath::new("assets/existing.png"))
+            .expect("asset query should succeed")
+            .expect("existing asset should exist");
+    assert_eq!(unchanged.updated_at, seeded.updated_at);
+
+    thread::sleep(Duration::from_millis(1));
+    rebuild_index(
+        &mut connection,
+        &[],
+        &[AssetInput {
+            path: RelativePath::new("assets/existing.png"),
+            content_hash: ContentHash::from(
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ),
+            mime_type: Some("application/octet-stream".to_string()),
+            size_bytes: seeded.size_bytes,
+        }],
+    )
+    .expect("second rebuild should succeed");
+    let hash_changed =
+        AssetRepo::get_asset_by_path(&connection, &RelativePath::new("assets/existing.png"))
+            .expect("asset query should succeed")
+            .expect("existing asset should exist");
+    assert!(hash_changed.updated_at > unchanged.updated_at);
+    assert_eq!(
+        hash_changed.content_hash,
+        ContentHash::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+    );
+
+    thread::sleep(Duration::from_millis(1));
+    rebuild_index(
+        &mut connection,
+        &[],
+        &[AssetInput {
+            path: RelativePath::new("assets/renamed.png"),
+            content_hash: ContentHash::from(
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ),
+            mime_type: Some("application/octet-stream".to_string()),
+            size_bytes: seeded.size_bytes,
+        }],
+    )
+    .expect("third rebuild should succeed");
+    let path_changed =
+        AssetRepo::get_asset_by_path(&connection, &RelativePath::new("assets/renamed.png"))
+            .expect("asset query should succeed")
+            .expect("renamed asset should exist");
+    assert!(path_changed.updated_at > hash_changed.updated_at);
+    assert_eq!(path_changed.asset_id, existing_asset_id());
 }
