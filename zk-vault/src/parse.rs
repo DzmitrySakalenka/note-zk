@@ -76,28 +76,27 @@ pub fn analyze_body(body: &str) -> BodyAnalysis {
 }
 
 fn split_frontmatter_sections(file_content: &str) -> Option<(&str, &str)> {
-    const OPENING_DELIMITER: &str = "---\n";
-    if !file_content.starts_with(OPENING_DELIMITER) {
+    let (opening_line, frontmatter_start_index) = split_next_line(file_content)?;
+    if !is_frontmatter_delimiter(opening_line) {
         return None;
     }
 
-    let frontmatter_and_body = &file_content[OPENING_DELIMITER.len()..];
+    let frontmatter_and_body = &file_content[frontmatter_start_index..];
     let mut line_start_index = 0usize;
 
     while line_start_index < frontmatter_and_body.len() {
         let search_space = &frontmatter_and_body[line_start_index..];
-        if let Some(relative_newline_index) = search_space.find('\n') {
-            let line_end_index = line_start_index + relative_newline_index;
-            if frontmatter_and_body[line_start_index..line_end_index] == *"---" {
+        if let Some((line, next_line_start_index)) = split_next_line(search_space) {
+            if is_frontmatter_delimiter(line) {
                 let raw_frontmatter = &frontmatter_and_body[..line_start_index];
-                let body_markdown = &frontmatter_and_body[line_end_index + 1..];
+                let body_markdown = &search_space[next_line_start_index..];
                 return Some((raw_frontmatter, body_markdown));
             }
-            line_start_index = line_end_index + 1;
+            line_start_index += next_line_start_index;
             continue;
         }
 
-        if frontmatter_and_body[line_start_index..] == *"---" {
+        if is_frontmatter_delimiter(search_space) {
             let raw_frontmatter = &frontmatter_and_body[..line_start_index];
             return Some((raw_frontmatter, ""));
         }
@@ -105,6 +104,15 @@ fn split_frontmatter_sections(file_content: &str) -> Option<(&str, &str)> {
     }
 
     None
+}
+
+fn split_next_line(content: &str) -> Option<(&str, usize)> {
+    let newline_index = content.find('\n')?;
+    Some((&content[..newline_index], newline_index + 1))
+}
+
+fn is_frontmatter_delimiter(line: &str) -> bool {
+    line.strip_suffix('\r').unwrap_or(line) == "---"
 }
 
 fn analyze_body_internal(body: &str) -> BodyAnalysis {

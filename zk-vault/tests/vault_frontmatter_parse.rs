@@ -1,8 +1,9 @@
 use std::{fs, path::Path};
 
 use tempfile::TempDir;
+use zk_domain::note::{NoteFrontmatter, RawNoteFrontmatter};
 use zk_vault::error::VaultError;
-use zk_vault::{RawNoteDocument, parse_note_file};
+use zk_vault::{RawNoteDocument, parse_note_file, render_note_file};
 
 fn write_text_file(path: &Path, content: &str) {
     if let Some(parent) = path.parent() {
@@ -16,6 +17,26 @@ fn write_bytes(path: &Path, bytes: &[u8]) {
         fs::create_dir_all(parent).expect("parent directory should be created");
     }
     fs::write(path, bytes).expect("file should be written");
+}
+
+fn crlf_fixture_path() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/crlf_frontmatter.md")
+}
+
+fn into_note_frontmatter(raw: RawNoteFrontmatter) -> NoteFrontmatter {
+    NoteFrontmatter {
+        id: raw.id.expect("fixture frontmatter should include id"),
+        title: raw.title.expect("fixture frontmatter should include title"),
+        tags: raw.tags,
+        note_type: raw.note_type,
+        aliases: raw.aliases,
+        created: raw.created,
+        updated: raw.updated,
+        source: raw.source,
+        status: raw.status,
+        sources: raw.sources,
+        extra: raw.extra,
+    }
 }
 
 #[test]
@@ -160,6 +181,37 @@ fn parse_delimiter_not_at_file_start_is_not_frontmatter() {
     assert_eq!(parsed.frontmatter, None);
     assert_eq!(parsed.raw_frontmatter_yaml, None);
     assert_eq!(parsed.body_markdown, content);
+}
+
+#[test]
+fn parse_crlf_frontmatter_fixture_preserves_raw_yaml_and_body() {
+    let note_path = crlf_fixture_path();
+    let file_bytes = fs::read(&note_path).expect("fixture file should be readable");
+
+    assert!(file_bytes.windows(2).any(|window| window == b"\r\n"));
+
+    let parsed = parse_note_file(&note_path).expect("crlf fixture should parse");
+    let frontmatter = parsed.frontmatter.expect("frontmatter should exist");
+
+    assert!(parsed.has_frontmatter_delimiters);
+    assert_eq!(frontmatter.title.as_deref(), Some("CRLF Fixture"));
+    assert_eq!(
+        parsed.raw_frontmatter_yaml.as_deref(),
+        Some("id: 01CRLFFIXTURENOTE0000000001\r\ntitle: CRLF Fixture\r\ntags:\r\n  - windows\r\n")
+    );
+    assert_eq!(parsed.body_markdown, "# Heading\nBody line\n");
+    assert!(!parsed.body_markdown.contains("---"));
+}
+
+#[test]
+fn render_after_parsing_crlf_frontmatter_uses_lf_only_output() {
+    let note_path = crlf_fixture_path();
+    let parsed = parse_note_file(&note_path).expect("crlf fixture should parse");
+    let frontmatter = into_note_frontmatter(parsed.frontmatter.expect("frontmatter should exist"));
+
+    let rendered = render_note_file(&frontmatter, &parsed.body_markdown);
+
+    assert!(!rendered.contains('\r'));
 }
 
 #[allow(dead_code)]
