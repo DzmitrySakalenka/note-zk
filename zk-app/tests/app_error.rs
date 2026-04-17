@@ -68,6 +68,10 @@ fn preserves_app_owned_payloads() {
     let path_exists = AppError::NotePathExists {
         path: RelativePath::new("notes/existing.md"),
     };
+    let id_mismatch = AppError::NoteIdMismatch {
+        request_note_id: NoteId::from("01REQUESTNOTEID000000000000"),
+        frontmatter_note_id: NoteId::from("01FRONTMATTERID00000000000"),
+    };
 
     assert!(matches!(
         immutable,
@@ -80,5 +84,13 @@ fn preserves_app_owned_payloads() {
     assert!(matches!(
         path_exists,
         AppError::NotePathExists { path } if path.as_str() == "notes/existing.md"
+    ));
+    assert!(matches!(
+        id_mismatch,
+        AppError::NoteIdMismatch {
+            request_note_id,
+            frontmatter_note_id
+        } if request_note_id.as_str() == "01REQUESTNOTEID000000000000"
+            && frontmatter_note_id.as_str() == "01FRONTMATTERID00000000000"
     ));
 }

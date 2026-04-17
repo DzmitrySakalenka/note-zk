@@ -20,5 +20,7 @@ pub use error::{AppError, Result};
 pub use rebuild::{RebuildOptions, RebuildOutcome, rebuild_index};
 pub use scan::{ScanOutcome, scan_vault};
 pub use status::{StatusSummary, status_summary};
-pub use write::create_note;
+pub use write::{
+    BatchWriteFailure, BatchWriteKind, BatchWriteOutcome, batch_write, create_note, update_note,
+};
 pub use write_policy::{ensure_writable, is_path_immutable};

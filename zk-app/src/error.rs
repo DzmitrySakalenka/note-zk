@@ -32,6 +32,13 @@ pub enum AppError {
     ImmutableFolder { path: RelativePath },
     #[error("while attempting to update note {note_id}: note not found")]
     NoteNotFound { note_id: NoteId },
+    #[error(
+        "while attempting to update note {request_note_id}: frontmatter id {frontmatter_note_id} does not match request id"
+    )]
+    NoteIdMismatch {
+        request_note_id: NoteId,
+        frontmatter_note_id: NoteId,
+    },
     #[error("while attempting to create note at {path}: path already exists")]
     NotePathExists { path: RelativePath },
     #[error("while attempting to serialize note frontmatter to JSON: {source}")]

@@ -4,9 +4,37 @@ use std::{
     path::Path,
 };
 
+use serde::Serialize;
+use zk_domain::write::UpdateNoteRequest;
 use zk_domain::{config::EffectiveConfig, id::NoteId, write::CreateNoteRequest};
+use zk_domain::{id::RelativePath, note::NoteFrontmatter, write::BatchWriteRequest};
 
-use crate::{AppError, Result, ensure_writable};
+use crate::{AppError, Result, config::validate_effective_config, ensure_writable};
+
+/// Batch writes are non-transactional at the filesystem level.
+///
+/// The API applies operations sequentially and does not roll back already-written files.
+/// Callers are responsible for idempotency and for running a post-batch reindex.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum BatchWriteKind {
+    Create,
+    Update,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BatchWriteFailure {
+    pub request_index: usize,
+    pub kind: BatchWriteKind,
+    pub error_message: String,
+    pub note_id: Option<NoteId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BatchWriteOutcome {
+    pub created: Vec<NoteId>,
+    pub updated: Vec<NoteId>,
+    pub failures: Vec<BatchWriteFailure>,
+}
 
 /// Creates a new note file under `vault_root` using atomic file replacement semantics.
 ///
@@ -59,4 +87,135 @@ pub fn create_note(
     zk_vault::atomic_write_file(&absolute_path, rendered.as_bytes())?;
 
     Ok(final_note_id)
+}
+
+/// Updates an existing note by stable note ID.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when note lookup fails, IDs mismatch, folder policy blocks
+/// writes, or parse/write operations fail.
+pub fn update_note(
+    vault_root: &Path,
+    config: &EffectiveConfig,
+    request: UpdateNoteRequest,
+) -> Result<()> {
+    if let Some(frontmatter) = &request.frontmatter {
+        if frontmatter.id != request.note_id {
+            return Err(AppError::NoteIdMismatch {
+                request_note_id: request.note_id.clone(),
+                frontmatter_note_id: frontmatter.id.clone(),
+            });
+        }
+    }
+
+    let scan_result = zk_vault::scan_vault(vault_root, config)?;
+    let mut matches: Vec<(RelativePath, NoteFrontmatter)> = scan_result
+        .notes
+        .iter()
+        .filter_map(|result| {
+            let frontmatter = result.frontmatter.as_ref()?;
+            if frontmatter.id != request.note_id {
+                return None;
+            }
+            Some((result.relative_path.clone(), frontmatter.clone()))
+        })
+        .collect();
+
+    if matches.len() != 1 {
+        return Err(AppError::NoteNotFound {
+            note_id: request.note_id,
+        });
+    }
+
+    let Some((relative_path, current_frontmatter)) = matches.pop() else {
+        return Err(AppError::NoteNotFound {
+            note_id: request.note_id,
+        });
+    };
+    let absolute_path = vault_root.join(relative_path.as_str());
+    let parsed = zk_vault::parse_note_file(&absolute_path)?;
+    let final_frontmatter = request.frontmatter.unwrap_or(current_frontmatter);
+    let final_body = request.body_markdown.unwrap_or(parsed.body_markdown);
+
+    ensure_writable(&relative_path, &config.folders)?;
+
+    let rendered = zk_vault::render_note_file(&final_frontmatter, &final_body);
+    zk_vault::atomic_write_file(&absolute_path, rendered.as_bytes())?;
+
+    Ok(())
+}
+
+/// Applies create and update operations sequentially.
+///
+/// # Errors
+///
+/// Returns [`AppError`] only for catastrophic preflight failures (invalid config or
+/// unreadable/non-directory vault root). Per-entry failures are captured in
+/// [`BatchWriteOutcome::failures`].
+pub fn batch_write(
+    vault_root: &Path,
+    config: &EffectiveConfig,
+    request: BatchWriteRequest,
+) -> Result<BatchWriteOutcome> {
+    validate_effective_config(config)?;
+    validate_vault_root(vault_root)?;
+
+    let mut outcome = BatchWriteOutcome {
+        created: Vec::new(),
+        updated: Vec::new(),
+        failures: Vec::new(),
+    };
+
+    for (request_index, create_request) in request.creates.into_iter().enumerate() {
+        let candidate_note_id = if create_request.frontmatter.id.as_str().is_empty() {
+            None
+        } else {
+            Some(create_request.frontmatter.id.clone())
+        };
+
+        match create_note(vault_root, config, create_request) {
+            Ok(note_id) => outcome.created.push(note_id),
+            Err(error) => outcome.failures.push(BatchWriteFailure {
+                request_index,
+                kind: BatchWriteKind::Create,
+                error_message: error.to_string(),
+                note_id: candidate_note_id,
+            }),
+        }
+    }
+
+    for (request_index, update_request) in request.updates.into_iter().enumerate() {
+        let note_id = update_request.note_id.clone();
+        match update_note(vault_root, config, update_request) {
+            Ok(()) => outcome.updated.push(note_id),
+            Err(error) => outcome.failures.push(BatchWriteFailure {
+                request_index,
+                kind: BatchWriteKind::Update,
+                error_message: error.to_string(),
+                note_id: Some(note_id),
+            }),
+        }
+    }
+
+    Ok(outcome)
+}
+
+fn validate_vault_root(vault_root: &Path) -> Result<()> {
+    let metadata = fs::metadata(vault_root).map_err(|source| AppError::Io {
+        path: vault_root.to_path_buf(),
+        source,
+    })?;
+
+    if metadata.is_dir() {
+        return Ok(());
+    }
+
+    Err(AppError::Io {
+        path: vault_root.to_path_buf(),
+        source: io::Error::new(
+            ErrorKind::InvalidInput,
+            "while attempting to apply batch write to a non-directory root",
+        ),
+    })
 }
