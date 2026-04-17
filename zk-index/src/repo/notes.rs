@@ -90,12 +90,26 @@ const SELECT_ALIASES_FOR_NOTE: &str =
     "SELECT alias FROM note_aliases WHERE note_id = ?1 ORDER BY alias ASC";
 const SELECT_NOTES_BY_TAG: &str =
     "SELECT note_id FROM note_tags WHERE tag = ?1 ORDER BY note_id ASC";
+const COUNT_NOTES_SQL: &str = "SELECT COUNT(*) FROM notes_index";
 const SAVEPOINT_REPLACE_TAGS: &str = "note_repo_replace_tags";
 const SAVEPOINT_REPLACE_ALIASES: &str = "note_repo_replace_aliases";
 
 pub struct NoteRepo;
 
 impl NoteRepo {
+    /// Returns the total number of note rows in `notes_index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if the `COUNT(*)` query fails.
+    pub fn count(conn: &Connection) -> Result<u32, IndexError> {
+        conn.query_row(COUNT_NOTES_SQL, [], |row| row.get(0))
+            .map_err(|source| IndexError::Sqlite {
+                source,
+                context: "count notes".to_string(),
+            })
+    }
+
     /// Inserts a new note row or updates mutable note content fields by `note_id`.
     ///
     /// # Errors

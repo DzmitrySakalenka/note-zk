@@ -52,6 +52,38 @@ fn sample_asset_references(source_note_id: &NoteId) -> Vec<AssetReference> {
 }
 
 #[test]
+fn count_returns_zero_for_empty_table() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+
+    let count = AssetRepo::count(&connection).expect("asset count query should succeed");
+
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn count_returns_inserted_row_total() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+
+    let first = sample_asset_record();
+    let second = AssetRecord {
+        asset_id: second_asset_id(),
+        current_path: RelativePath::new("assets/second.png"),
+        content_hash: ContentHash::from(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        ),
+        ..sample_asset_record()
+    };
+    AssetRepo::upsert_asset(&connection, &first).expect("first asset upsert should succeed");
+    AssetRepo::upsert_asset(&connection, &second).expect("second asset upsert should succeed");
+
+    let count = AssetRepo::count(&connection).expect("asset count query should succeed");
+
+    assert_eq!(count, 2);
+}
+
+#[test]
 fn upsert_asset_and_get_asset_round_trip() {
     let connection = open_memory().expect("in-memory database should open");
     ensure_schema(&connection).expect("schema should be ready");

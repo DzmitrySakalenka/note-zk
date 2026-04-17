@@ -3,6 +3,7 @@ mod bridge;
 mod error;
 mod rebuild;
 mod scan;
+mod status;
 
 pub mod config;
 
@@ -14,3 +15,4 @@ pub use bridge::{build_asset_inputs, build_note_inputs};
 pub use error::{AppError, Result};
 pub use rebuild::{RebuildOptions, RebuildOutcome, rebuild_index};
 pub use scan::{ScanOutcome, scan_vault};
+pub use status::{StatusSummary, status_summary};

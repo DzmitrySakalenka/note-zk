@@ -113,11 +113,25 @@ FROM asset_references
 WHERE source_note_id = ?1
 ORDER BY rowid ASC
 ";
+const COUNT_ASSETS_SQL: &str = "SELECT COUNT(*) FROM assets_index";
 const SAVEPOINT_REPLACE_ASSET_REFERENCES: &str = "asset_repo_replace_asset_references";
 
 pub struct AssetRepo;
 
 impl AssetRepo {
+    /// Returns the total number of asset rows in `assets_index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if the `COUNT(*)` query fails.
+    pub fn count(conn: &Connection) -> Result<u32, IndexError> {
+        conn.query_row(COUNT_ASSETS_SQL, [], |row| row.get(0))
+            .map_err(|source| IndexError::Sqlite {
+                source,
+                context: "count assets".to_string(),
+            })
+    }
+
     /// Inserts or replaces one asset row by `asset_id`.
     ///
     /// # Errors

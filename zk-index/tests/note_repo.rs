@@ -40,6 +40,42 @@ fn insert_sample_note(conn: &rusqlite::Connection) {
 }
 
 #[test]
+fn count_returns_zero_for_empty_table() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+
+    let count = NoteRepo::count(&connection).expect("note count query should succeed");
+
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn count_returns_inserted_row_total() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    insert_sample_note(&connection);
+
+    let second_note_id = NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YPN");
+    let second_path = RelativePath::new("notes/sqlite-index.md");
+    let second_hash = ContentHash::from_bytes(b"sqlite content");
+    NoteRepo::upsert_note(
+        &connection,
+        &second_note_id,
+        &second_path,
+        "SQLite Indexing",
+        &second_hash,
+        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YPN","title":"SQLite Indexing"}"#,
+        "2026-04-05T09:00:00Z",
+        "2026-04-05T09:00:00Z",
+    )
+    .expect("second note should insert");
+
+    let count = NoteRepo::count(&connection).expect("note count query should succeed");
+
+    assert_eq!(count, 2);
+}
+
+#[test]
 fn insert_note_and_get_note_returns_matching_record() {
     let connection = open_memory().expect("in-memory database should open");
     ensure_schema(&connection).expect("schema should be ready");
