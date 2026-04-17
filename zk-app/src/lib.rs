@@ -5,6 +5,7 @@ mod error;
 mod rebuild;
 mod scan;
 mod status;
+mod write_policy;
 
 pub mod config;
 
@@ -18,3 +19,4 @@ pub use error::{AppError, Result};
 pub use rebuild::{RebuildOptions, RebuildOutcome, rebuild_index};
 pub use scan::{ScanOutcome, scan_vault};
 pub use status::{StatusSummary, status_summary};
+pub use write_policy::{ensure_writable, is_path_immutable};
