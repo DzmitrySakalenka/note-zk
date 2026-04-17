@@ -64,6 +64,26 @@ fn sample_frontmatter_full_with_extra() -> NoteFrontmatter {
     }
 }
 
+fn parse_and_normalize(note_path: &Path, relative_path: &RelativePath) -> NoteFrontmatter {
+    let parsed = parse_note_file(note_path).expect("serialized note should parse");
+    let raw_frontmatter = parsed.frontmatter.expect("frontmatter should exist");
+    let body_analysis = analyze_body(&parsed.body_markdown);
+    let config = EffectiveConfig::default();
+    let context = NormalizationContext {
+        relative_path,
+        body_analysis: &body_analysis,
+        config: &config,
+        is_immutable: false,
+    };
+
+    let (normalized, _diagnostics) =
+        normalize_frontmatter_with_id_generator(raw_frontmatter, &context, || {
+            note_id("01UNUSEDGENERATEDID00000001")
+        });
+
+    normalized
+}
+
 fn line_index(content: &str, line: &str) -> usize {
     content
         .lines()
@@ -234,22 +254,48 @@ fn parse_normalize_serialize_parse_roundtrip_preserves_frontmatter() {
     let rendered = render_note_file(&frontmatter, body);
     write_text_file(&note_path, &rendered);
 
-    let parsed = parse_note_file(&note_path).expect("serialized note should parse");
-    let raw_frontmatter = parsed.frontmatter.expect("frontmatter should exist");
-    let body_analysis = analyze_body(&parsed.body_markdown);
-    let config = EffectiveConfig::default();
     let relative_path = RelativePath::new("roundtrip.md");
-    let context = NormalizationContext {
-        relative_path: &relative_path,
-        body_analysis: &body_analysis,
-        config: &config,
-        is_immutable: false,
-    };
-
-    let (normalized, _diagnostics) =
-        normalize_frontmatter_with_id_generator(raw_frontmatter, &context, || {
-            note_id("01UNUSEDGENERATEDID00000001")
-        });
+    let normalized = parse_and_normalize(&note_path, &relative_path);
 
     assert_eq!(normalized, frontmatter);
+}
+
+#[test]
+fn yaml_hostile_scalars_roundtrip_through_render_and_parse_unchanged() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let relative_path = RelativePath::new("yaml-hostile.md");
+    let note_path = tempdir.path().join(relative_path.as_str());
+    let title_cases = [
+        "Rust: a first look",
+        "- leading dash",
+        ": leading colon",
+        "#tagless",
+        "value with \"quotes\"",
+        "line1\nline2",
+    ];
+
+    for title in title_cases {
+        let frontmatter = NoteFrontmatter {
+            id: note_id("01YAMLHOSTILE0000000000000001"),
+            title: title.to_string(),
+            tags: vec!["tag: value".to_string(), "c++".to_string()],
+            note_type: Some("concept".to_string()),
+            aliases: vec![r"folder\alias".to_string()],
+            created: Some("2026-04-17T12:00:00Z".to_string()),
+            updated: Some("2026-04-17T13:00:00Z".to_string()),
+            source: Some("source: primary".to_string()),
+            status: Some("active#1".to_string()),
+            sources: vec![note_id("01YAMLHOSTILESRC00000000000001")],
+            extra: BTreeMap::new(),
+        };
+
+        let rendered = render_note_file(&frontmatter, "Body\n");
+        write_text_file(&note_path, &rendered);
+
+        let normalized = parse_and_normalize(&note_path, &relative_path);
+        assert_eq!(
+            normalized, frontmatter,
+            "title case should round-trip: {title}"
+        );
+    }
 }
