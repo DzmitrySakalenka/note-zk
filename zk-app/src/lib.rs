@@ -1,5 +1,6 @@
 mod bootstrap;
 mod bridge;
+mod doctor;
 mod error;
 mod rebuild;
 mod scan;
@@ -12,6 +13,7 @@ pub use bootstrap::{
     resolve_default_global_config_path,
 };
 pub use bridge::{build_asset_inputs, build_note_inputs};
+pub use doctor::{DoctorIssue, DoctorReport, doctor_report};
 pub use error::{AppError, Result};
 pub use rebuild::{RebuildOptions, RebuildOutcome, rebuild_index};
 pub use scan::{ScanOutcome, scan_vault};

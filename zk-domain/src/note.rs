@@ -182,6 +182,30 @@ impl RuleId {
             RuleId::BrokenAssetRef => "broken asset reference",
         }
     }
+
+    /// Returns a stable kebab-case identifier for machine-readable output.
+    #[must_use]
+    pub fn as_kebab_case(&self) -> &'static str {
+        match self {
+            RuleId::InvalidFrontmatter => "invalid-frontmatter",
+            RuleId::MissingTitle => "missing-title",
+            RuleId::DuplicateId => "duplicate-id",
+            RuleId::EmptyBody => "empty-body",
+            RuleId::NoH1InBody => "no-h1-in-body",
+            RuleId::TitleH1Mismatch => "title-h1-mismatch",
+            RuleId::SuspiciousPathNaming => "suspicious-path-naming",
+            RuleId::MermaidBlockDetected => "mermaid-block-detected",
+            RuleId::TitleDerivedFromH1 => "title-derived-from-h1",
+            RuleId::TitleDerivedFromFilename => "title-derived-from-filename",
+            RuleId::IdInjected => "id-injected",
+            RuleId::DefaultUntaggedTag => "default-untagged-tag",
+            RuleId::FrontmatterInserted => "frontmatter-inserted",
+            RuleId::IdFormatSuspicious => "id-format-suspicious",
+            RuleId::UnresolvedLink => "unresolved-link",
+            RuleId::AmbiguousLink => "ambiguous-link",
+            RuleId::BrokenAssetRef => "broken-asset-ref",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
