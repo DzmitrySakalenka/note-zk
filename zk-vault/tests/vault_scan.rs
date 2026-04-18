@@ -12,6 +12,18 @@ use zk_domain::{
 use zk_vault::{AssetCandidate, NoteCandidate, VaultFileSet, scan_vault_files};
 
 #[cfg(unix)]
+use zk_domain::note::DiagnosticLevel;
+
+#[cfg(unix)]
+use zk_vault::error::NON_UTF8_PATH_COMPONENT_SCAN_DIAGNOSTIC_PREFIX;
+
+#[cfg(unix)]
+use std::ffi::OsString;
+
+#[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
+
+#[cfg(unix)]
 use std::os::unix::fs::{PermissionsExt, symlink};
 
 fn write_text_file(path: &Path, content: &str) {
@@ -238,6 +250,51 @@ fn scan_does_not_follow_symlinked_directories() {
     assert!(
         !notes.iter().any(|path| path == "linked-dir/linked-note.md"),
         "scanner must not traverse into symlinked directory targets"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn scan_rejects_non_utf8_filenames_with_warning_diagnostic() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let vault_root = tempdir.path();
+    let config = base_config(vault_root);
+    let invalid_filename = OsString::from_vec(vec![0xff, b'.', b'm', b'd']);
+    let invalid_filename_debug = format!("{invalid_filename:?}");
+    let invalid_note_path = vault_root.join(PathBuf::from(&invalid_filename));
+    match fs::write(&invalid_note_path, "# Invalid") {
+        Ok(()) => {}
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::PermissionDenied
+                    | std::io::ErrorKind::InvalidInput
+                    | std::io::ErrorKind::Unsupported
+            ) || error.raw_os_error() == Some(92) =>
+        {
+            return;
+        }
+        Err(error) => panic!("invalid-path file should be written: {error}"),
+    }
+
+    let scanned = scan_vault_files(vault_root, &config).expect("scan should succeed");
+
+    assert!(
+        scanned.notes.is_empty(),
+        "invalid-path note must be skipped"
+    );
+    assert!(
+        scanned.assets.is_empty(),
+        "invalid-path note must not become an asset"
+    );
+    assert_eq!(scanned.diagnostics.len(), 1);
+
+    let diagnostic = &scanned.diagnostics[0];
+    assert_eq!(diagnostic.level, DiagnosticLevel::Warning);
+    assert_eq!(diagnostic.path, RelativePath::new(""));
+    assert_eq!(
+        diagnostic.message,
+        format!("{NON_UTF8_PATH_COMPONENT_SCAN_DIAGNOSTIC_PREFIX}: {invalid_filename_debug}")
     );
 }
 

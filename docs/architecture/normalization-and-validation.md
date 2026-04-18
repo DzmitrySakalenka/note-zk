@@ -124,8 +124,10 @@ All file writes during normalization (`scan --write`) must use atomic rename:
 1. write normalized content to `<note>.md.tmp`
 2. fsync the temp file
 3. rename `<note>.md.tmp` over `<note>.md`
+4. fsync the parent directory after the rename on platforms that support directory fsync
 
-This ensures a crash mid-normalization never leaves a half-written file.
+This ensures a crash mid-normalization never leaves a half-written file or
+loses the renamed directory entry after the content itself was persisted.
 
 ## Tags Normalization Rule
 

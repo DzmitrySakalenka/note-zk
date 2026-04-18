@@ -215,6 +215,11 @@ Recommended write order:
 
 Use UTF-8 text files.
 
+Phase 1 scan behavior rejects any filename or directory component that is not
+valid UTF-8. The scanner emits a warning diagnostic and skips that entry rather
+than guessing at a lossy replacement, so the user must rename the path on disk
+before it can participate in vault operations (TG8-020).
+
 ## 18. Duplicate IDs
 
 Duplicate note IDs are invalid and must be reported as errors.
