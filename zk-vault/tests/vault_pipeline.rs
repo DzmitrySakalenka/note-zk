@@ -360,6 +360,18 @@ fn atomic_write_file_replaces_target_content_without_leftover_temp_files() {
 }
 
 #[test]
+fn atomic_write_file_creates_new_file_with_expected_content() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let target_path = tempdir.path().join("notes/new-note.md");
+    fs::create_dir_all(target_path.parent().expect("target should have parent"))
+        .expect("parent directory should be created");
+
+    atomic_write_file(&target_path, b"new content").expect("atomic write should succeed");
+
+    assert_eq!(read_file_text(&target_path), "new content");
+}
+
+#[test]
 fn atomic_write_file_cleans_temp_file_on_rename_failure() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let target_dir_path = tempdir.path().join("target-is-directory");

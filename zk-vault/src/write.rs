@@ -11,10 +11,13 @@ use crate::error::VaultError;
 /// Writes content to a temp file in the same directory, fsyncs, and atomically
 /// renames it over the destination.
 ///
+/// After return, the file's content and its parent directory entry are both
+/// durably persisted on platforms that support directory fsync.
+///
 /// # Errors
 ///
 /// Returns [`VaultError::Io`] when temp file creation, write, fsync, rename,
-/// or cleanup operations fail.
+/// parent-directory fsync, or cleanup operations fail.
 pub fn atomic_write_file(path: &Path, content: &[u8]) -> Result<(), VaultError> {
     let parent_dir = path.parent().ok_or_else(|| VaultError::Io {
         path: path.to_path_buf(),
@@ -44,7 +47,28 @@ pub fn atomic_write_file(path: &Path, content: &[u8]) -> Result<(), VaultError> 
         })?;
 
     match temp_file.persist(path) {
-        Ok(_persisted_file) => Ok(()),
+        Ok(_persisted_file) => {
+            #[cfg(unix)]
+            {
+                let parent_dir_handle =
+                    fs::File::open(parent_dir).map_err(|source| VaultError::Io {
+                        path: parent_dir.to_path_buf(),
+                        source,
+                    })?;
+                parent_dir_handle
+                    .sync_all()
+                    .map_err(|source| VaultError::Io {
+                        path: parent_dir.to_path_buf(),
+                        source,
+                    })?;
+            }
+            #[cfg(not(unix))]
+            {
+                // Directory fsync is only attempted on platforms that support it directly.
+            }
+
+            Ok(())
+        }
         Err(persist_error) => {
             cleanup_temp_after_failed_persist(persist_error.file.path());
             Err(VaultError::Io {
