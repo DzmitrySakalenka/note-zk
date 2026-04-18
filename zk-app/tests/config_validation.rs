@@ -21,8 +21,10 @@ fn validate_effective_config_accepts_defaults() {
 
 #[test]
 fn validate_effective_config_rejects_zero_retention_days() {
-    let mut config = EffectiveConfig::default();
-    config.retention_days = 0;
+    let config = EffectiveConfig {
+        retention_days: 0,
+        ..EffectiveConfig::default()
+    };
 
     let err = validate_effective_config(&config).expect_err("zero retention should be invalid");
     match err {
@@ -39,8 +41,10 @@ fn validate_effective_config_rejects_zero_retention_days() {
 
 #[test]
 fn validate_effective_config_rejects_empty_extension_list() {
-    let mut config = EffectiveConfig::default();
-    config.allowed_note_extensions = vec![];
+    let config = EffectiveConfig {
+        allowed_note_extensions: vec![],
+        ..EffectiveConfig::default()
+    };
 
     let err = validate_effective_config(&config).expect_err("empty extensions should be invalid");
     match err {
@@ -51,8 +55,10 @@ fn validate_effective_config_rejects_empty_extension_list() {
 
 #[test]
 fn validate_effective_config_rejects_blank_extension_entry() {
-    let mut config = EffectiveConfig::default();
-    config.allowed_note_extensions = vec!["md".to_string(), "".to_string()];
+    let config = EffectiveConfig {
+        allowed_note_extensions: vec!["md".to_string(), String::new()],
+        ..EffectiveConfig::default()
+    };
 
     let err =
         validate_effective_config(&config).expect_err("blank extension entry should be invalid");
@@ -67,8 +73,10 @@ fn validate_effective_config_rejects_extensions_with_invalid_characters() {
     let invalid_extensions = ["md!", "m d", "md/x"];
 
     for invalid_extension in invalid_extensions {
-        let mut config = EffectiveConfig::default();
-        config.allowed_note_extensions = vec![invalid_extension.to_string()];
+        let config = EffectiveConfig {
+            allowed_note_extensions: vec![invalid_extension.to_string()],
+            ..EffectiveConfig::default()
+        };
 
         let err = validate_effective_config(&config)
             .expect_err("extensions with invalid characters should be rejected");
@@ -90,8 +98,10 @@ fn validate_effective_config_rejects_extensions_with_invalid_characters() {
 
 #[test]
 fn validate_effective_config_rejects_empty_vault_path() {
-    let mut config = EffectiveConfig::default();
-    config.vault_path = PathBuf::new();
+    let config = EffectiveConfig {
+        vault_path: PathBuf::new(),
+        ..EffectiveConfig::default()
+    };
 
     let err = validate_effective_config(&config).expect_err("empty vault path should be invalid");
     match err {
@@ -104,8 +114,10 @@ fn validate_effective_config_rejects_empty_vault_path() {
 
 #[test]
 fn validate_effective_config_rejects_empty_local_db_path() {
-    let mut config = EffectiveConfig::default();
-    config.local_db_path = PathBuf::new();
+    let config = EffectiveConfig {
+        local_db_path: PathBuf::new(),
+        ..EffectiveConfig::default()
+    };
 
     let err =
         validate_effective_config(&config).expect_err("empty local db path should be invalid");
@@ -123,13 +135,15 @@ fn validate_effective_config_rejects_empty_local_db_path() {
 
 #[test]
 fn validate_effective_config_rejects_invalid_folder_prefix() {
-    let mut config = EffectiveConfig::default();
-    config.folders = BTreeMap::from([(
-        "../raw".to_string(),
-        FolderPolicy {
-            immutable: Some(true),
-        },
-    )]);
+    let config = EffectiveConfig {
+        folders: BTreeMap::from([(
+            "../raw".to_string(),
+            FolderPolicy {
+                immutable: Some(true),
+            },
+        )]),
+        ..EffectiveConfig::default()
+    };
 
     let err = validate_effective_config(&config).expect_err("invalid folder prefix should fail");
     match err {
@@ -145,13 +159,15 @@ fn validate_effective_config_rejects_absolute_folder_prefix_variants() {
     let invalid_prefixes = ["/raw", "\\raw"];
 
     for invalid_prefix in invalid_prefixes {
-        let mut config = EffectiveConfig::default();
-        config.folders = BTreeMap::from([(
-            invalid_prefix.to_string(),
-            FolderPolicy {
-                immutable: Some(true),
-            },
-        )]);
+        let config = EffectiveConfig {
+            folders: BTreeMap::from([(
+                invalid_prefix.to_string(),
+                FolderPolicy {
+                    immutable: Some(true),
+                },
+            )]),
+            ..EffectiveConfig::default()
+        };
 
         let err = validate_effective_config(&config)
             .expect_err("absolute folder prefix should fail validation");
@@ -199,8 +215,10 @@ fn resolve_folder_policy_matches_exact_prefix_and_nested_paths() {
 
 #[test]
 fn validate_effective_config_rejects_empty_trash_dir() {
-    let mut config = EffectiveConfig::default();
-    config.trash_dir = String::new();
+    let config = EffectiveConfig {
+        trash_dir: String::new(),
+        ..EffectiveConfig::default()
+    };
 
     let err = validate_effective_config(&config).expect_err("empty trash_dir should fail");
     match err {
@@ -213,8 +231,10 @@ fn validate_effective_config_rejects_empty_trash_dir() {
 
 #[test]
 fn validate_effective_config_rejects_trash_dir_path_traversal() {
-    let mut config = EffectiveConfig::default();
-    config.trash_dir = "../escape".to_string();
+    let config = EffectiveConfig {
+        trash_dir: "../escape".to_string(),
+        ..EffectiveConfig::default()
+    };
 
     let err = validate_effective_config(&config).expect_err("path traversal trash_dir should fail");
     match err {
@@ -227,8 +247,10 @@ fn validate_effective_config_rejects_trash_dir_path_traversal() {
 
 #[test]
 fn validate_effective_config_rejects_absolute_trash_dir() {
-    let mut config = EffectiveConfig::default();
-    config.trash_dir = "/absolute/path".to_string();
+    let config = EffectiveConfig {
+        trash_dir: "/absolute/path".to_string(),
+        ..EffectiveConfig::default()
+    };
 
     let err = validate_effective_config(&config).expect_err("absolute trash_dir should fail");
     match err {
@@ -241,8 +263,10 @@ fn validate_effective_config_rejects_absolute_trash_dir() {
 
 #[test]
 fn validate_effective_config_accepts_valid_trash_dir() {
-    let mut config = EffectiveConfig::default();
-    config.trash_dir = "99_trash".to_string();
+    let config = EffectiveConfig {
+        trash_dir: "99_trash".to_string(),
+        ..EffectiveConfig::default()
+    };
 
     validate_effective_config(&config).expect("valid trash_dir should pass validation");
 }

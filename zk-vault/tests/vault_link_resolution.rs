@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{fmt::Write as _, fs, path::Path};
 
 use insta::assert_debug_snapshot;
 use tempfile::TempDir;
@@ -24,10 +24,11 @@ fn write_text_file(path: &Path, content: &str) {
 }
 
 fn base_config(vault_root: &Path) -> EffectiveConfig {
-    let mut config = EffectiveConfig::default();
-    config.vault_path = vault_root.to_path_buf();
-    config.allowed_note_extensions = vec!["md".to_string()];
-    config
+    EffectiveConfig {
+        vault_path: vault_root.to_path_buf(),
+        allowed_note_extensions: vec!["md".to_string()],
+        ..EffectiveConfig::default()
+    }
 }
 
 fn note_content(id: &str, title: &str, aliases: &[&str], body: &str) -> String {
@@ -36,7 +37,7 @@ fn note_content(id: &str, title: &str, aliases: &[&str], body: &str) -> String {
     if !aliases.is_empty() {
         content.push_str("aliases:\n");
         for alias in aliases {
-            content.push_str(&format!("  - {alias}\n"));
+            let _ = writeln!(content, "  - {alias}");
         }
     }
 
@@ -85,7 +86,7 @@ fn wiki_link_resolves_to_target_note_id() {
 
     assert_eq!(
         outbound_link.target_note_id,
-        Some(NoteId::from(TITLE_TARGET_ID))
+        Some(NoteId::new(TITLE_TARGET_ID))
     );
     assert_eq!(outbound_link.raw_target, "Note B Title");
     assert!(!outbound_link.is_ambiguous);
@@ -128,7 +129,7 @@ fn title_match_wins_over_alias_and_basename_matches() {
 
     assert_eq!(
         outbound_link.target_note_id,
-        Some(NoteId::from(PRIORITY_TITLE_ID))
+        Some(NoteId::new(PRIORITY_TITLE_ID))
     );
     assert!(!outbound_link.is_ambiguous);
 }
@@ -157,7 +158,7 @@ fn alias_match_resolves_when_no_title_matches() {
 
     assert_eq!(
         outbound_link.target_note_id,
-        Some(NoteId::from(ALIAS_TARGET_ID))
+        Some(NoteId::new(ALIAS_TARGET_ID))
     );
     assert!(!outbound_link.is_ambiguous);
 }
@@ -186,7 +187,7 @@ fn basename_match_resolves_when_title_and_alias_do_not_match() {
 
     assert_eq!(
         outbound_link.target_note_id,
-        Some(NoteId::from(BASENAME_TARGET_ID))
+        Some(NoteId::new(BASENAME_TARGET_ID))
     );
     assert_eq!(outbound_link.raw_target, "basename-match");
     assert!(!outbound_link.is_ambiguous);
@@ -216,7 +217,7 @@ fn path_match_resolves_as_last_resort() {
 
     assert_eq!(
         outbound_link.target_note_id,
-        Some(NoteId::from(PATH_TARGET_ID))
+        Some(NoteId::new(PATH_TARGET_ID))
     );
     assert_eq!(outbound_link.raw_target, "refs/path-match");
     assert!(!outbound_link.is_ambiguous);
@@ -347,7 +348,7 @@ fn note_without_frontmatter_is_excluded_from_output_when_insertion_is_disabled()
     let resolved = resolve_fixture_vault(vault_root, &config);
 
     assert_eq!(resolved.len(), 1);
-    assert_eq!(resolved[0].note_id, NoteId::from(TITLE_TARGET_ID));
+    assert_eq!(resolved[0].note_id, NoteId::new(TITLE_TARGET_ID));
 }
 
 #[test]
@@ -380,7 +381,7 @@ fn wiki_alias_preserves_display_text() {
     assert_eq!(outbound_link.link_text.as_deref(), Some("Display Text"));
     assert_eq!(
         outbound_link.target_note_id,
-        Some(NoteId::from(TITLE_TARGET_ID))
+        Some(NoteId::new(TITLE_TARGET_ID))
     );
 }
 

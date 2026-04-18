@@ -11,9 +11,10 @@ use zk_vault::{
 };
 
 fn base_config() -> EffectiveConfig {
-    let mut config = EffectiveConfig::default();
-    config.allowed_note_extensions = vec!["md".to_string()];
-    config
+    EffectiveConfig {
+        allowed_note_extensions: vec!["md".to_string()],
+        ..EffectiveConfig::default()
+    }
 }
 
 fn empty_plan() -> NormalizationPlan {
@@ -30,7 +31,7 @@ fn empty_plan() -> NormalizationPlan {
 
 fn frontmatter_with(id: &str, title: &str, aliases: &[&str]) -> NoteFrontmatter {
     NoteFrontmatter {
-        id: NoteId::from(id),
+        id: NoteId::new(id),
         title: title.to_string(),
         tags: vec!["tag".to_string()],
         note_type: None,
@@ -84,12 +85,13 @@ fn scan_with_notes(
         notes,
         assets: Vec::new(),
         diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
         duplicate_ids,
     }
 }
 
 fn find_index<'a>(indexes: &'a [ParsedNoteIndex], note_id: &str) -> &'a ParsedNoteIndex {
-    let expected_note_id = NoteId::from(note_id);
+    let expected_note_id = NoteId::new(note_id);
     indexes
         .iter()
         .find(|index| index.note_id == expected_note_id)
@@ -124,9 +126,9 @@ fn wiki_link_resolves_to_target_note_id() {
     assert_eq!(
         source.outbound_note_links,
         vec![ResolvedNoteLink {
-            source_note_id: NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAA"),
+            source_note_id: NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAA"),
             raw_target: "Target Note".to_string(),
-            target_note_id: Some(NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAB")),
+            target_note_id: Some(NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAB")),
             link_text: None,
             is_ambiguous: false,
         }]
@@ -152,7 +154,7 @@ fn external_markdown_link_produces_external_link() {
     assert_eq!(
         source.outbound_external_links,
         vec![ExternalLink {
-            source_note_id: NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAC"),
+            source_note_id: NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAC"),
             url: "https://example.com/docs".to_string(),
             link_text: Some("Docs".to_string()),
         }]
@@ -178,7 +180,7 @@ fn image_reference_produces_asset_reference_with_no_target_asset_id() {
     assert_eq!(
         source.asset_references,
         vec![AssetReference {
-            source_note_id: NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAD"),
+            source_note_id: NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAD"),
             raw_path: "./assets/diagram.png".to_string(),
             target_asset_id: None,
         }]
@@ -204,7 +206,7 @@ fn unresolved_wiki_link_sets_none_and_non_ambiguous() {
     assert_eq!(
         source.outbound_note_links,
         vec![ResolvedNoteLink {
-            source_note_id: NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAE"),
+            source_note_id: NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAE"),
             raw_target: "Missing Note".to_string(),
             target_note_id: None,
             link_text: None,
@@ -248,7 +250,7 @@ fn ambiguous_wiki_link_sets_ambiguous_flag() {
     assert_eq!(
         source.outbound_note_links,
         vec![ResolvedNoteLink {
-            source_note_id: NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAF"),
+            source_note_id: NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAF"),
             raw_target: "Shared Target".to_string(),
             target_note_id: None,
             link_text: None,
@@ -285,9 +287,9 @@ fn note_path_markdown_link_resolves_to_target_note_id() {
     assert_eq!(
         source.outbound_note_links,
         vec![ResolvedNoteLink {
-            source_note_id: NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAJ"),
+            source_note_id: NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAJ"),
             raw_target: "./notes/target.md".to_string(),
-            target_note_id: Some(NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAK")),
+            target_note_id: Some(NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAK")),
             link_text: Some("Target".to_string()),
             is_ambiguous: false,
         }]
@@ -315,13 +317,13 @@ fn notes_without_frontmatter_are_excluded_from_output() {
     assert_eq!(resolved.len(), 1);
     assert_eq!(
         resolved[0].note_id,
-        NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAL")
+        NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAL")
     );
 }
 
 #[test]
 fn duplicate_id_notes_are_excluded_from_output() {
-    let duplicate_id = NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAM");
+    let duplicate_id = NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAM");
     let scan = scan_with_notes(
         vec![
             make_note(
@@ -360,7 +362,7 @@ fn duplicate_id_notes_are_excluded_from_output() {
     assert_eq!(resolved.len(), 1);
     assert_eq!(
         resolved[0].note_id,
-        NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAN")
+        NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAN")
     );
 }
 

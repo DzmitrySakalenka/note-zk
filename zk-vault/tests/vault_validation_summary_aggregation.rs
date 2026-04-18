@@ -1,3 +1,4 @@
+pub use zk_vault::resolve_vault_links;
 pub use zk_vault::{NormalizationResult, TitleSource, VaultScanResult, analyze_body};
 
 #[allow(dead_code)]
@@ -43,9 +44,10 @@ impl ValidationRule for StubVaultFindingsRule {
 }
 
 fn base_config() -> EffectiveConfig {
-    let mut config = EffectiveConfig::default();
-    config.validation = ValidationConfig::default();
-    config
+    EffectiveConfig {
+        validation: ValidationConfig::default(),
+        ..EffectiveConfig::default()
+    }
 }
 
 fn empty_scan_result() -> VaultScanResult {
@@ -53,6 +55,7 @@ fn empty_scan_result() -> VaultScanResult {
         notes: Vec::new(),
         assets: Vec::new(),
         diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
     }
 }

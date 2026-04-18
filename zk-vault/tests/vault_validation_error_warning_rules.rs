@@ -27,7 +27,7 @@ fn empty_plan() -> NormalizationPlan {
 
 fn frontmatter_with(id: &str, title: &str) -> NoteFrontmatter {
     NoteFrontmatter {
-        id: NoteId::from(id),
+        id: NoteId::new(id),
         title: title.to_string(),
         tags: vec!["tag".to_string()],
         note_type: None,
@@ -65,11 +65,12 @@ fn scan_with_notes(
         notes,
         assets: Vec::new(),
         diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
         duplicate_ids,
     }
 }
 
-fn findings_for_rule<'a>(report: &'a ValidationReport, rule: RuleId) -> Vec<&'a ValidationFinding> {
+fn findings_for_rule(report: &ValidationReport, rule: RuleId) -> Vec<&ValidationFinding> {
     report
         .findings
         .iter()
@@ -150,7 +151,7 @@ fn duplicate_id_rule_emits_one_error_per_duplicate_path() {
             ),
         ],
         vec![(
-            NoteId::from("01DUPLICATEID00000000000001"),
+            NoteId::new("01DUPLICATEID00000000000001"),
             duplicate_paths.clone(),
         )],
     );

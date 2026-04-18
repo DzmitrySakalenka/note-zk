@@ -118,7 +118,7 @@ fn decode_device_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceRecor
         })?;
 
     Ok(DeviceRecord {
-        device_id: DeviceId::from(&device_id),
+        device_id: DeviceId::new(&device_id),
         device_name: row.get(1)?,
         platform: row.get(2)?,
         app_version: row.get(3)?,

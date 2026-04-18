@@ -20,7 +20,7 @@ fn raw_frontmatter_allows_missing_id() {
 fn raw_frontmatter_allows_missing_title() {
     let raw = parse_frontmatter("id: 01J7ABCDEF1234567890ABCDEF\ntags:\n  - rust\n");
 
-    assert_eq!(raw.id, Some(NoteId::from("01J7ABCDEF1234567890ABCDEF")));
+    assert_eq!(raw.id, Some(NoteId::new("01J7ABCDEF1234567890ABCDEF")));
     assert_eq!(raw.title, None);
     assert_eq!(raw.tags, vec!["rust".to_string()]);
 }
@@ -64,7 +64,7 @@ sources:
 "#;
     let raw = parse_frontmatter(yaml);
 
-    assert_eq!(raw.id, Some(NoteId::from("01J7ABCDEF1234567890ABCDEF")));
+    assert_eq!(raw.id, Some(NoteId::new("01J7ABCDEF1234567890ABCDEF")));
     assert_eq!(raw.title, Some("Example Note".to_string()));
     assert_eq!(
         raw.tags,
@@ -79,20 +79,20 @@ sources:
     assert_eq!(
         raw.sources,
         vec![
-            NoteId::from("01J7SOURCE0000000000000001"),
-            NoteId::from("01J7SOURCE0000000000000002")
+            NoteId::new("01J7SOURCE0000000000000001"),
+            NoteId::new("01J7SOURCE0000000000000002")
         ]
     );
 }
 
 #[test]
 fn raw_frontmatter_preserves_unknown_keys_in_extra() {
-    let yaml = r#"
+    let yaml = r"
 title: With Extra
 custom_flag: true
 metadata:
   owner: team-a
-"#;
+";
     let raw = parse_frontmatter(yaml);
 
     assert_eq!(raw.title, Some("With Extra".to_string()));
@@ -114,11 +114,11 @@ metadata:
 
 #[test]
 fn raw_frontmatter_round_trips_unknown_keys() {
-    let yaml = r#"
+    let yaml = r"
 title: Round Trip
 labels:
   - keep
-"#;
+";
     let raw = parse_frontmatter(yaml);
     let serialized = serde_yaml::to_string(&raw).expect("raw frontmatter should serialize");
     let reparsed: RawNoteFrontmatter =

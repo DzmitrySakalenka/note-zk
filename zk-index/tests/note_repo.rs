@@ -5,7 +5,7 @@ use zk_domain::{
 use zk_index::{NoteRepo, ensure_schema, open_memory};
 
 fn sample_note_id() -> NoteId {
-    NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMP")
+    NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP")
 }
 
 fn sample_note_record() -> NoteRecord {
@@ -37,6 +37,42 @@ fn insert_sample_note(conn: &rusqlite::Connection) {
         &record.updated_at,
     )
     .expect("sample note should be inserted");
+}
+
+#[test]
+fn count_returns_zero_for_empty_table() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+
+    let count = NoteRepo::count(&connection).expect("note count query should succeed");
+
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn count_returns_inserted_row_total() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    insert_sample_note(&connection);
+
+    let second_note_id = NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YPN");
+    let second_path = RelativePath::new("notes/sqlite-index.md");
+    let second_hash = ContentHash::from_bytes(b"sqlite content");
+    NoteRepo::upsert_note(
+        &connection,
+        &second_note_id,
+        &second_path,
+        "SQLite Indexing",
+        &second_hash,
+        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YPN","title":"SQLite Indexing"}"#,
+        "2026-04-05T09:00:00Z",
+        "2026-04-05T09:00:00Z",
+    )
+    .expect("second note should insert");
+
+    let count = NoteRepo::count(&connection).expect("note count query should succeed");
+
+    assert_eq!(count, 2);
 }
 
 #[test]
@@ -170,7 +206,7 @@ fn get_notes_by_tag_filters_matching_notes() {
     ensure_schema(&connection).expect("schema should be ready");
     insert_sample_note(&connection);
 
-    let second_note_id = NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YPN");
+    let second_note_id = NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YPN");
     let second_path = RelativePath::new("notes/sqlite-index.md");
     let second_hash = ContentHash::from_bytes(b"sqlite content");
     NoteRepo::upsert_note(
@@ -208,7 +244,7 @@ fn get_note_for_missing_id_returns_none() {
     ensure_schema(&connection).expect("schema should be ready");
 
     let missing =
-        NoteRepo::get_note(&connection, &NoteId::from("01MISSING")).expect("query should succeed");
+        NoteRepo::get_note(&connection, &NoteId::new("01MISSING")).expect("query should succeed");
 
     assert!(missing.is_none());
 }
@@ -233,7 +269,7 @@ fn list_notes_returns_all_rows_in_deterministic_order() {
     ensure_schema(&connection).expect("schema should be ready");
     insert_sample_note(&connection);
 
-    let second_note_id = NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YPN");
+    let second_note_id = NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YPN");
     let second_path = RelativePath::new("archive/sqlite-index.md");
     let second_hash = ContentHash::from_bytes(b"sqlite content");
     NoteRepo::upsert_note(
@@ -262,7 +298,7 @@ fn round_trip_preserves_nullable_and_boolean_fields() {
 
     connection
         .execute(
-            r#"
+            r"
             UPDATE notes_index
             SET trashed_at = ?1,
                 deleted_at = ?2,
@@ -271,7 +307,7 @@ fn round_trip_preserves_nullable_and_boolean_fields() {
                 last_editor_device_id = ?5,
                 server_revision = ?6
             WHERE note_id = ?7
-            "#,
+            ",
             rusqlite::params![
                 "2026-04-06T08:00:00Z",
                 "2026-04-07T09:00:00Z",
@@ -294,7 +330,7 @@ fn round_trip_preserves_nullable_and_boolean_fields() {
     assert!(actual.is_deleted);
     assert_eq!(
         actual.last_editor_device_id,
-        Some(DeviceId::from("device-macbook"))
+        Some(DeviceId::new("device-macbook"))
     );
     assert_eq!(actual.server_revision, ServerRevision::new(42));
 }

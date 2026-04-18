@@ -54,8 +54,10 @@ fn normalize_fixture_output(
     write_text_file(&absolute_path, file_content);
 
     let parsed = parse_note_file(&absolute_path).expect("fixture file should parse");
-    let mut config = EffectiveConfig::default();
-    config.derive_title_from_h1 = derive_title_from_h1;
+    let config = EffectiveConfig {
+        derive_title_from_h1,
+        ..EffectiveConfig::default()
+    };
     let body_analysis = analyze_body(&parsed.body_markdown);
     let relative_path = RelativePath::new(relative_path);
     let context = zk_vault::NormalizationContext {
@@ -67,10 +69,11 @@ fn normalize_fixture_output(
     let raw_frontmatter = parsed.frontmatter.unwrap_or_else(default_raw_frontmatter);
     let (normalized_frontmatter, _diagnostics) =
         normalize_frontmatter_with_id_generator(raw_frontmatter, &context, || {
-            NoteId::from("01FIXEDSNAPSHOTTESTID0000000001")
+            NoteId::new("01FIXEDSNAPSHOTTESTID0000000001")
         });
 
     render_note_file(&normalized_frontmatter, &parsed.body_markdown)
+        .expect("normalized note fixture should render")
 }
 
 fn full_frontmatter_fixture() -> NoteFrontmatter {
@@ -82,7 +85,7 @@ fn full_frontmatter_fixture() -> NoteFrontmatter {
     extra.insert("custom_beta".to_string(), serde_yaml::Value::Bool(true));
 
     NoteFrontmatter {
-        id: NoteId::from("01FULLSNAPSHOTNOTEID0000000001"),
+        id: NoteId::new("01FULLSNAPSHOTNOTEID0000000001"),
         title: "Full Snapshot".to_string(),
         tags: vec!["rust".to_string(), "project/zk".to_string()],
         note_type: Some("concept".to_string()),
@@ -92,8 +95,8 @@ fn full_frontmatter_fixture() -> NoteFrontmatter {
         source: Some("source_ref".to_string()),
         status: Some("active".to_string()),
         sources: vec![
-            NoteId::from("01SOURCEA000000000000000001"),
-            NoteId::from("01SOURCEB000000000000000002"),
+            NoteId::new("01SOURCEA000000000000000001"),
+            NoteId::new("01SOURCEB000000000000000002"),
         ],
         extra,
     }
@@ -101,7 +104,7 @@ fn full_frontmatter_fixture() -> NoteFrontmatter {
 
 fn minimal_frontmatter_fixture() -> NoteFrontmatter {
     NoteFrontmatter {
-        id: NoteId::from("01MINIMALSNAPSHOTNOTEID000001"),
+        id: NoteId::new("01MINIMALSNAPSHOTNOTEID000001"),
         title: "Minimal Snapshot".to_string(),
         tags: vec!["rust".to_string()],
         note_type: None,
@@ -117,13 +120,15 @@ fn minimal_frontmatter_fixture() -> NoteFrontmatter {
 
 #[test]
 fn snapshot_serialize_full_frontmatter() {
-    let serialized = serialize_frontmatter(&full_frontmatter_fixture());
+    let serialized = serialize_frontmatter(&full_frontmatter_fixture())
+        .expect("full snapshot frontmatter should serialize");
     assert_snapshot!("serialize_full_frontmatter", &serialized);
 }
 
 #[test]
 fn snapshot_serialize_minimal_frontmatter() {
-    let serialized = serialize_frontmatter(&minimal_frontmatter_fixture());
+    let serialized = serialize_frontmatter(&minimal_frontmatter_fixture())
+        .expect("minimal snapshot frontmatter should serialize");
     assert_snapshot!("serialize_minimal_frontmatter", &serialized);
 }
 
@@ -137,7 +142,8 @@ fn snapshot_serialize_frontmatter_with_unknown_keys() {
     frontmatter
         .extra
         .insert("z_custom".to_string(), serde_yaml::Value::Number(7.into()));
-    let serialized = serialize_frontmatter(&frontmatter);
+    let serialized = serialize_frontmatter(&frontmatter)
+        .expect("frontmatter with unknown keys should serialize");
     assert_snapshot!("serialize_with_unknown_keys", &serialized);
 }
 
@@ -147,7 +153,8 @@ fn snapshot_serialize_optional_field_combinations() {
     frontmatter.note_type = Some("note".to_string());
     frontmatter.created = Some("2026-04-14T09:00:00Z".to_string());
     frontmatter.status = Some("draft".to_string());
-    let serialized = serialize_frontmatter(&frontmatter);
+    let serialized =
+        serialize_frontmatter(&frontmatter).expect("optional field combination should serialize");
     assert_snapshot!("serialize_optional_field_combo", &serialized);
 }
 
@@ -197,7 +204,7 @@ fn snapshot_normalize_preserves_unknown_keys_and_appends_them() {
 #[test]
 fn normalize_already_normalized_output_is_identical_to_input() {
     let frontmatter = NoteFrontmatter {
-        id: NoteId::from("01ALREADYNORMALIZEDSNAPSHOT0001"),
+        id: NoteId::new("01ALREADYNORMALIZEDSNAPSHOT0001"),
         title: "Already Normalized".to_string(),
         tags: vec!["rust".to_string()],
         note_type: None,
@@ -210,7 +217,8 @@ fn normalize_already_normalized_output_is_identical_to_input() {
         extra: BTreeMap::new(),
     };
     let body = "Body line\n";
-    let input = render_note_file(&frontmatter, body);
+    let input =
+        render_note_file(&frontmatter, body).expect("already normalized note should render");
     let output = normalize_fixture_output("notes/already.md", &input, true);
     assert_eq!(output, input);
 }
@@ -231,18 +239,28 @@ fn normalization_is_idempotent_and_body_is_preserved_byte_identically() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the regression fixture reads more clearly as one end-to-end scenario"
+)]
+#[allow(
+    clippy::similar_names,
+    reason = "the fixture intentionally mirrors paired dup-a and dup-b files"
+)]
 fn multi_file_vault_regression_scan_and_apply() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let vault_root = tempdir.path();
-    let mut config = EffectiveConfig::default();
-    config.vault_path = vault_root.to_path_buf();
-    config.allowed_note_extensions = vec!["md".to_string()];
-    config.folders = BTreeMap::from([(
-        "raw".to_string(),
-        FolderPolicy {
-            immutable: Some(true),
-        },
-    )]);
+    let config = EffectiveConfig {
+        vault_path: vault_root.to_path_buf(),
+        allowed_note_extensions: vec!["md".to_string()],
+        folders: BTreeMap::from([(
+            "raw".to_string(),
+            FolderPolicy {
+                immutable: Some(true),
+            },
+        )]),
+        ..EffectiveConfig::default()
+    };
 
     let missing_id_path = vault_root.join("notes/missing-id.md");
     let missing_title_path = vault_root.join("notes/missing-title.md");
@@ -279,8 +297,8 @@ fn multi_file_vault_regression_scan_and_apply() {
     );
 
     let immutable_before = read_bytes(&immutable_path);
-    let dup_a_before = read_bytes(&dup_a_path);
-    let dup_b_before = read_bytes(&dup_b_path);
+    let duplicate_a_bytes_before = read_bytes(&dup_a_path);
+    let duplicate_b_bytes_before = read_bytes(&dup_b_path);
     let already_before = read_bytes(&already_path);
 
     let scan_result = scan_vault(vault_root, &config).expect("scan should succeed");
@@ -315,8 +333,8 @@ fn multi_file_vault_regression_scan_and_apply() {
     assert_eq!(summary.files_errored, 0);
 
     assert_eq!(read_bytes(&immutable_path), immutable_before);
-    assert_eq!(read_bytes(&dup_a_path), dup_a_before);
-    assert_eq!(read_bytes(&dup_b_path), dup_b_before);
+    assert_eq!(read_bytes(&dup_a_path), duplicate_a_bytes_before);
+    assert_eq!(read_bytes(&dup_b_path), duplicate_b_bytes_before);
     assert_eq!(read_bytes(&already_path), already_before);
 
     let parsed_missing_id = parse_note_file(&missing_id_path).expect("file should parse");

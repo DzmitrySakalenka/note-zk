@@ -99,6 +99,8 @@ local_db_path = "/Users/test/.local/share/note-zk/index.sqlite"
         GlobalConfigError::Parse { path, .. } => {
             assert_eq!(path, config_path);
         }
-        other => panic!("expected parse error, got {other:?}"),
+        other @ GlobalConfigError::Io { .. } => {
+            panic!("expected parse error, got {other:?}");
+        }
     }
 }

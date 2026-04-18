@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use serde_json;
 use zk_domain::id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision};
 
 // ==========================================================================
@@ -9,10 +8,10 @@ use zk_domain::id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, Server
 
 #[test]
 fn note_id_display_roundtrip() {
-    let id = NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
+    let id = NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
     let displayed = id.to_string();
     assert_eq!(displayed, "01HZ3KQBFG9T2R5XJ4N8VW6YMP");
-    let parsed = NoteId::from(displayed.as_str());
+    let parsed = NoteId::new(displayed.as_str());
     assert_eq!(id, parsed);
 }
 
@@ -36,9 +35,9 @@ fn note_id_generate_is_valid_ulid() {
 
 #[test]
 fn note_id_hash_and_eq() {
-    let a = NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
-    let b = NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
-    let c = NoteId::from("01JABC123456789DEF0GHIJKLM");
+    let a = NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
+    let b = NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
+    let c = NoteId::new("01JABC123456789DEF0GHIJKLM");
 
     assert_eq!(a, b);
     assert_ne!(a, c);
@@ -51,7 +50,7 @@ fn note_id_hash_and_eq() {
 
 #[test]
 fn note_id_serde_roundtrip() {
-    let id = NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
+    let id = NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
     let json = serde_json::to_string(&id).expect("serialize");
     assert_eq!(json, r#""01HZ3KQBFG9T2R5XJ4N8VW6YMP""#);
     let back: NoteId = serde_json::from_str(&json).expect("deserialize");
@@ -60,7 +59,7 @@ fn note_id_serde_roundtrip() {
 
 #[test]
 fn note_id_as_str_returns_inner_value() {
-    let id = NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
+    let id = NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
     assert_eq!(id.as_str(), "01HZ3KQBFG9T2R5XJ4N8VW6YMP");
 }
 
@@ -70,15 +69,15 @@ fn note_id_as_str_returns_inner_value() {
 
 #[test]
 fn asset_id_display_and_eq() {
-    let a = AssetId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
-    let b = AssetId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
+    let a = AssetId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
+    let b = AssetId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP");
     assert_eq!(a, b);
     assert_eq!(a.to_string(), "01HZ3KQBFG9T2R5XJ4N8VW6YMP");
 }
 
 #[test]
 fn asset_id_serde_roundtrip() {
-    let id = AssetId::from("ASSET001");
+    let id = AssetId::new("ASSET001");
     let json = serde_json::to_string(&id).expect("serialize");
     let back: AssetId = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(id, back);
@@ -86,7 +85,7 @@ fn asset_id_serde_roundtrip() {
 
 #[test]
 fn asset_id_as_str_returns_inner_value() {
-    let id = AssetId::from("ASSET001");
+    let id = AssetId::new("ASSET001");
     assert_eq!(id.as_str(), "ASSET001");
 }
 
@@ -96,15 +95,15 @@ fn asset_id_as_str_returns_inner_value() {
 
 #[test]
 fn device_id_display_and_eq() {
-    let a = DeviceId::from("device-macbook-2026");
-    let b = DeviceId::from("device-macbook-2026");
+    let a = DeviceId::new("device-macbook-2026");
+    let b = DeviceId::new("device-macbook-2026");
     assert_eq!(a, b);
     assert_eq!(a.to_string(), "device-macbook-2026");
 }
 
 #[test]
 fn device_id_serde_roundtrip() {
-    let id = DeviceId::from("device-macbook-2026");
+    let id = DeviceId::new("device-macbook-2026");
     let json = serde_json::to_string(&id).expect("serialize");
     let back: DeviceId = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(id, back);
@@ -112,7 +111,7 @@ fn device_id_serde_roundtrip() {
 
 #[test]
 fn device_id_as_str_returns_inner_value() {
-    let id = DeviceId::from("device-macbook-2026");
+    let id = DeviceId::new("device-macbook-2026");
     assert_eq!(id.as_str(), "device-macbook-2026");
 }
 
@@ -171,14 +170,14 @@ fn content_hash_serde_roundtrip() {
 #[test]
 fn content_hash_from_str() {
     let hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-    let hash = ContentHash::from(hex);
+    let hash = ContentHash::new(hex);
     assert_eq!(hash.to_string(), hex);
 }
 
 #[test]
 fn content_hash_as_str_returns_inner_value() {
     let hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-    let hash = ContentHash::from(hex);
+    let hash = ContentHash::new(hex);
     assert_eq!(hash.as_str(), hex);
 }
 

@@ -23,7 +23,7 @@ fn empty_plan() -> NormalizationPlan {
 
 fn frontmatter_with(id: &str, title: &str, aliases: &[&str]) -> NoteFrontmatter {
     NoteFrontmatter {
-        id: NoteId::from(id),
+        id: NoteId::new(id),
         title: title.to_string(),
         tags: vec!["tag".to_string()],
         note_type: None,
@@ -76,6 +76,7 @@ fn scan_with_notes(
         notes,
         assets: Vec::new(),
         diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
         duplicate_ids,
     }
 }
@@ -83,7 +84,7 @@ fn scan_with_notes(
 fn assert_resolved(index: &NoteLookupIndex, target: &str, expected_id: &str) {
     assert_eq!(
         index.resolve_target(target),
-        ResolveResult::Resolved(NoteId::from(expected_id))
+        ResolveResult::Resolved(NoteId::new(expected_id))
     );
 }
 
@@ -161,6 +162,39 @@ fn path_resolves_as_last_resort() {
 }
 
 #[test]
+fn path_lookup_handles_root_nested_and_dotless_paths_without_panic() {
+    let scan = scan_with_notes(
+        vec![
+            make_note(
+                "root-note.md",
+                "01ARZ3NDEKTSV4RRFFQ69G5FAQ",
+                "Root Note",
+                &[],
+            ),
+            make_note(
+                "notes/nested-note.md",
+                "01ARZ3NDEKTSV4RRFFQ69G5FAR",
+                "Nested Note",
+                &[],
+            ),
+            make_note(
+                "notes/dotless",
+                "01ARZ3NDEKTSV4RRFFQ69G5FAS",
+                "Dotless Note",
+                &[],
+            ),
+        ],
+        Vec::new(),
+    );
+
+    let index = build_from_scan(&scan);
+
+    assert_resolved(&index, "root-note", "01ARZ3NDEKTSV4RRFFQ69G5FAQ");
+    assert_resolved(&index, "notes/nested-note", "01ARZ3NDEKTSV4RRFFQ69G5FAR");
+    assert_resolved(&index, "notes/dotless", "01ARZ3NDEKTSV4RRFFQ69G5FAS");
+}
+
+#[test]
 fn ambiguous_when_two_notes_share_same_title() {
     let scan = scan_with_notes(
         vec![
@@ -228,7 +262,7 @@ fn notes_without_document_are_excluded_from_index() {
 
 #[test]
 fn duplicate_id_notes_are_excluded_from_index() {
-    let duplicate_id = NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAJ");
+    let duplicate_id = NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAJ");
     let scan = scan_with_notes(
         vec![make_note(
             "notes/alpha.md",
@@ -305,14 +339,14 @@ fn same_note_id_is_deduplicated_within_each_bucket() {
 
     assert_eq!(
         index.titles.get("same key"),
-        Some(&vec![NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAP")])
+        Some(&vec![NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAP")])
     );
     assert_eq!(
         index.aliases.get("same key"),
-        Some(&vec![NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAP")])
+        Some(&vec![NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAP")])
     );
     assert_eq!(
         index.resolve_target("Same Key"),
-        ResolveResult::Resolved(NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAP"))
+        ResolveResult::Resolved(NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAP"))
     );
 }

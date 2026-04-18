@@ -13,3 +13,11 @@ zk-domain = { path = "../zk-domain" }
 toml = "1.1.2"
 thiserror = "2.0.18"
 serde = "1.0.228"
+serde_json = "1.0.149"
+zk-vault = { path = "../zk-vault" }
+zk-index = { path = "../zk-index" }
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+serde_yaml = "0.9.34"
+
+[dev-dependencies]
+tempfile = "3.27.0"

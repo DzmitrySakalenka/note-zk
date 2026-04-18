@@ -47,7 +47,9 @@ fn sample_report() -> ValidationReport {
 #[test]
 fn to_json_pretty_returns_valid_json_with_expected_shape() {
     let report = sample_report();
-    let pretty = report.to_json();
+    let pretty = report
+        .to_json()
+        .expect("pretty validation report JSON should serialize");
     let value: Value = serde_json::from_str(&pretty).expect("pretty json should parse");
 
     assert!(pretty.contains('\n'));
@@ -61,8 +63,12 @@ fn to_json_pretty_returns_valid_json_with_expected_shape() {
 #[test]
 fn to_json_compact_returns_valid_json_equivalent_to_pretty() {
     let report = sample_report();
-    let compact = report.to_json_compact();
-    let pretty = report.to_json();
+    let compact = report
+        .to_json_compact()
+        .expect("compact validation report JSON should serialize");
+    let pretty = report
+        .to_json()
+        .expect("pretty validation report JSON should serialize");
 
     assert!(!compact.contains('\n'));
 
@@ -86,8 +92,12 @@ fn empty_report_json_contains_zero_counts() {
         scan_diagnostics: Vec::new(),
     };
 
-    let pretty = report.to_json();
-    let compact = report.to_json_compact();
+    let pretty = report
+        .to_json()
+        .expect("pretty empty validation report JSON should serialize");
+    let compact = report
+        .to_json_compact()
+        .expect("compact empty validation report JSON should serialize");
     let pretty_value: Value = serde_json::from_str(&pretty).expect("pretty json should parse");
     let compact_value: Value = serde_json::from_str(&compact).expect("compact json should parse");
 

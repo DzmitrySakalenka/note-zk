@@ -27,7 +27,7 @@ fn sync_status_serde_roundtrip_all_variants() {
 fn sync_status_clone_copy_eq() {
     let a = SyncStatus::Conflict;
     let b = a;
-    let c = a.clone();
+    let c = a;
     assert_eq!(a, b);
     assert_eq!(a, c);
 }
@@ -65,7 +65,7 @@ fn pending_operation_serde_roundtrip_all_variants() {
 fn pending_operation_clone_copy_eq() {
     let a = PendingOperation::Move;
     let b = a;
-    let c = a.clone();
+    let c = a;
     assert_eq!(a, b);
     assert_eq!(a, c);
 }
@@ -119,7 +119,7 @@ fn event_type_serde_roundtrip_all_variants() {
 fn event_type_clone_copy_eq() {
     let a = EventType::Purge;
     let b = a;
-    let c = a.clone();
+    let c = a;
     assert_eq!(a, b);
     assert_eq!(a, c);
 }
@@ -155,7 +155,7 @@ fn conflict_resolution_serde_roundtrip_all_variants() {
 fn conflict_resolution_clone_copy_eq() {
     let a = ConflictResolution::KeepBoth;
     let b = a;
-    let c = a.clone();
+    let c = a;
     assert_eq!(a, b);
     assert_eq!(a, c);
 }

@@ -2,14 +2,17 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use zk_domain::{
     config::EffectiveConfig,
-    id::RelativePath,
+    derived::ParsedNoteIndex,
+    id::{NoteId, RelativePath},
     note::{DiagnosticLevel, RuleId, ValidationFinding, ValidationReport, ValidationSummary},
 };
 
-use crate::{NormalizationResult, TitleSource, VaultScanResult, analyze_body};
+use crate::{NormalizationResult, TitleSource, VaultScanResult, analyze_body, resolve_vault_links};
 
 pub(crate) struct ValidationContext<'a> {
     pub(crate) scan_result: &'a VaultScanResult,
+    parsed_indexes_by_note_id: HashMap<NoteId, &'a ParsedNoteIndex>,
+    asset_paths: HashSet<RelativePath>,
 }
 
 pub(crate) trait ValidationRule {
@@ -27,14 +30,29 @@ pub(crate) trait ValidationRule {
 
 #[must_use]
 pub fn validate_vault(scan_result: &VaultScanResult, config: &EffectiveConfig) -> ValidationReport {
+    let parsed_indexes = resolve_vault_links(scan_result, config);
+    validate_vault_with_parsed_indexes(scan_result, &parsed_indexes, config)
+}
+
+/// Validates a scan using caller-provided parsed link and asset indexes.
+#[must_use]
+pub fn validate_vault_with_parsed_indexes(
+    scan_result: &VaultScanResult,
+    parsed_indexes: &[ParsedNoteIndex],
+    config: &EffectiveConfig,
+) -> ValidationReport {
     let rules = register_rules();
-    validate_vault_with_rules(scan_result, config, rules)
+    validate_vault_with_rules_and_parsed_indexes(scan_result, parsed_indexes, config, rules)
 }
 
 fn register_rules() -> Vec<Box<dyn ValidationRule>> {
     vec![
+        Box::new(InvalidFrontmatterRule),
         Box::new(MissingTitleRule),
         Box::new(DuplicateIdRule),
+        Box::new(UnresolvedLinkRule),
+        Box::new(AmbiguousLinkRule),
+        Box::new(BrokenAssetRefRule),
         Box::new(EmptyBodyRule),
         Box::new(NoH1InBodyRule),
         Box::new(TitleH1MismatchRule),
@@ -48,12 +66,34 @@ fn register_rules() -> Vec<Box<dyn ValidationRule>> {
     ]
 }
 
+#[allow(dead_code)]
 pub(crate) fn validate_vault_with_rules(
     scan_result: &VaultScanResult,
     config: &EffectiveConfig,
     rules: Vec<Box<dyn ValidationRule>>,
 ) -> ValidationReport {
-    let context = ValidationContext { scan_result };
+    let parsed_indexes = resolve_vault_links(scan_result, config);
+    validate_vault_with_rules_and_parsed_indexes(scan_result, &parsed_indexes, config, rules)
+}
+
+fn validate_vault_with_rules_and_parsed_indexes(
+    scan_result: &VaultScanResult,
+    parsed_indexes: &[ParsedNoteIndex],
+    config: &EffectiveConfig,
+    rules: Vec<Box<dyn ValidationRule>>,
+) -> ValidationReport {
+    let context = ValidationContext {
+        scan_result,
+        parsed_indexes_by_note_id: parsed_indexes
+            .iter()
+            .map(|parsed_index| (parsed_index.note_id.clone(), parsed_index))
+            .collect(),
+        asset_paths: scan_result
+            .assets
+            .iter()
+            .map(|asset| asset.relative_path.clone())
+            .collect(),
+    };
     let disabled_rules = parse_disabled_rules(&config.validation.disabled_rules);
     let severity_overrides = parse_severity_overrides(&config.validation.severity_overrides);
     let mut findings = Vec::new();
@@ -152,6 +192,41 @@ fn parse_level_override(name: &str) -> Option<DiagnosticLevel> {
     None
 }
 
+struct InvalidFrontmatterRule;
+
+impl ValidationRule for InvalidFrontmatterRule {
+    fn id(&self) -> RuleId {
+        RuleId::InvalidFrontmatter
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Error
+    }
+
+    fn check_note(
+        &self,
+        _note: &NormalizationResult,
+        _ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        Vec::new()
+    }
+
+    fn check_vault(&self, ctx: &ValidationContext<'_>) -> Vec<ValidationFinding> {
+        ctx.scan_result
+            .frontmatter_parse_failures
+            .iter()
+            .map(|failure| {
+                new_finding(
+                    RuleId::InvalidFrontmatter,
+                    DiagnosticLevel::Error,
+                    failure.path.clone(),
+                    format!("invalid frontmatter: {}", failure.message),
+                )
+            })
+            .collect()
+    }
+}
+
 struct MissingTitleRule;
 
 impl ValidationRule for MissingTitleRule {
@@ -215,6 +290,121 @@ impl ValidationRule for DuplicateIdRule {
             }
         }
         findings
+    }
+}
+
+struct UnresolvedLinkRule;
+
+impl ValidationRule for UnresolvedLinkRule {
+    fn id(&self) -> RuleId {
+        RuleId::UnresolvedLink
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Warning
+    }
+
+    fn check_note(
+        &self,
+        note: &NormalizationResult,
+        ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        let Some(parsed_index) = parsed_index_for_note(note, ctx) else {
+            return Vec::new();
+        };
+
+        parsed_index
+            .outbound_note_links
+            .iter()
+            .filter(|link| link.target_note_id.is_none() && !link.is_ambiguous)
+            .map(|link| {
+                new_finding(
+                    RuleId::UnresolvedLink,
+                    DiagnosticLevel::Warning,
+                    note.relative_path.clone(),
+                    format!("unresolved note link target: {}", link.raw_target),
+                )
+            })
+            .collect()
+    }
+}
+
+struct AmbiguousLinkRule;
+
+impl ValidationRule for AmbiguousLinkRule {
+    fn id(&self) -> RuleId {
+        RuleId::AmbiguousLink
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Warning
+    }
+
+    fn check_note(
+        &self,
+        note: &NormalizationResult,
+        ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        let Some(parsed_index) = parsed_index_for_note(note, ctx) else {
+            return Vec::new();
+        };
+
+        parsed_index
+            .outbound_note_links
+            .iter()
+            .filter(|link| link.target_note_id.is_none() && link.is_ambiguous)
+            .map(|link| {
+                new_finding(
+                    RuleId::AmbiguousLink,
+                    DiagnosticLevel::Warning,
+                    note.relative_path.clone(),
+                    format!("ambiguous note link target: {}", link.raw_target),
+                )
+            })
+            .collect()
+    }
+}
+
+struct BrokenAssetRefRule;
+
+impl ValidationRule for BrokenAssetRefRule {
+    fn id(&self) -> RuleId {
+        RuleId::BrokenAssetRef
+    }
+
+    fn default_level(&self) -> DiagnosticLevel {
+        DiagnosticLevel::Warning
+    }
+
+    fn check_note(
+        &self,
+        note: &NormalizationResult,
+        ctx: &ValidationContext<'_>,
+    ) -> Vec<ValidationFinding> {
+        let Some(parsed_index) = parsed_index_for_note(note, ctx) else {
+            return Vec::new();
+        };
+
+        parsed_index
+            .asset_references
+            .iter()
+            .filter(|asset_reference| {
+                asset_reference.target_asset_id.is_none()
+                    && !asset_reference_exists(
+                        note.relative_path.as_str(),
+                        &asset_reference.raw_path,
+                        ctx,
+                    )
+            })
+            .map(|asset_reference| {
+                new_finding(
+                    RuleId::BrokenAssetRef,
+                    DiagnosticLevel::Warning,
+                    note.relative_path.clone(),
+                    format!("broken asset reference: {}", asset_reference.raw_path),
+                )
+            })
+            .collect()
     }
 }
 
@@ -591,6 +781,41 @@ fn new_finding(
         path,
         message: message.into(),
     }
+}
+
+fn parsed_index_for_note<'a>(
+    note: &NormalizationResult,
+    ctx: &'a ValidationContext<'_>,
+) -> Option<&'a ParsedNoteIndex> {
+    let note_id = note
+        .frontmatter
+        .as_ref()
+        .map(|frontmatter| &frontmatter.id)?;
+    ctx.parsed_indexes_by_note_id.get(note_id).copied()
+}
+
+fn asset_reference_exists(
+    source_note_path: &str,
+    raw_path: &str,
+    ctx: &ValidationContext<'_>,
+) -> bool {
+    let resolved_path = resolve_asset_reference_path(source_note_path, raw_path);
+    ctx.asset_paths.contains(&resolved_path)
+}
+
+fn resolve_asset_reference_path(source_note_path: &str, raw_path: &str) -> RelativePath {
+    if raw_path.starts_with('/') {
+        return RelativePath::new(raw_path);
+    }
+
+    let parent_path = source_note_path
+        .rsplit_once('/')
+        .map_or("", |(parent, _)| parent);
+    if parent_path.is_empty() {
+        return RelativePath::new(raw_path);
+    }
+
+    RelativePath::new(&format!("{parent_path}/{raw_path}"))
 }
 
 fn file_name_component(path: &RelativePath) -> &str {

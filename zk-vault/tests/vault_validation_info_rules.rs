@@ -42,7 +42,7 @@ fn empty_plan() -> NormalizationPlan {
 
 fn frontmatter_with(id: &str, title: &str, tags: &[&str]) -> NoteFrontmatter {
     NoteFrontmatter {
-        id: NoteId::from(id),
+        id: NoteId::new(id),
         title: title.to_string(),
         tags: tags.iter().map(ToString::to_string).collect(),
         note_type: None,
@@ -81,11 +81,12 @@ fn scan_with_notes(notes: Vec<NormalizationResult>) -> VaultScanResult {
         notes,
         assets: Vec::new(),
         diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
     }
 }
 
-fn findings_for_rule<'a>(report: &'a ValidationReport, rule: RuleId) -> Vec<&'a ValidationFinding> {
+fn findings_for_rule(report: &ValidationReport, rule: RuleId) -> Vec<&ValidationFinding> {
     report
         .findings
         .iter()

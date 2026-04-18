@@ -2,7 +2,7 @@ use rusqlite::{Connection, Transaction};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use zk_domain::{
     asset::AssetRecord,
-    id::{AssetId, RelativePath, ServerRevision},
+    id::{AssetId, ServerRevision},
 };
 
 use crate::{AssetInput, AssetRepo, LinkRepo, NoteInput, NoteRepo, error::IndexError};
@@ -115,12 +115,12 @@ fn build_asset_record(
     asset: &AssetInput,
 ) -> Result<AssetRecord, IndexError> {
     if let Some(existing) = AssetRepo::get_asset_by_path(transaction, &asset.path)? {
-        return Ok(merge_existing_asset(existing, asset));
+        return merge_existing_asset(existing, asset);
     }
 
     if let Some(existing) = AssetRepo::find_asset_by_content_hash(transaction, &asset.content_hash)?
     {
-        return Ok(merge_existing_asset(existing, asset));
+        return merge_existing_asset(existing, asset);
     }
 
     let timestamp = current_timestamp_utc()?;
@@ -140,21 +140,34 @@ fn build_asset_record(
     })
 }
 
-fn merge_existing_asset(existing: AssetRecord, asset: &AssetInput) -> AssetRecord {
-    AssetRecord {
+fn merge_existing_asset(
+    existing: AssetRecord,
+    asset: &AssetInput,
+) -> Result<AssetRecord, IndexError> {
+    let should_bump_updated_at = existing.content_hash != asset.content_hash
+        || existing.current_path != asset.path
+        || existing.size_bytes != asset.size_bytes;
+    let updated_at = if should_bump_updated_at {
+        current_timestamp_utc()?
+    } else {
+        existing.updated_at
+    };
+
+    // `mime_type` is a derived classification and should not affect update time.
+    Ok(AssetRecord {
         asset_id: existing.asset_id,
         current_path: asset.path.clone(),
         content_hash: asset.content_hash.clone(),
         mime_type: asset.mime_type.clone(),
         size_bytes: asset.size_bytes,
         created_at: existing.created_at,
-        updated_at: existing.updated_at,
+        updated_at,
         trashed_at: existing.trashed_at,
         deleted_at: existing.deleted_at,
         is_trashed: existing.is_trashed,
         is_deleted: existing.is_deleted,
         server_revision: existing.server_revision,
-    }
+    })
 }
 
 fn current_timestamp_utc() -> Result<String, IndexError> {
@@ -165,6 +178,3 @@ fn current_timestamp_utc() -> Result<String, IndexError> {
             context: "format current asset timestamp".to_string(),
         })
 }
-
-#[allow(dead_code)]
-fn _assert_relative_path_clone(_: &RelativePath) {}

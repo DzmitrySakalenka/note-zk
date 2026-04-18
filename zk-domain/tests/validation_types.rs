@@ -49,6 +49,29 @@ fn description_for(rule: RuleId) -> &'static str {
     }
 }
 
+fn kebab_case_for(rule: RuleId) -> &'static str {
+    match rule {
+        RuleId::InvalidFrontmatter => "invalid-frontmatter",
+        RuleId::MissingTitle => "missing-title",
+        RuleId::DuplicateId => "duplicate-id",
+        RuleId::EmptyBody => "empty-body",
+        RuleId::NoH1InBody => "no-h1-in-body",
+        RuleId::TitleH1Mismatch => "title-h1-mismatch",
+        RuleId::SuspiciousPathNaming => "suspicious-path-naming",
+        RuleId::MermaidBlockDetected => "mermaid-block-detected",
+        RuleId::TitleDerivedFromH1 => "title-derived-from-h1",
+        RuleId::TitleDerivedFromFilename => "title-derived-from-filename",
+        RuleId::IdInjected => "id-injected",
+        RuleId::DefaultUntaggedTag => "default-untagged-tag",
+        RuleId::FrontmatterInserted => "frontmatter-inserted",
+        RuleId::IdFormatSuspicious => "id-format-suspicious",
+        RuleId::UnresolvedLink => "unresolved-link",
+        RuleId::AmbiguousLink => "ambiguous-link",
+        RuleId::BrokenAssetRef => "broken-asset-ref",
+        _ => panic!("unexpected RuleId variant outside TG8-007 coverage: {rule:?}"),
+    }
+}
+
 #[test]
 fn diagnostic_level_serde_roundtrip_all_variants() {
     let levels = [
@@ -93,6 +116,13 @@ fn rule_id_serde_roundtrip_all_variants() {
 fn rule_id_description_exact_mapping() {
     for rule in all_rule_ids() {
         assert_eq!(rule.description(), description_for(rule));
+    }
+}
+
+#[test]
+fn rule_id_kebab_case_exact_mapping() {
+    for rule in all_rule_ids() {
+        assert_eq!(rule.as_kebab_case(), kebab_case_for(rule));
     }
 }
 

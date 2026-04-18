@@ -312,10 +312,10 @@ fn path_without_extension(path: &str) -> Option<String> {
         return None;
     }
 
-    let parent = path
-        .strip_suffix(filename)
-        .expect("filename should be a suffix of the path");
-    Some(format!("{parent}{stem}"))
+    match path.rsplit_once('/') {
+        Some((parent, _)) => Some(format!("{parent}/{stem}")),
+        None => Some(stem.to_string()),
+    }
 }
 
 fn resolve_bucket(bucket: Option<&Vec<NoteId>>) -> Option<ResolveResult> {

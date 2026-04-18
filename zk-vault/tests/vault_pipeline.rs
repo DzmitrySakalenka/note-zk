@@ -30,10 +30,11 @@ fn read_file_text(path: &Path) -> String {
 }
 
 fn base_config(vault_root: &Path) -> EffectiveConfig {
-    let mut config = EffectiveConfig::default();
-    config.vault_path = vault_root.to_path_buf();
-    config.allowed_note_extensions = vec!["md".to_string()];
-    config
+    EffectiveConfig {
+        vault_path: vault_root.to_path_buf(),
+        allowed_note_extensions: vec!["md".to_string()],
+        ..EffectiveConfig::default()
+    }
 }
 
 fn find_note_result<'a>(
@@ -49,7 +50,7 @@ fn find_note_result<'a>(
 
 fn contains_path(paths: &[RelativePath], target: &str) -> bool {
     let normalized_target = RelativePath::new(target);
-    paths.iter().any(|path| *path == normalized_target)
+    paths.contains(&normalized_target)
 }
 
 #[test]
@@ -147,14 +148,21 @@ fn scan_vault_records_parse_error_for_invalid_yaml_and_continues_processing() {
         "invalid note document should be absent after parse error"
     );
     assert!(
-        scan_result.diagnostics.iter().any(|diagnostic| {
-            diagnostic.level == DiagnosticLevel::Error
-                && diagnostic.path == RelativePath::new("notes/invalid.md")
-                && diagnostic
-                    .message
-                    .contains("failed to parse note during vault scan")
-        }),
-        "scan should report parse failure diagnostic for invalid YAML note"
+        scan_result
+            .frontmatter_parse_failures
+            .iter()
+            .any(|failure| {
+                failure.path == RelativePath::new("notes/invalid.md")
+                    && failure.message.contains("did not find expected")
+            }),
+        "scan should capture structured parse failure for invalid YAML note"
+    );
+    assert!(
+        !scan_result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.path == RelativePath::new("notes/invalid.md")),
+        "frontmatter parse failures should not be duplicated as scan diagnostics"
     );
 }
 
@@ -350,6 +358,18 @@ fn atomic_write_file_replaces_target_content_without_leftover_temp_files() {
         .collect();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0], target_path);
+}
+
+#[test]
+fn atomic_write_file_creates_new_file_with_expected_content() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let target_path = tempdir.path().join("notes/new-note.md");
+    fs::create_dir_all(target_path.parent().expect("target should have parent"))
+        .expect("parent directory should be created");
+
+    atomic_write_file(&target_path, b"new content").expect("atomic write should succeed");
+
+    assert_eq!(read_file_text(&target_path), "new content");
 }
 
 #[test]

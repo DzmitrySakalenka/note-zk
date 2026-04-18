@@ -113,11 +113,25 @@ FROM asset_references
 WHERE source_note_id = ?1
 ORDER BY rowid ASC
 ";
+const COUNT_ASSETS_SQL: &str = "SELECT COUNT(*) FROM assets_index";
 const SAVEPOINT_REPLACE_ASSET_REFERENCES: &str = "asset_repo_replace_asset_references";
 
 pub struct AssetRepo;
 
 impl AssetRepo {
+    /// Returns the total number of asset rows in `assets_index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if the `COUNT(*)` query fails.
+    pub fn count(conn: &Connection) -> Result<u32, IndexError> {
+        conn.query_row(COUNT_ASSETS_SQL, [], |row| row.get(0))
+            .map_err(|source| IndexError::Sqlite {
+                source,
+                context: "count assets".to_string(),
+            })
+    }
+
     /// Inserts or replaces one asset row by `asset_id`.
     ///
     /// # Errors
@@ -336,9 +350,9 @@ fn decode_asset_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssetRecord>
         .unwrap_or(DEFAULT_SERVER_REVISION);
 
     Ok(AssetRecord {
-        asset_id: AssetId::from(&asset_id),
+        asset_id: AssetId::new(&asset_id),
         current_path: RelativePath::new(&current_path),
-        content_hash: ContentHash::from(&content_hash),
+        content_hash: ContentHash::new(&content_hash),
         mime_type: row.get(3)?,
         size_bytes: decode_size_bytes(raw_size_bytes)?,
         created_at: row.get(5)?,
@@ -356,9 +370,9 @@ fn decode_asset_reference(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssetRefe
     let target_asset_id = row.get::<_, Option<String>>(2)?;
 
     Ok(AssetReference {
-        source_note_id: NoteId::from(&source_note_id),
+        source_note_id: NoteId::new(&source_note_id),
         raw_path: row.get(1)?,
-        target_asset_id: target_asset_id.as_deref().map(AssetId::from),
+        target_asset_id: target_asset_id.as_deref().map(AssetId::new),
     })
 }
 

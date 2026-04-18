@@ -26,14 +26,7 @@ pub struct BodyAnalysis {
 /// when bytes are not valid UTF-8 text, and [`VaultError::FrontmatterParse`]
 /// when a detected frontmatter block contains invalid YAML.
 pub fn parse_note_file(path: &Path) -> Result<RawNoteDocument, VaultError> {
-    let file_bytes = fs::read(path).map_err(|source| VaultError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let file_content = String::from_utf8(file_bytes).map_err(|source| VaultError::Utf8Decode {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let file_content = read_note_text(path)?;
 
     let Some((raw_yaml, body_markdown)) = split_frontmatter_sections(&file_content) else {
         return Ok(RawNoteDocument {
@@ -44,13 +37,7 @@ pub fn parse_note_file(path: &Path) -> Result<RawNoteDocument, VaultError> {
         });
     };
 
-    let parsed_frontmatter =
-        serde_yaml::from_str::<RawNoteFrontmatter>(raw_yaml).map_err(|source| {
-            VaultError::FrontmatterParse {
-                path: path.to_path_buf(),
-                source,
-            }
-        })?;
+    let parsed_frontmatter = parse_raw_frontmatter_yaml(path, raw_yaml)?;
 
     Ok(RawNoteDocument {
         frontmatter: Some(parsed_frontmatter),
@@ -58,6 +45,18 @@ pub fn parse_note_file(path: &Path) -> Result<RawNoteDocument, VaultError> {
         body_markdown: body_markdown.to_string(),
         has_frontmatter_delimiters: true,
     })
+}
+
+pub(crate) fn parse_note_frontmatter(
+    path: &Path,
+) -> Result<Option<RawNoteFrontmatter>, VaultError> {
+    let file_content = read_note_text(path)?;
+    let Some((raw_yaml, _)) = split_frontmatter_sections(&file_content) else {
+        return Ok(None);
+    };
+
+    let parsed_frontmatter = parse_raw_frontmatter_yaml(path, raw_yaml)?;
+    Ok(Some(parsed_frontmatter))
 }
 
 #[must_use]
@@ -75,29 +74,51 @@ pub fn analyze_body(body: &str) -> BodyAnalysis {
     analyze_body_internal(body)
 }
 
+fn read_note_text(path: &Path) -> Result<String, VaultError> {
+    let file_bytes = fs::read(path).map_err(|source| VaultError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    String::from_utf8(file_bytes).map_err(|source| VaultError::Utf8Decode {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn parse_raw_frontmatter_yaml(
+    path: &Path,
+    raw_yaml: &str,
+) -> Result<RawNoteFrontmatter, VaultError> {
+    serde_yaml::from_str::<RawNoteFrontmatter>(raw_yaml).map_err(|source| {
+        VaultError::FrontmatterParse {
+            path: path.to_path_buf(),
+            source,
+        }
+    })
+}
+
 fn split_frontmatter_sections(file_content: &str) -> Option<(&str, &str)> {
-    const OPENING_DELIMITER: &str = "---\n";
-    if !file_content.starts_with(OPENING_DELIMITER) {
+    let (opening_line, frontmatter_start_index) = split_next_line(file_content)?;
+    if !is_frontmatter_delimiter(opening_line) {
         return None;
     }
 
-    let frontmatter_and_body = &file_content[OPENING_DELIMITER.len()..];
+    let frontmatter_and_body = &file_content[frontmatter_start_index..];
     let mut line_start_index = 0usize;
 
     while line_start_index < frontmatter_and_body.len() {
         let search_space = &frontmatter_and_body[line_start_index..];
-        if let Some(relative_newline_index) = search_space.find('\n') {
-            let line_end_index = line_start_index + relative_newline_index;
-            if frontmatter_and_body[line_start_index..line_end_index] == *"---" {
+        if let Some((line, next_line_start_index)) = split_next_line(search_space) {
+            if is_frontmatter_delimiter(line) {
                 let raw_frontmatter = &frontmatter_and_body[..line_start_index];
-                let body_markdown = &frontmatter_and_body[line_end_index + 1..];
+                let body_markdown = &search_space[next_line_start_index..];
                 return Some((raw_frontmatter, body_markdown));
             }
-            line_start_index = line_end_index + 1;
+            line_start_index += next_line_start_index;
             continue;
         }
 
-        if frontmatter_and_body[line_start_index..] == *"---" {
+        if is_frontmatter_delimiter(search_space) {
             let raw_frontmatter = &frontmatter_and_body[..line_start_index];
             return Some((raw_frontmatter, ""));
         }
@@ -105,6 +126,15 @@ fn split_frontmatter_sections(file_content: &str) -> Option<(&str, &str)> {
     }
 
     None
+}
+
+fn split_next_line(content: &str) -> Option<(&str, usize)> {
+    let newline_index = content.find('\n')?;
+    Some((&content[..newline_index], newline_index + 1))
+}
+
+fn is_frontmatter_delimiter(line: &str) -> bool {
+    line.strip_suffix('\r').unwrap_or(line) == "---"
 }
 
 fn analyze_body_internal(body: &str) -> BodyAnalysis {

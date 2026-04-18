@@ -5,19 +5,19 @@ use zk_domain::{
 use zk_index::{LinkRepo, ensure_schema, open_memory};
 
 fn source_note_id() -> NoteId {
-    NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMP")
+    NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP")
 }
 
 fn second_source_note_id() -> NoteId {
-    NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMQ")
+    NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMQ")
 }
 
 fn target_note_id() -> NoteId {
-    NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMR")
+    NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMR")
 }
 
 fn secondary_target_note_id() -> NoteId {
-    NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMS")
+    NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMS")
 }
 
 fn sample_note_links(source_note_id: &NoteId) -> Vec<ResolvedNoteLink> {

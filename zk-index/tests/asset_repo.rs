@@ -6,22 +6,22 @@ use zk_domain::{
 use zk_index::{AssetRepo, ensure_schema, open_memory};
 
 fn asset_id() -> AssetId {
-    AssetId::from("01HZ3ASSET00000000000000A")
+    AssetId::new("01HZ3ASSET00000000000000A")
 }
 
 fn second_asset_id() -> AssetId {
-    AssetId::from("01HZ3ASSET00000000000000B")
+    AssetId::new("01HZ3ASSET00000000000000B")
 }
 
 fn source_note_id() -> NoteId {
-    NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMP")
+    NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP")
 }
 
 fn sample_asset_record() -> AssetRecord {
     AssetRecord {
         asset_id: asset_id(),
         current_path: RelativePath::new("assets/diagram.png"),
-        content_hash: ContentHash::from(
+        content_hash: ContentHash::new(
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         ),
         mime_type: Some("image/png".to_string()),
@@ -52,6 +52,38 @@ fn sample_asset_references(source_note_id: &NoteId) -> Vec<AssetReference> {
 }
 
 #[test]
+fn count_returns_zero_for_empty_table() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+
+    let count = AssetRepo::count(&connection).expect("asset count query should succeed");
+
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn count_returns_inserted_row_total() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+
+    let first = sample_asset_record();
+    let second = AssetRecord {
+        asset_id: second_asset_id(),
+        current_path: RelativePath::new("assets/second.png"),
+        content_hash: ContentHash::new(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        ),
+        ..sample_asset_record()
+    };
+    AssetRepo::upsert_asset(&connection, &first).expect("first asset upsert should succeed");
+    AssetRepo::upsert_asset(&connection, &second).expect("second asset upsert should succeed");
+
+    let count = AssetRepo::count(&connection).expect("asset count query should succeed");
+
+    assert_eq!(count, 2);
+}
+
+#[test]
 fn upsert_asset_and_get_asset_round_trip() {
     let connection = open_memory().expect("in-memory database should open");
     ensure_schema(&connection).expect("schema should be ready");
@@ -74,7 +106,7 @@ fn upsert_asset_is_idempotent_for_same_asset_id() {
 
     let replacement = AssetRecord {
         current_path: RelativePath::new("assets/diagram-v2.png"),
-        content_hash: ContentHash::from(
+        content_hash: ContentHash::new(
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         ),
         mime_type: Some("image/webp".to_string()),
@@ -120,7 +152,7 @@ fn find_asset_by_content_hash_uses_path_order_tie_break_for_duplicates() {
     let connection = open_memory().expect("in-memory database should open");
     ensure_schema(&connection).expect("schema should be ready");
     let shared_hash =
-        ContentHash::from("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+        ContentHash::new("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
     let later_path = AssetRecord {
         asset_id: second_asset_id(),
         current_path: RelativePath::new("assets/zeta.png"),

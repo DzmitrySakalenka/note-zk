@@ -12,7 +12,7 @@ use zk_vault::{
 };
 
 fn note_id(value: &str) -> NoteId {
-    NoteId::from(value)
+    NoteId::new(value)
 }
 
 fn write_text_file(path: &Path, content: &str) {
@@ -64,6 +64,26 @@ fn sample_frontmatter_full_with_extra() -> NoteFrontmatter {
     }
 }
 
+fn parse_and_normalize(note_path: &Path, relative_path: &RelativePath) -> NoteFrontmatter {
+    let parsed = parse_note_file(note_path).expect("serialized note should parse");
+    let raw_frontmatter = parsed.frontmatter.expect("frontmatter should exist");
+    let body_analysis = analyze_body(&parsed.body_markdown);
+    let config = EffectiveConfig::default();
+    let context = NormalizationContext {
+        relative_path,
+        body_analysis: &body_analysis,
+        config: &config,
+        is_immutable: false,
+    };
+
+    let (normalized, _diagnostics) =
+        normalize_frontmatter_with_id_generator(raw_frontmatter, &context, || {
+            note_id("01UNUSEDGENERATEDID00000001")
+        });
+
+    normalized
+}
+
 fn line_index(content: &str, line: &str) -> usize {
     content
         .lines()
@@ -75,7 +95,8 @@ fn line_index(content: &str, line: &str) -> usize {
 fn serialize_full_frontmatter_in_canonical_order_with_sorted_extra() {
     let frontmatter = sample_frontmatter_full_with_extra();
 
-    let serialized = serialize_frontmatter(&frontmatter);
+    let serialized =
+        serialize_frontmatter(&frontmatter).expect("full frontmatter should serialize");
 
     let expected = concat!(
         "id: 01FULLNOTEID0000000000000001\n",
@@ -105,7 +126,8 @@ fn serialize_full_frontmatter_in_canonical_order_with_sorted_extra() {
 fn serialize_minimal_frontmatter_contains_only_required_fields() {
     let frontmatter = sample_frontmatter_minimal();
 
-    let serialized = serialize_frontmatter(&frontmatter);
+    let serialized =
+        serialize_frontmatter(&frontmatter).expect("minimal frontmatter should serialize");
 
     let expected = concat!(
         "id: 01MINIMALNOTEID000000000001\n",
@@ -121,7 +143,8 @@ fn serialize_minimal_frontmatter_contains_only_required_fields() {
 fn serialize_omits_none_and_empty_optional_fields() {
     let frontmatter = sample_frontmatter_minimal();
 
-    let serialized = serialize_frontmatter(&frontmatter);
+    let serialized =
+        serialize_frontmatter(&frontmatter).expect("minimal frontmatter should serialize");
 
     assert!(!serialized.contains("type:"));
     assert!(!serialized.contains("aliases:"));
@@ -138,7 +161,8 @@ fn serialize_omits_none_and_empty_optional_fields() {
 fn serialize_lists_use_block_style_not_inline_style() {
     let frontmatter = sample_frontmatter_full_with_extra();
 
-    let serialized = serialize_frontmatter(&frontmatter);
+    let serialized =
+        serialize_frontmatter(&frontmatter).expect("full frontmatter should serialize");
 
     assert!(serialized.contains("tags:\n  - rust\n  - project/foo\n"));
     assert!(serialized.contains("aliases:\n  - Alias A\n  - Alias B\n"));
@@ -155,7 +179,8 @@ fn serialize_lists_use_block_style_not_inline_style() {
 fn serialize_places_extra_keys_after_known_fields_in_alphabetical_order() {
     let frontmatter = sample_frontmatter_full_with_extra();
 
-    let serialized = serialize_frontmatter(&frontmatter);
+    let serialized =
+        serialize_frontmatter(&frontmatter).expect("full frontmatter should serialize");
 
     let status_index = line_index(&serialized, "status: active");
     let sources_index = line_index(&serialized, "sources:");
@@ -172,7 +197,7 @@ fn render_note_file_wraps_yaml_and_body_with_expected_newline_layout() {
     let frontmatter = sample_frontmatter_minimal();
     let body = "# Heading\nBody line";
 
-    let rendered = render_note_file(&frontmatter, body);
+    let rendered = render_note_file(&frontmatter, body).expect("note file should render");
 
     let expected = concat!(
         "---\n",
@@ -195,7 +220,7 @@ fn render_note_file_wraps_yaml_and_body_with_expected_newline_layout() {
 fn render_note_file_with_empty_body_still_has_trailing_newline() {
     let frontmatter = sample_frontmatter_minimal();
 
-    let rendered = render_note_file(&frontmatter, "");
+    let rendered = render_note_file(&frontmatter, "").expect("empty-body note file should render");
 
     let expected = concat!(
         "---\n",
@@ -215,10 +240,13 @@ fn serialization_and_render_outputs_are_deterministic_for_same_input() {
     let frontmatter = sample_frontmatter_full_with_extra();
     let body = "# Deterministic\nSame output expected";
 
-    let serialized_first = serialize_frontmatter(&frontmatter);
-    let serialized_second = serialize_frontmatter(&frontmatter);
-    let rendered_first = render_note_file(&frontmatter, body);
-    let rendered_second = render_note_file(&frontmatter, body);
+    let serialized_first =
+        serialize_frontmatter(&frontmatter).expect("first serialization should succeed");
+    let serialized_second =
+        serialize_frontmatter(&frontmatter).expect("second serialization should succeed");
+    let rendered_first = render_note_file(&frontmatter, body).expect("first render should succeed");
+    let rendered_second =
+        render_note_file(&frontmatter, body).expect("second render should succeed");
 
     assert_eq!(serialized_first, serialized_second);
     assert_eq!(rendered_first, rendered_second);
@@ -231,25 +259,52 @@ fn parse_normalize_serialize_parse_roundtrip_preserves_frontmatter() {
     let frontmatter = sample_frontmatter_full_with_extra();
     let body = "# Full Note\nRoundtrip body";
 
-    let rendered = render_note_file(&frontmatter, body);
+    let rendered = render_note_file(&frontmatter, body).expect("roundtrip note file should render");
     write_text_file(&note_path, &rendered);
 
-    let parsed = parse_note_file(&note_path).expect("serialized note should parse");
-    let raw_frontmatter = parsed.frontmatter.expect("frontmatter should exist");
-    let body_analysis = analyze_body(&parsed.body_markdown);
-    let config = EffectiveConfig::default();
     let relative_path = RelativePath::new("roundtrip.md");
-    let context = NormalizationContext {
-        relative_path: &relative_path,
-        body_analysis: &body_analysis,
-        config: &config,
-        is_immutable: false,
-    };
-
-    let (normalized, _diagnostics) =
-        normalize_frontmatter_with_id_generator(raw_frontmatter, &context, || {
-            note_id("01UNUSEDGENERATEDID00000001")
-        });
+    let normalized = parse_and_normalize(&note_path, &relative_path);
 
     assert_eq!(normalized, frontmatter);
+}
+
+#[test]
+fn yaml_hostile_scalars_roundtrip_through_render_and_parse_unchanged() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let relative_path = RelativePath::new("yaml-hostile.md");
+    let note_path = tempdir.path().join(relative_path.as_str());
+    let title_cases = [
+        "Rust: a first look",
+        "- leading dash",
+        ": leading colon",
+        "#tagless",
+        "value with \"quotes\"",
+        "line1\nline2",
+    ];
+
+    for title in title_cases {
+        let frontmatter = NoteFrontmatter {
+            id: note_id("01YAMLHOSTILE0000000000000001"),
+            title: title.to_string(),
+            tags: vec!["tag: value".to_string(), "c++".to_string()],
+            note_type: Some("concept".to_string()),
+            aliases: vec![r"folder\alias".to_string()],
+            created: Some("2026-04-17T12:00:00Z".to_string()),
+            updated: Some("2026-04-17T13:00:00Z".to_string()),
+            source: Some("source: primary".to_string()),
+            status: Some("active#1".to_string()),
+            sources: vec![note_id("01YAMLHOSTILESRC00000000000001")],
+            extra: BTreeMap::new(),
+        };
+
+        let rendered =
+            render_note_file(&frontmatter, "Body\n").expect("yaml-hostile note file should render");
+        write_text_file(&note_path, &rendered);
+
+        let normalized = parse_and_normalize(&note_path, &relative_path);
+        assert_eq!(
+            normalized, frontmatter,
+            "title case should round-trip: {title}"
+        );
+    }
 }

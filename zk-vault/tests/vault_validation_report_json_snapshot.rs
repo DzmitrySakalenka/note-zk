@@ -50,5 +50,10 @@ fn mixed_report() -> ValidationReport {
 #[test]
 fn snapshot_validation_report_json_mixed_levels() {
     let report = mixed_report();
-    assert_snapshot!("validation_report_json_mixed_levels", report.to_json());
+    assert_snapshot!(
+        "validation_report_json_mixed_levels",
+        report
+            .to_json()
+            .expect("validation report JSON snapshot should serialize")
+    );
 }

@@ -12,7 +12,7 @@ use zk_domain::{
     note::{DiagnosticLevel, ScanDiagnostic},
 };
 
-use crate::error::VaultError;
+use crate::error::{NON_UTF8_PATH_COMPONENT_SCAN_DIAGNOSTIC_PREFIX, VaultError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoteCandidate {
@@ -32,6 +32,12 @@ pub struct VaultFileSet {
     pub notes: Vec<NoteCandidate>,
     pub assets: Vec<AssetCandidate>,
     pub diagnostics: Vec<ScanDiagnostic>,
+}
+
+#[derive(Debug)]
+struct InvalidPathComponent {
+    diagnostic_path: RelativePath,
+    component_debug: String,
 }
 
 /// Recursively scans the vault and classifies files into note and asset sets.
@@ -69,7 +75,13 @@ pub fn scan_vault_files(
                     continue;
                 }
 
-                let relative_path = relative_path_for_entry(vault_root, entry.path());
+                let relative_path = match relative_path_for_entry(vault_root, entry.path()) {
+                    Ok(relative_path) => relative_path,
+                    Err(invalid_component) => {
+                        diagnostics.push(diagnostic_from_invalid_path_component(invalid_component));
+                        continue;
+                    }
+                };
                 if should_skip_entry(&entry, &relative_path, &trash_prefix) {
                     continue;
                 }
@@ -141,14 +153,31 @@ fn should_skip_entry(
     false
 }
 
-fn relative_path_for_entry(vault_root: &Path, absolute_path: &Path) -> RelativePath {
+fn relative_path_for_entry(
+    vault_root: &Path,
+    absolute_path: &Path,
+) -> Result<RelativePath, InvalidPathComponent> {
     if let Ok(relative_path) = absolute_path.strip_prefix(vault_root) {
-        let relative_text = relative_path.to_string_lossy().to_string();
-        return RelativePath::new(&relative_text);
+        return validated_relative_path(relative_path);
     }
 
-    let absolute_text = absolute_path.to_string_lossy().to_string();
-    RelativePath::new(&absolute_text)
+    validated_relative_path(absolute_path)
+}
+
+fn validated_relative_path(path: &Path) -> Result<RelativePath, InvalidPathComponent> {
+    let mut utf8_components = Vec::new();
+
+    for component in path {
+        let Some(component_text) = component.to_str() else {
+            return Err(InvalidPathComponent {
+                diagnostic_path: RelativePath::new(&utf8_components.join("/")),
+                component_debug: format!("{component:?}"),
+            });
+        };
+        utf8_components.push(component_text);
+    }
+
+    Ok(RelativePath::new(&utf8_components.join("/")))
 }
 
 fn is_hidden_relative_path(relative_path: &RelativePath) -> bool {
@@ -201,12 +230,28 @@ fn is_path_within_prefix(path: &str, prefix: &str) -> bool {
 fn diagnostic_from_walk_error(vault_root: &Path, error: &walkdir::Error) -> ScanDiagnostic {
     let path = error.path().map_or_else(
         || RelativePath::new(""),
-        |path| relative_path_for_entry(vault_root, path),
+        |path| {
+            relative_path_for_entry(vault_root, path)
+                .unwrap_or_else(|invalid_component| invalid_component.diagnostic_path)
+        },
     );
 
     ScanDiagnostic {
         level: DiagnosticLevel::Error,
         path,
         message: format!("while attempting to walk vault entries: {error}"),
+    }
+}
+
+fn diagnostic_from_invalid_path_component(
+    invalid_component: InvalidPathComponent,
+) -> ScanDiagnostic {
+    ScanDiagnostic {
+        level: DiagnosticLevel::Warning,
+        path: invalid_component.diagnostic_path,
+        message: format!(
+            "{NON_UTF8_PATH_COMPONENT_SCAN_DIAGNOSTIC_PREFIX}: {}",
+            invalid_component.component_debug
+        ),
     }
 }

@@ -28,6 +28,21 @@ struct ArbitraryFrontmatter {
     extra: Vec<(String, String)>,
 }
 
+#[derive(Clone, Debug)]
+struct ArbitraryHostileFrontmatter {
+    id: String,
+    title: String,
+    tags: Vec<String>,
+    note_type: Option<String>,
+    aliases: Vec<String>,
+    created: Option<String>,
+    updated: Option<String>,
+    source: Option<String>,
+    status: Option<String>,
+    sources: Vec<String>,
+    extra: Vec<(String, String)>,
+}
+
 impl ArbitraryFrontmatter {
     fn into_note_frontmatter(self) -> NoteFrontmatter {
         let mut extra = BTreeMap::new();
@@ -36,7 +51,7 @@ impl ArbitraryFrontmatter {
         }
 
         NoteFrontmatter {
-            id: NoteId::from(self.id.as_str()),
+            id: NoteId::new(self.id.as_str()),
             title: self.title,
             tags: self.tags,
             note_type: self.note_type,
@@ -48,7 +63,34 @@ impl ArbitraryFrontmatter {
             sources: self
                 .sources
                 .into_iter()
-                .map(|value| NoteId::from(value.as_str()))
+                .map(|value| NoteId::new(value.as_str()))
+                .collect(),
+            extra,
+        }
+    }
+}
+
+impl ArbitraryHostileFrontmatter {
+    fn into_note_frontmatter(self) -> NoteFrontmatter {
+        let mut extra = BTreeMap::new();
+        for (key, value) in self.extra {
+            extra.insert(key, serde_yaml::Value::String(value));
+        }
+
+        NoteFrontmatter {
+            id: NoteId::new(self.id.as_str()),
+            title: self.title,
+            tags: self.tags,
+            note_type: self.note_type,
+            aliases: self.aliases,
+            created: self.created,
+            updated: self.updated,
+            source: self.source,
+            status: self.status,
+            sources: self
+                .sources
+                .into_iter()
+                .map(|value| NoteId::new(value.as_str()))
                 .collect(),
             extra,
         }
@@ -73,6 +115,24 @@ impl Arbitrary for ArbitraryFrontmatter {
     }
 }
 
+impl Arbitrary for ArbitraryHostileFrontmatter {
+    fn arbitrary(g: &mut Gen) -> Self {
+        Self {
+            id: prefixed_token(g, "id", 24),
+            title: hostile_token(g, "title", 24),
+            tags: hostile_token_vec(g, "tag", 1, 4, 16),
+            note_type: Some(hostile_token(g, "type", 16)),
+            aliases: hostile_token_vec(g, "alias", 1, 4, 16),
+            created: Some(hostile_token(g, "created", 20)),
+            updated: Some(hostile_token(g, "updated", 20)),
+            source: Some(hostile_token(g, "source", 20)),
+            status: Some(hostile_token(g, "status", 16)),
+            sources: token_vec(g, "src", 1, 3, 20),
+            extra: pair_vec(g, "xk", "xv", 0, 4, 14),
+        }
+    }
+}
+
 fn prefixed_token(g: &mut Gen, prefix: &str, max_len: usize) -> String {
     let raw_len = usize::arbitrary(g) % max_len;
     let token_len = raw_len + 1;
@@ -86,12 +146,44 @@ fn prefixed_token(g: &mut Gen, prefix: &str, max_len: usize) -> String {
     token
 }
 
+fn hostile_token(g: &mut Gen, prefix: &str, max_len: usize) -> String {
+    const HOSTILE_SUFFIXES: [&str; 10] = [
+        ": value",
+        "- leading",
+        ": leading",
+        "#tagless",
+        " [list]",
+        " {map}",
+        " \"quoted\"",
+        r" \backslash",
+        "\nline2",
+        " !bang",
+    ];
+
+    let base = prefixed_token(g, prefix, max_len);
+    let suffix = HOSTILE_SUFFIXES[usize::arbitrary(g) % HOSTILE_SUFFIXES.len()];
+    format!("{base}{suffix}")
+}
+
 fn maybe_token(g: &mut Gen, prefix: &str, max_len: usize) -> Option<String> {
     if bool::arbitrary(g) {
         Some(prefixed_token(g, prefix, max_len))
     } else {
         None
     }
+}
+
+fn hostile_token_vec(
+    g: &mut Gen,
+    prefix: &str,
+    min_items: usize,
+    max_items_exclusive: usize,
+    max_len: usize,
+) -> Vec<String> {
+    let item_count = min_items + (usize::arbitrary(g) % max_items_exclusive);
+    (0..item_count)
+        .map(|_| hostile_token(g, prefix, max_len))
+        .collect()
 }
 
 fn token_vec(
@@ -107,6 +199,10 @@ fn token_vec(
         .collect()
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the generator helper is clearer with separate key/value and count bounds"
+)]
 fn pair_vec(
     g: &mut Gen,
     key_prefix: &str,
@@ -133,12 +229,16 @@ fn write_text_file(path: &Path, content: &str) {
     fs::write(path, content).expect("file should be written");
 }
 
-#[quickcheck]
-fn property_frontmatter_roundtrip_preserves_data(case: ArbitraryFrontmatter) -> bool {
-    let original_frontmatter = case.into_note_frontmatter();
-    let original_serialized = serialize_frontmatter(&original_frontmatter);
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "quickcheck property functions receive owned arbitrary values by design"
+)]
+fn roundtrip_preserves_data(original_frontmatter: NoteFrontmatter) -> bool {
+    let original_serialized = serialize_frontmatter(&original_frontmatter)
+        .expect("original frontmatter should serialize");
     let original_body = "property_body_line\n";
-    let original_file = render_note_file(&original_frontmatter, original_body);
+    let original_file = render_note_file(&original_frontmatter, original_body)
+        .expect("original note file should render");
 
     let tempdir = TempDir::new().expect("tempdir should be created");
     let note_path = tempdir.path().join("property-note.md");
@@ -157,9 +257,22 @@ fn property_frontmatter_roundtrip_preserves_data(case: ArbitraryFrontmatter) -> 
     };
     let (normalized_frontmatter, _diagnostics) =
         normalize_frontmatter_with_id_generator(raw_frontmatter, &context, || {
-            NoteId::from("01UNUSEDPROPERTYGENERATORID0001")
+            NoteId::new("01UNUSEDPROPERTYGENERATORID0001")
         });
-    let normalized_serialized = serialize_frontmatter(&normalized_frontmatter);
+    let normalized_serialized = serialize_frontmatter(&normalized_frontmatter)
+        .expect("normalized frontmatter should serialize");
 
     normalized_frontmatter == original_frontmatter && normalized_serialized == original_serialized
+}
+
+#[quickcheck]
+fn property_frontmatter_roundtrip_preserves_data(case: ArbitraryFrontmatter) -> bool {
+    roundtrip_preserves_data(case.into_note_frontmatter())
+}
+
+#[quickcheck]
+fn property_frontmatter_roundtrip_preserves_yaml_hostile_scalars(
+    case: ArbitraryHostileFrontmatter,
+) -> bool {
+    roundtrip_preserves_data(case.into_note_frontmatter())
 }

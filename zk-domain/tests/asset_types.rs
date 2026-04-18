@@ -7,7 +7,7 @@ use zk_domain::id::{AssetId, ContentHash, RelativePath, ServerRevision};
 
 fn sample_asset() -> AssetRecord {
     AssetRecord {
-        asset_id: AssetId::from("01HZ3ASSET00000000000000A"),
+        asset_id: AssetId::new("01HZ3ASSET00000000000000A"),
         current_path: RelativePath::new("assets/diagram.png"),
         content_hash: ContentHash::from_bytes(b"fake png bytes"),
         mime_type: Some("image/png".to_string()),

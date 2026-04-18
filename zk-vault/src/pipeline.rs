@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     io::{self, ErrorKind},
     path::{Path, PathBuf},
@@ -17,8 +17,8 @@ use crate::{
         NormalizationContext, NormalizationPlan, TitleSource, empty_raw_frontmatter,
         normalize_frontmatter, plan_normalization_with_body_analysis,
     },
-    parse::{analyze_body, parse_note_file},
-    scan::{AssetCandidate, scan_vault_files},
+    parse::{analyze_body, parse_note_file, parse_note_frontmatter},
+    scan::{AssetCandidate, NoteCandidate, scan_vault_files},
     serialize::render_note_file,
     write::atomic_write_file,
 };
@@ -37,7 +37,66 @@ pub struct VaultScanResult {
     pub notes: Vec<NormalizationResult>,
     pub assets: Vec<AssetCandidate>,
     pub diagnostics: Vec<ScanDiagnostic>,
+    pub frontmatter_parse_failures: Vec<FrontmatterParseFailure>,
     pub duplicate_ids: Vec<(NoteId, Vec<RelativePath>)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Structured frontmatter parse failure captured during vault scan.
+pub struct FrontmatterParseFailure {
+    /// Vault-relative path of the note whose frontmatter failed to parse.
+    pub path: RelativePath,
+    /// Human-readable YAML parser error message.
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Reusable note-id to path lookup used by higher-level write flows.
+pub struct NotePathIndex {
+    paths_by_id: HashMap<NoteId, RelativePath>,
+    ambiguous_ids: HashSet<NoteId>,
+}
+
+impl NotePathIndex {
+    /// Creates an empty lookup index.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns the resolved relative path for a unique note ID.
+    #[must_use]
+    pub fn get(&self, note_id: &NoteId) -> Option<&RelativePath> {
+        self.paths_by_id.get(note_id)
+    }
+
+    /// Inserts a note ID to path mapping, marking duplicate IDs as ambiguous.
+    pub fn insert(&mut self, note_id: NoteId, relative_path: RelativePath) {
+        if self.ambiguous_ids.contains(&note_id) {
+            return;
+        }
+
+        match self.paths_by_id.get(&note_id) {
+            None => {
+                self.paths_by_id.insert(note_id, relative_path);
+            }
+            Some(existing_path) if existing_path == &relative_path => {}
+            Some(_) => {
+                let removed_note_id = note_id.clone();
+                let _ = self.paths_by_id.remove(&removed_note_id);
+                let _ = self.ambiguous_ids.insert(note_id);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Result of building a reusable note-path lookup index.
+pub struct NotePathIndexBuild {
+    /// Unique note-id to path mappings that can be reused by callers.
+    pub index: NotePathIndex,
+    /// Non-fatal diagnostics emitted while skipping malformed notes.
+    pub diagnostics: Vec<ScanDiagnostic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,78 +121,15 @@ pub fn scan_vault(
     let file_set = scan_vault_files(vault_root, config)?;
     let mut notes = Vec::new();
     let mut diagnostics = file_set.diagnostics;
+    let mut frontmatter_parse_failures = Vec::new();
 
     for candidate in &file_set.notes {
-        let original_bytes =
-            fs::read(&candidate.absolute_path).map_err(|source| VaultError::Io {
-                path: candidate.absolute_path.clone(),
-                source,
-            })?;
-        let content_hash = ContentHash::from_bytes(&original_bytes);
-
-        match parse_note_file(&candidate.absolute_path) {
-            Ok(raw_document) => {
-                let body_analysis = analyze_body(&raw_document.body_markdown);
-                let plan = plan_normalization_with_body_analysis(
-                    &raw_document,
-                    candidate,
-                    config,
-                    &body_analysis,
-                );
-                diagnostics.extend(plan.diagnostics.clone());
-
-                if raw_document.frontmatter.is_none() && !config.allow_insert_frontmatter {
-                    notes.push(NormalizationResult {
-                        relative_path: candidate.relative_path.clone(),
-                        plan,
-                        frontmatter: None,
-                        document: None,
-                        content_hash,
-                    });
-                    continue;
-                }
-
-                let normalization_context = NormalizationContext {
-                    relative_path: &candidate.relative_path,
-                    body_analysis: &body_analysis,
-                    config,
-                    is_immutable: candidate.is_immutable,
-                };
-                let raw_frontmatter = raw_document
-                    .frontmatter
-                    .unwrap_or_else(empty_raw_frontmatter);
-                let (normalized_frontmatter, normalize_diagnostics) =
-                    normalize_frontmatter(raw_frontmatter, &normalization_context);
-                diagnostics.extend(normalize_diagnostics);
-
-                let document = NoteDocument {
-                    frontmatter: normalized_frontmatter.clone(),
-                    body_markdown: raw_document.body_markdown,
-                };
-
-                notes.push(NormalizationResult {
-                    relative_path: candidate.relative_path.clone(),
-                    plan,
-                    frontmatter: Some(normalized_frontmatter),
-                    document: Some(document),
-                    content_hash,
-                });
-            }
-            Err(parse_error) => {
-                diagnostics.push(ScanDiagnostic {
-                    level: DiagnosticLevel::Error,
-                    path: candidate.relative_path.clone(),
-                    message: format!("failed to parse note during vault scan: {parse_error}"),
-                });
-                notes.push(NormalizationResult {
-                    relative_path: candidate.relative_path.clone(),
-                    plan: empty_plan(candidate.is_immutable),
-                    frontmatter: None,
-                    document: None,
-                    content_hash,
-                });
-            }
+        let note_scan = scan_note_candidate(candidate, config)?;
+        diagnostics.extend(note_scan.diagnostics);
+        if let Some(frontmatter_parse_failure) = note_scan.frontmatter_parse_failure {
+            frontmatter_parse_failures.push(frontmatter_parse_failure);
         }
+        notes.push(note_scan.note);
     }
 
     let duplicate_ids = collect_duplicate_ids(&notes);
@@ -151,8 +147,151 @@ pub fn scan_vault(
         notes,
         assets: file_set.assets,
         diagnostics,
+        frontmatter_parse_failures,
         duplicate_ids,
     })
+}
+
+/// Builds a reusable note-id lookup index without parsing note bodies.
+///
+/// # Errors
+///
+/// Returns [`VaultError`] when the vault walk itself cannot be established.
+pub fn build_note_path_index(
+    vault_root: &Path,
+    config: &EffectiveConfig,
+) -> Result<NotePathIndexBuild, VaultError> {
+    let file_set = scan_vault_files(vault_root, config)?;
+    let mut diagnostics = file_set.diagnostics;
+    let mut paths_by_id: BTreeMap<String, Vec<RelativePath>> = BTreeMap::new();
+
+    for candidate in &file_set.notes {
+        match parse_note_frontmatter(&candidate.absolute_path) {
+            Ok(Some(frontmatter)) => {
+                let Some(note_id) = frontmatter.id else {
+                    continue;
+                };
+                paths_by_id
+                    .entry(note_id.to_string())
+                    .or_default()
+                    .push(candidate.relative_path.clone());
+            }
+            Ok(None) => {}
+            Err(error) => diagnostics.push(note_path_index_error(candidate, &error)),
+        }
+    }
+
+    let mut index = NotePathIndex::new();
+    for (note_id_text, paths) in paths_by_id {
+        let note_id = NoteId::new(note_id_text.as_str());
+        let has_duplicates = paths.len() > 1;
+
+        for path in paths {
+            index.insert(note_id.clone(), path.clone());
+            if has_duplicates {
+                diagnostics.push(ScanDiagnostic {
+                    level: DiagnosticLevel::Error,
+                    path,
+                    message: format!("duplicate note id detected: {note_id}"),
+                });
+            }
+        }
+    }
+
+    Ok(NotePathIndexBuild { index, diagnostics })
+}
+
+struct NoteScanOutcome {
+    note: NormalizationResult,
+    diagnostics: Vec<ScanDiagnostic>,
+    frontmatter_parse_failure: Option<FrontmatterParseFailure>,
+}
+
+fn scan_note_candidate(
+    candidate: &NoteCandidate,
+    config: &EffectiveConfig,
+) -> Result<NoteScanOutcome, VaultError> {
+    let original_bytes = fs::read(&candidate.absolute_path).map_err(|source| VaultError::Io {
+        path: candidate.absolute_path.clone(),
+        source,
+    })?;
+    let content_hash = ContentHash::from_bytes(&original_bytes);
+
+    match parse_note_file(&candidate.absolute_path) {
+        Ok(raw_document) => {
+            let body_analysis = analyze_body(&raw_document.body_markdown);
+            let plan = plan_normalization_with_body_analysis(
+                &raw_document,
+                candidate,
+                config,
+                &body_analysis,
+            );
+            let mut diagnostics = plan.diagnostics.clone();
+
+            if raw_document.frontmatter.is_none() && !config.allow_insert_frontmatter {
+                return Ok(NoteScanOutcome {
+                    note: empty_normalization_result(candidate, content_hash, plan),
+                    diagnostics,
+                    frontmatter_parse_failure: None,
+                });
+            }
+
+            let normalization_context = NormalizationContext {
+                relative_path: &candidate.relative_path,
+                body_analysis: &body_analysis,
+                config,
+                is_immutable: candidate.is_immutable,
+            };
+            let raw_frontmatter = raw_document
+                .frontmatter
+                .unwrap_or_else(empty_raw_frontmatter);
+            let (normalized_frontmatter, normalize_diagnostics) =
+                normalize_frontmatter(raw_frontmatter, &normalization_context);
+            diagnostics.extend(normalize_diagnostics);
+
+            let document = NoteDocument {
+                frontmatter: normalized_frontmatter.clone(),
+                body_markdown: raw_document.body_markdown,
+            };
+
+            Ok(NoteScanOutcome {
+                note: NormalizationResult {
+                    relative_path: candidate.relative_path.clone(),
+                    plan,
+                    frontmatter: Some(normalized_frontmatter),
+                    document: Some(document),
+                    content_hash,
+                },
+                diagnostics,
+                frontmatter_parse_failure: None,
+            })
+        }
+        Err(VaultError::FrontmatterParse { path: _, source }) => Ok(NoteScanOutcome {
+            note: empty_normalization_result(
+                candidate,
+                content_hash,
+                empty_plan(candidate.is_immutable),
+            ),
+            diagnostics: Vec::new(),
+            frontmatter_parse_failure: Some(FrontmatterParseFailure {
+                path: candidate.relative_path.clone(),
+                message: source.to_string(),
+            }),
+        }),
+        Err(parse_error) => Ok(NoteScanOutcome {
+            note: empty_normalization_result(
+                candidate,
+                content_hash,
+                empty_plan(candidate.is_immutable),
+            ),
+            diagnostics: vec![ScanDiagnostic {
+                level: DiagnosticLevel::Error,
+                path: candidate.relative_path.clone(),
+                message: format!("failed to parse note during vault scan: {parse_error}"),
+            }],
+            frontmatter_parse_failure: None,
+        }),
+    }
 }
 
 /// Applies planned normalization to notes and writes only changed files.
@@ -214,7 +353,20 @@ pub fn apply_normalization(
         };
 
         let rendered_content =
-            render_note_file(&note_document.frontmatter, &note_document.body_markdown);
+            match render_note_file(&note_document.frontmatter, &note_document.body_markdown) {
+                Ok(rendered_content) => rendered_content,
+                Err(render_error) => {
+                    summary.files_errored += 1;
+                    summary.diagnostics.push(ScanDiagnostic {
+                        level: DiagnosticLevel::Error,
+                        path: note_result.relative_path.clone(),
+                        message: format!(
+                            "failed to render normalized note content: {render_error}"
+                        ),
+                    });
+                    continue;
+                }
+            };
         let target_path = resolve_note_path(vault_root, &note_result.relative_path);
         let current_bytes = match fs::read(&target_path) {
             Ok(bytes) => bytes,
@@ -262,6 +414,28 @@ fn empty_plan(is_immutable: bool) -> NormalizationPlan {
     }
 }
 
+fn note_path_index_error(candidate: &NoteCandidate, error: &VaultError) -> ScanDiagnostic {
+    ScanDiagnostic {
+        level: DiagnosticLevel::Error,
+        path: candidate.relative_path.clone(),
+        message: format!("failed to parse note while building note path index: {error}"),
+    }
+}
+
+fn empty_normalization_result(
+    candidate: &NoteCandidate,
+    content_hash: ContentHash,
+    plan: NormalizationPlan,
+) -> NormalizationResult {
+    NormalizationResult {
+        relative_path: candidate.relative_path.clone(),
+        plan,
+        frontmatter: None,
+        document: None,
+        content_hash,
+    }
+}
+
 fn collect_duplicate_ids(notes: &[NormalizationResult]) -> Vec<(NoteId, Vec<RelativePath>)> {
     let mut paths_by_id: BTreeMap<String, Vec<RelativePath>> = BTreeMap::new();
 
@@ -281,7 +455,7 @@ fn collect_duplicate_ids(notes: &[NormalizationResult]) -> Vec<(NoteId, Vec<Rela
             continue;
         }
         paths.sort_by(|left, right| left.as_str().cmp(right.as_str()));
-        duplicates.push((NoteId::from(id_text.as_str()), paths));
+        duplicates.push((NoteId::new(id_text.as_str()), paths));
     }
 
     duplicates

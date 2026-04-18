@@ -213,7 +213,7 @@ impl SyncStateRepo {
                 context: "list notes by sync status".to_string(),
             })?;
 
-        rows.map(|row| row.map(|note_id| NoteId::from(&note_id)))
+        rows.map(|row| row.map(|note_id| NoteId::new(&note_id)))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|source| IndexError::Sqlite {
                 source,
@@ -244,7 +244,7 @@ impl SyncStateRepo {
                 context: "list assets by sync status".to_string(),
             })?;
 
-        rows.map(|row| row.map(|asset_id| AssetId::from(&asset_id)))
+        rows.map(|row| row.map(|asset_id| AssetId::new(&asset_id)))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|source| IndexError::Sqlite {
                 source,
@@ -256,7 +256,7 @@ impl SyncStateRepo {
 fn decode_note_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSyncState> {
     let note_id = row.get::<_, String>(0)?;
     Ok(NoteSyncState {
-        item_id: NoteId::from(&note_id),
+        item_id: NoteId::new(&note_id),
         device_id: decode_device_id(row, 1)?,
         last_local_hash: decode_optional_content_hash(row, 2)?,
         last_synced_hash: decode_optional_content_hash(row, 3)?,
@@ -271,7 +271,7 @@ fn decode_note_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSyncS
 fn decode_asset_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssetSyncState> {
     let asset_id = row.get::<_, String>(0)?;
     Ok(AssetSyncState {
-        item_id: AssetId::from(&asset_id),
+        item_id: AssetId::new(&asset_id),
         device_id: decode_device_id(row, 1)?,
         last_local_hash: decode_optional_content_hash(row, 2)?,
         last_synced_hash: decode_optional_content_hash(row, 3)?,
@@ -285,7 +285,7 @@ fn decode_asset_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssetSyn
 
 fn decode_device_id(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<DeviceId> {
     row.get::<_, String>(column)
-        .map(|device_id| DeviceId::from(&device_id))
+        .map(|device_id| DeviceId::new(&device_id))
 }
 
 fn decode_optional_content_hash(
@@ -293,7 +293,7 @@ fn decode_optional_content_hash(
     column: usize,
 ) -> rusqlite::Result<Option<ContentHash>> {
     row.get::<_, Option<String>>(column)
-        .map(|value| value.as_deref().map(ContentHash::from))
+        .map(|value| value.as_deref().map(ContentHash::new))
 }
 
 fn encode_sync_status(status: SyncStatus) -> Result<String, IndexError> {
