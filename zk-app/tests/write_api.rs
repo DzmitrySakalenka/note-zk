@@ -49,6 +49,7 @@ fn roundtrip_create_then_update_changes_body() {
             frontmatter: None,
             body_markdown: Some("Updated body\n".to_string()),
         },
+        None,
     )
     .expect("update should succeed");
 
@@ -82,6 +83,7 @@ Existing body
             frontmatter: None,
             body_markdown: Some("body\n".to_string()),
         },
+        None,
     )
     .expect_err("missing note update should fail");
 
@@ -219,6 +221,7 @@ fn update_note_mismatched_frontmatter_id_returns_note_id_mismatch() {
             frontmatter: Some(sample_frontmatter(conflicting_id.as_str(), "Conflict")),
             body_markdown: None,
         },
+        None,
     )
     .expect_err("mismatched ids should fail");
 
@@ -233,4 +236,140 @@ fn update_note_mismatched_frontmatter_id_returns_note_id_mismatch() {
     let persisted = fs::read_to_string(vault_root.join("notes").join("mismatch.md"))
         .expect("read note after mismatch rejection");
     assert!(persisted.contains("title: Mismatch"));
+}
+
+#[test]
+fn batch_write_builds_note_path_index_once_for_many_updates() {
+    let root = unique_test_dir("write-api-batch-single-index");
+    let vault_root = root.join("vault");
+    let config = EffectiveConfig::default();
+
+    for note_index in 0..50 {
+        let note_id_text = format!("batch-single-index-{note_index:02}");
+        create_note(
+            &vault_root,
+            &config,
+            CreateNoteRequest {
+                path: RelativePath::new(&format!("notes/note-{note_index:02}.md")),
+                frontmatter: sample_frontmatter(&note_id_text, &format!("Note {note_index:02}")),
+                body_markdown: format!("Before {note_index:02}\n"),
+            },
+        )
+        .expect("seed note for batch update test");
+    }
+
+    let updates: Vec<_> = (0..20)
+        .map(|note_index| UpdateNoteRequest {
+            note_id: NoteId::from(&format!("batch-single-index-{note_index:02}")),
+            frontmatter: None,
+            body_markdown: Some(format!("After {note_index:02}\n")),
+        })
+        .collect();
+
+    let outcome = batch_write(
+        &vault_root,
+        &config,
+        BatchWriteRequest {
+            creates: vec![],
+            updates,
+        },
+    )
+    .expect("batch write should succeed");
+
+    assert!(outcome.created.is_empty());
+    assert_eq!(outcome.updated.len(), 20);
+    assert!(outcome.failures.is_empty());
+    #[cfg(debug_assertions)]
+    assert_eq!(outcome.note_path_index_builds, 1);
+
+    for note_index in 0..20 {
+        let parsed = parse_note_file(
+            &vault_root
+                .join("notes")
+                .join(format!("note-{note_index:02}.md")),
+        )
+        .expect("parse updated note after batch");
+        assert_eq!(parsed.body_markdown, format!("After {note_index:02}\n"));
+    }
+}
+
+#[test]
+fn batch_write_can_update_note_created_earlier_in_same_batch() {
+    let root = unique_test_dir("write-api-batch-create-then-update");
+    let vault_root = root.join("vault");
+    let config = EffectiveConfig::default();
+    let note_id = NoteId::from("01BATCHCREATEUPDATE00000001");
+    fs::create_dir_all(&vault_root).expect("create vault root for batch test");
+
+    let outcome = batch_write(
+        &vault_root,
+        &config,
+        BatchWriteRequest {
+            creates: vec![CreateNoteRequest {
+                path: RelativePath::new("notes/new.md"),
+                frontmatter: sample_frontmatter(note_id.as_str(), "Created Then Updated"),
+                body_markdown: "Created body\n".to_string(),
+            }],
+            updates: vec![UpdateNoteRequest {
+                note_id: note_id.clone(),
+                frontmatter: None,
+                body_markdown: Some("Updated in batch\n".to_string()),
+            }],
+        },
+    )
+    .expect("batch write should succeed");
+
+    assert_eq!(outcome.created, vec![note_id.clone()]);
+    assert_eq!(outcome.updated, vec![note_id.clone()]);
+    assert!(outcome.failures.is_empty());
+
+    let parsed =
+        parse_note_file(&vault_root.join("notes").join("new.md")).expect("parse created note");
+    assert_eq!(parsed.body_markdown, "Updated in batch\n");
+}
+
+#[test]
+fn update_note_duplicate_id_returns_note_not_found() {
+    let root = unique_test_dir("write-api-duplicate-id");
+    let vault_root = root.join("vault");
+    let config = EffectiveConfig::default();
+    let duplicate_id = NoteId::from("01WRITEAPIDUPLICATE0000001");
+
+    create_note(
+        &vault_root,
+        &config,
+        CreateNoteRequest {
+            path: RelativePath::new("notes/first.md"),
+            frontmatter: sample_frontmatter(duplicate_id.as_str(), "First"),
+            body_markdown: "first\n".to_string(),
+        },
+    )
+    .expect("create first duplicate note");
+    create_note(
+        &vault_root,
+        &config,
+        CreateNoteRequest {
+            path: RelativePath::new("notes/second.md"),
+            frontmatter: sample_frontmatter(duplicate_id.as_str(), "Second"),
+            body_markdown: "second\n".to_string(),
+        },
+    )
+    .expect("create second duplicate note");
+
+    let err = update_note(
+        &vault_root,
+        &config,
+        UpdateNoteRequest {
+            note_id: duplicate_id.clone(),
+            frontmatter: None,
+            body_markdown: Some("should not write\n".to_string()),
+        },
+        None,
+    )
+    .expect_err("duplicate id should not resolve to an arbitrary note");
+
+    assert!(matches!(
+        err,
+        AppError::NoteNotFound { note_id } if note_id == duplicate_id
+    ));
 }

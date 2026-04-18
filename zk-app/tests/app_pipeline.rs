@@ -220,6 +220,7 @@ immutable = true
             frontmatter: None,
             body_markdown: Some("After update\n".to_string()),
         },
+        None,
     )
     .expect("update note should succeed");
 

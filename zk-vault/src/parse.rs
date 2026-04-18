@@ -26,14 +26,7 @@ pub struct BodyAnalysis {
 /// when bytes are not valid UTF-8 text, and [`VaultError::FrontmatterParse`]
 /// when a detected frontmatter block contains invalid YAML.
 pub fn parse_note_file(path: &Path) -> Result<RawNoteDocument, VaultError> {
-    let file_bytes = fs::read(path).map_err(|source| VaultError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let file_content = String::from_utf8(file_bytes).map_err(|source| VaultError::Utf8Decode {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let file_content = read_note_text(path)?;
 
     let Some((raw_yaml, body_markdown)) = split_frontmatter_sections(&file_content) else {
         return Ok(RawNoteDocument {
@@ -44,13 +37,7 @@ pub fn parse_note_file(path: &Path) -> Result<RawNoteDocument, VaultError> {
         });
     };
 
-    let parsed_frontmatter =
-        serde_yaml::from_str::<RawNoteFrontmatter>(raw_yaml).map_err(|source| {
-            VaultError::FrontmatterParse {
-                path: path.to_path_buf(),
-                source,
-            }
-        })?;
+    let parsed_frontmatter = parse_raw_frontmatter_yaml(path, raw_yaml)?;
 
     Ok(RawNoteDocument {
         frontmatter: Some(parsed_frontmatter),
@@ -58,6 +45,18 @@ pub fn parse_note_file(path: &Path) -> Result<RawNoteDocument, VaultError> {
         body_markdown: body_markdown.to_string(),
         has_frontmatter_delimiters: true,
     })
+}
+
+pub(crate) fn parse_note_frontmatter(
+    path: &Path,
+) -> Result<Option<RawNoteFrontmatter>, VaultError> {
+    let file_content = read_note_text(path)?;
+    let Some((raw_yaml, _)) = split_frontmatter_sections(&file_content) else {
+        return Ok(None);
+    };
+
+    let parsed_frontmatter = parse_raw_frontmatter_yaml(path, raw_yaml)?;
+    Ok(Some(parsed_frontmatter))
 }
 
 #[must_use]
@@ -73,6 +72,29 @@ pub fn detect_mermaid(body: &str) -> bool {
 #[must_use]
 pub fn analyze_body(body: &str) -> BodyAnalysis {
     analyze_body_internal(body)
+}
+
+fn read_note_text(path: &Path) -> Result<String, VaultError> {
+    let file_bytes = fs::read(path).map_err(|source| VaultError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    String::from_utf8(file_bytes).map_err(|source| VaultError::Utf8Decode {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn parse_raw_frontmatter_yaml(
+    path: &Path,
+    raw_yaml: &str,
+) -> Result<RawNoteFrontmatter, VaultError> {
+    serde_yaml::from_str::<RawNoteFrontmatter>(raw_yaml).map_err(|source| {
+        VaultError::FrontmatterParse {
+            path: path.to_path_buf(),
+            source,
+        }
+    })
 }
 
 fn split_frontmatter_sections(file_content: &str) -> Option<(&str, &str)> {

@@ -23,8 +23,8 @@ pub use parse::{
     BodyAnalysis, RawNoteDocument, analyze_body, detect_mermaid, extract_first_h1, parse_note_file,
 };
 pub use pipeline::{
-    FrontmatterParseFailure, NormalizationResult, NormalizationSummary, VaultScanResult,
-    apply_normalization, scan_vault,
+    FrontmatterParseFailure, NormalizationResult, NormalizationSummary, NotePathIndex,
+    NotePathIndexBuild, VaultScanResult, apply_normalization, build_note_path_index, scan_vault,
 };
 pub use scan::{AssetCandidate, NoteCandidate, VaultFileSet, scan_vault_files};
 pub use serialize::{render_note_file, serialize_frontmatter};
