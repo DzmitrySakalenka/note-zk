@@ -15,7 +15,7 @@ use zk_vault::{
 
 #[test]
 fn build_note_inputs_populates_links_and_roundtrips_frontmatter() {
-    let note_id = NoteId::from("01TESTNOTEID00000000000000");
+    let note_id = NoteId::new("01TESTNOTEID00000000000000");
     let frontmatter = note_frontmatter(&note_id, "Bridge Note");
     let scan_result = VaultScanResult {
         notes: vec![normalization_result(
@@ -38,7 +38,7 @@ fn build_note_inputs_populates_links_and_roundtrips_frontmatter() {
             ResolvedNoteLink {
                 source_note_id: note_id.clone(),
                 raw_target: "Existing Note".to_string(),
-                target_note_id: Some(NoteId::from("01TARGETNOTEID000000000000")),
+                target_note_id: Some(NoteId::new("01TARGETNOTEID000000000000")),
                 link_text: Some("Existing".to_string()),
                 is_ambiguous: false,
             },
@@ -97,14 +97,14 @@ fn build_note_inputs_populates_links_and_roundtrips_frontmatter() {
 
 #[test]
 fn build_note_inputs_omits_notes_without_document() {
-    let note_id = NoteId::from("01NODOCNOTEID00000000000000");
+    let note_id = NoteId::new("01NODOCNOTEID00000000000000");
     let scan_result = VaultScanResult {
         notes: vec![NormalizationResult {
             relative_path: RelativePath::new("notes/no-document.md"),
             plan: empty_plan(),
             frontmatter: None,
             document: None,
-            content_hash: ContentHash::from("hash-no-document"),
+            content_hash: ContentHash::new("hash-no-document"),
         }],
         assets: Vec::new(),
         diagnostics: vec![ScanDiagnostic {
@@ -123,7 +123,7 @@ fn build_note_inputs_omits_notes_without_document() {
 
 #[test]
 fn build_note_inputs_omits_duplicate_note_ids() {
-    let note_id = NoteId::from("01DUPLICATENOTEID0000000000");
+    let note_id = NoteId::new("01DUPLICATENOTEID0000000000");
     let frontmatter = note_frontmatter(&note_id, "Duplicate Note");
     let scan_result = VaultScanResult {
         notes: vec![normalization_result(
@@ -259,7 +259,7 @@ fn note_frontmatter(note_id: &NoteId, title: &str) -> NoteFrontmatter {
         updated: None,
         source: Some("https://example.com/source".to_string()),
         status: Some("draft".to_string()),
-        sources: vec![NoteId::from("01SOURCENOTEID000000000000")],
+        sources: vec![NoteId::new("01SOURCENOTEID000000000000")],
         extra: BTreeMap::new(),
     }
 }
@@ -278,7 +278,7 @@ fn normalization_result(
             frontmatter,
             body_markdown: body_markdown.to_string(),
         }),
-        content_hash: ContentHash::from(content_hash),
+        content_hash: ContentHash::new(content_hash),
     }
 }
 

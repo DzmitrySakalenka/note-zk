@@ -14,7 +14,7 @@ use zk_vault::parse_note_file;
 
 fn sample_frontmatter(id: &str, title: &str) -> NoteFrontmatter {
     NoteFrontmatter {
-        id: NoteId::from(id),
+        id: NoteId::new(id),
         title: title.to_string(),
         tags: vec!["tg8".to_string()],
         note_type: None,
@@ -32,7 +32,7 @@ fn sample_frontmatter(id: &str, title: &str) -> NoteFrontmatter {
 fn roundtrip_create_then_update_changes_body() {
     let root = unique_test_dir("write-api-roundtrip");
     let vault_root = root.join("vault");
-    let note_id = NoteId::from("01WRITEAPI0000000000000001");
+    let note_id = NoteId::new("01WRITEAPI0000000000000001");
     let create_request = CreateNoteRequest {
         path: RelativePath::new("notes/roundtrip.md"),
         frontmatter: sample_frontmatter(note_id.as_str(), "Roundtrip"),
@@ -79,7 +79,7 @@ Existing body
         &vault_root,
         &config,
         UpdateNoteRequest {
-            note_id: NoteId::from("01MISSING00000000000000001"),
+            note_id: NoteId::new("01MISSING00000000000000001"),
             frontmatter: None,
             body_markdown: Some("body\n".to_string()),
         },
@@ -98,7 +98,7 @@ fn batch_write_two_creates_and_one_update_reports_expected_counts() {
     let root = unique_test_dir("write-api-batch-counts");
     let vault_root = root.join("vault");
     let config = EffectiveConfig::default();
-    let existing_id = NoteId::from("01EXISTINGWRITEAPI0000000001");
+    let existing_id = NoteId::new("01EXISTINGWRITEAPI0000000001");
     create_note(
         &vault_root,
         &config,
@@ -110,8 +110,8 @@ fn batch_write_two_creates_and_one_update_reports_expected_counts() {
     )
     .expect("seed existing note");
 
-    let first_created_id = NoteId::from("01BATCHCREATEA0000000000001");
-    let second_created_id = NoteId::from("01BATCHCREATEB0000000000001");
+    let first_created_id = NoteId::new("01BATCHCREATEA0000000000001");
+    let second_created_id = NoteId::new("01BATCHCREATEB0000000000001");
     let outcome = batch_write(
         &vault_root,
         &config,
@@ -161,8 +161,8 @@ fn batch_write_immutable_middle_create_records_failure_and_keeps_earlier_success
         ..EffectiveConfig::default()
     };
 
-    let first_id = NoteId::from("01BATCHOK000000000000000001");
-    let blocked_id = NoteId::from("01BATCHBLOCKED000000000001");
+    let first_id = NoteId::new("01BATCHOK000000000000000001");
+    let blocked_id = NoteId::new("01BATCHBLOCKED000000000001");
     let outcome = batch_write(
         &vault_root,
         &config,
@@ -201,7 +201,7 @@ fn update_note_mismatched_frontmatter_id_returns_note_id_mismatch() {
     let root = unique_test_dir("write-api-note-id-mismatch");
     let vault_root = root.join("vault");
     let config = EffectiveConfig::default();
-    let original_id = NoteId::from("01WRITEAPIMISMATCH000000001");
+    let original_id = NoteId::new("01WRITEAPIMISMATCH000000001");
 
     create_note(
         &vault_root,
@@ -214,7 +214,7 @@ fn update_note_mismatched_frontmatter_id_returns_note_id_mismatch() {
     )
     .expect("create note for mismatch test");
 
-    let conflicting_id = NoteId::from("01WRITEAPIMISMATCH000000002");
+    let conflicting_id = NoteId::new("01WRITEAPIMISMATCH000000002");
     let err = update_note(
         &vault_root,
         &config,
@@ -262,7 +262,7 @@ fn batch_write_builds_note_path_index_once_for_many_updates() {
 
     let updates: Vec<_> = (0..20)
         .map(|note_index| UpdateNoteRequest {
-            note_id: NoteId::from(&format!("batch-single-index-{note_index:02}")),
+            note_id: NoteId::new(&format!("batch-single-index-{note_index:02}")),
             frontmatter: None,
             body_markdown: Some(format!("After {note_index:02}\n")),
         })
@@ -300,7 +300,7 @@ fn batch_write_can_update_note_created_earlier_in_same_batch() {
     let root = unique_test_dir("write-api-batch-create-then-update");
     let vault_root = root.join("vault");
     let config = EffectiveConfig::default();
-    let note_id = NoteId::from("01BATCHCREATEUPDATE00000001");
+    let note_id = NoteId::new("01BATCHCREATEUPDATE00000001");
     fs::create_dir_all(&vault_root).expect("create vault root for batch test");
 
     let outcome = batch_write(
@@ -335,7 +335,7 @@ fn update_note_duplicate_id_returns_note_not_found() {
     let root = unique_test_dir("write-api-duplicate-id");
     let vault_root = root.join("vault");
     let config = EffectiveConfig::default();
-    let duplicate_id = NoteId::from("01WRITEAPIDUPLICATE0000001");
+    let duplicate_id = NoteId::new("01WRITEAPIDUPLICATE0000001");
 
     create_note(
         &vault_root,

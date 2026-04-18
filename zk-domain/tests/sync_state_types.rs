@@ -8,8 +8,8 @@ use zk_domain::sync_state::{AssetSyncState, DeleteRecord, DeviceRecord, NoteSync
 
 fn sample_note_sync_state() -> NoteSyncState {
     NoteSyncState {
-        item_id: NoteId::from("01HZ3NOTE000000000000000A"),
-        device_id: DeviceId::from("device-alpha"),
+        item_id: NoteId::new("01HZ3NOTE000000000000000A"),
+        device_id: DeviceId::new("device-alpha"),
         last_local_hash: Some(ContentHash::from_bytes(b"local content")),
         last_synced_hash: Some(ContentHash::from_bytes(b"synced content")),
         last_known_server_revision: Some(ServerRevision::new(5)),
@@ -124,8 +124,8 @@ fn note_sync_state_different_status_not_equal() {
 
 fn sample_asset_sync_state() -> AssetSyncState {
     AssetSyncState {
-        item_id: AssetId::from("01HZ3ASSET00000000000000A"),
-        device_id: DeviceId::from("device-beta"),
+        item_id: AssetId::new("01HZ3ASSET00000000000000A"),
+        device_id: DeviceId::new("device-beta"),
         last_local_hash: Some(ContentHash::from_bytes(b"asset bytes")),
         last_synced_hash: Some(ContentHash::from_bytes(b"asset bytes")),
         last_known_server_revision: Some(ServerRevision::new(3)),
@@ -190,7 +190,7 @@ fn asset_sync_state_clone_and_eq() {
 fn asset_sync_state_different_asset_id_not_equal() {
     let a = sample_asset_sync_state();
     let b = AssetSyncState {
-        item_id: AssetId::from("01HZ3ASSET00000000000000B"),
+        item_id: AssetId::new("01HZ3ASSET00000000000000B"),
         ..sample_asset_sync_state()
     };
     assert_ne!(a, b);
@@ -224,7 +224,7 @@ fn note_and_asset_sync_states_have_parallel_structure() {
 
 fn sample_device_record() -> DeviceRecord {
     DeviceRecord {
-        device_id: DeviceId::from("device-alpha"),
+        device_id: DeviceId::new("device-alpha"),
         device_name: "MacBook Pro".to_string(),
         platform: Some("macos".to_string()),
         app_version: Some("0.1.0".to_string()),

@@ -56,7 +56,7 @@ fn build_note_path_index_indexes_only_notes_with_ids() {
     let build = build_note_path_index(vault_root, &config).expect("index build should succeed");
 
     assert_eq!(
-        build.index.get(&NoteId::from("01INDEXWITHID0000000000001")),
+        build.index.get(&NoteId::new("01INDEXWITHID0000000000001")),
         Some(&RelativePath::new("notes/with-id.md"))
     );
     assert!(build.diagnostics.is_empty());
@@ -88,7 +88,7 @@ fn build_note_path_index_skips_invalid_yaml_and_records_diagnostic() {
     let build = build_note_path_index(vault_root, &config).expect("index build should succeed");
 
     assert_eq!(
-        build.index.get(&NoteId::from("01INDEXVALID00000000000001")),
+        build.index.get(&NoteId::new("01INDEXVALID00000000000001")),
         Some(&RelativePath::new("notes/valid.md"))
     );
     assert!(
@@ -149,12 +149,12 @@ fn build_note_path_index_excludes_duplicate_ids_from_resolution() {
     let build = build_note_path_index(vault_root, &config).expect("index build should succeed");
 
     assert_eq!(
-        build.index.get(&NoteId::from("01INDEXDUPLICATE0000000001")),
+        build.index.get(&NoteId::new("01INDEXDUPLICATE0000000001")),
         None,
         "duplicate ids must not resolve to an arbitrary path"
     );
     assert_eq!(
-        build.index.get(&NoteId::from("01INDEXUNIQUE000000000001")),
+        build.index.get(&NoteId::new("01INDEXUNIQUE000000000001")),
         Some(&RelativePath::new("notes/unique.md"))
     );
 

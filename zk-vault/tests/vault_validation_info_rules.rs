@@ -42,7 +42,7 @@ fn empty_plan() -> NormalizationPlan {
 
 fn frontmatter_with(id: &str, title: &str, tags: &[&str]) -> NoteFrontmatter {
     NoteFrontmatter {
-        id: NoteId::from(id),
+        id: NoteId::new(id),
         title: title.to_string(),
         tags: tags.iter().map(ToString::to_string).collect(),
         note_type: None,

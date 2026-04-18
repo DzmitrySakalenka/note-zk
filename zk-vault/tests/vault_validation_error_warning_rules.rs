@@ -27,7 +27,7 @@ fn empty_plan() -> NormalizationPlan {
 
 fn frontmatter_with(id: &str, title: &str) -> NoteFrontmatter {
     NoteFrontmatter {
-        id: NoteId::from(id),
+        id: NoteId::new(id),
         title: title.to_string(),
         tags: vec!["tag".to_string()],
         note_type: None,
@@ -151,7 +151,7 @@ fn duplicate_id_rule_emits_one_error_per_duplicate_path() {
             ),
         ],
         vec![(
-            NoteId::from("01DUPLICATEID00000000000001"),
+            NoteId::new("01DUPLICATEID00000000000001"),
             duplicate_paths.clone(),
         )],
     );

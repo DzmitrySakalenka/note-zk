@@ -13,23 +13,23 @@ use zk_index::{
 };
 
 fn alpha_note_id() -> NoteId {
-    NoteId::from("01HZ3NOTE000000000000000A")
+    NoteId::new("01HZ3NOTE000000000000000A")
 }
 
 fn beta_note_id() -> NoteId {
-    NoteId::from("01HZ3NOTE000000000000000B")
+    NoteId::new("01HZ3NOTE000000000000000B")
 }
 
 fn gamma_note_id() -> NoteId {
-    NoteId::from("01HZ3NOTE000000000000000C")
+    NoteId::new("01HZ3NOTE000000000000000C")
 }
 
 fn existing_asset_id() -> AssetId {
-    AssetId::from("01HZ3ASSET00000000000000A")
+    AssetId::new("01HZ3ASSET00000000000000A")
 }
 
 fn second_existing_asset_id() -> AssetId {
-    AssetId::from("01HZ3ASSET00000000000000B")
+    AssetId::new("01HZ3ASSET00000000000000B")
 }
 
 fn sample_note_inputs() -> Vec<NoteInput> {
@@ -38,7 +38,7 @@ fn sample_note_inputs() -> Vec<NoteInput> {
             note_id: alpha_note_id(),
             path: RelativePath::new("notes/alpha.md"),
             title: "Alpha".to_string(),
-            content_hash: ContentHash::from(
+            content_hash: ContentHash::new(
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             ),
             frontmatter_json: r#"{"id":"01HZ3NOTE000000000000000A","title":"Alpha"}"#.to_string(),
@@ -77,7 +77,7 @@ fn sample_note_inputs() -> Vec<NoteInput> {
             note_id: beta_note_id(),
             path: RelativePath::new("notes/beta.md"),
             title: "Beta".to_string(),
-            content_hash: ContentHash::from(
+            content_hash: ContentHash::new(
                 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             ),
             frontmatter_json: r#"{"id":"01HZ3NOTE000000000000000B","title":"Beta"}"#.to_string(),
@@ -93,7 +93,7 @@ fn sample_note_inputs() -> Vec<NoteInput> {
             note_id: gamma_note_id(),
             path: RelativePath::new("notes/gamma.md"),
             title: "Gamma".to_string(),
-            content_hash: ContentHash::from(
+            content_hash: ContentHash::new(
                 "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
             ),
             frontmatter_json: r#"{"id":"01HZ3NOTE000000000000000C","title":"Gamma"}"#.to_string(),
@@ -112,7 +112,7 @@ fn sample_asset_inputs() -> Vec<AssetInput> {
     vec![
         AssetInput {
             path: RelativePath::new("assets/diagram.png"),
-            content_hash: ContentHash::from(
+            content_hash: ContentHash::new(
                 "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
             ),
             mime_type: Some("image/png".to_string()),
@@ -120,7 +120,7 @@ fn sample_asset_inputs() -> Vec<AssetInput> {
         },
         AssetInput {
             path: RelativePath::new("assets/report.pdf"),
-            content_hash: ContentHash::from(
+            content_hash: ContentHash::new(
                 "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             ),
             mime_type: Some("application/pdf".to_string()),
@@ -139,7 +139,7 @@ fn asset_record(
     AssetRecord {
         asset_id,
         current_path: RelativePath::new(path),
-        content_hash: ContentHash::from(hash),
+        content_hash: ContentHash::new(hash),
         mime_type: Some("image/png".to_string()),
         size_bytes: 2048,
         created_at: created_at.to_string(),
@@ -155,7 +155,7 @@ fn asset_record(
 fn note_sync_state(note_id: NoteId) -> NoteSyncState {
     NoteSyncState {
         item_id: note_id,
-        device_id: DeviceId::from("device-alpha"),
+        device_id: DeviceId::new("device-alpha"),
         last_local_hash: Some(ContentHash::from_bytes(b"note local hash")),
         last_synced_hash: Some(ContentHash::from_bytes(b"note synced hash")),
         last_known_server_revision: Some(ServerRevision::new(5)),
@@ -169,7 +169,7 @@ fn note_sync_state(note_id: NoteId) -> NoteSyncState {
 fn asset_sync_state(asset_id: AssetId) -> AssetSyncState {
     AssetSyncState {
         item_id: asset_id,
-        device_id: DeviceId::from("device-beta"),
+        device_id: DeviceId::new("device-beta"),
         last_local_hash: Some(ContentHash::from_bytes(b"asset local hash")),
         last_synced_hash: Some(ContentHash::from_bytes(b"asset synced hash")),
         last_known_server_revision: Some(ServerRevision::new(7)),
@@ -182,7 +182,7 @@ fn asset_sync_state(asset_id: AssetId) -> AssetSyncState {
 
 fn device_record() -> DeviceRecord {
     DeviceRecord {
-        device_id: DeviceId::from("device-alpha"),
+        device_id: DeviceId::new("device-alpha"),
         device_name: "MacBook Pro".to_string(),
         platform: Some("macos".to_string()),
         app_version: Some("0.1.0".to_string()),
@@ -352,7 +352,7 @@ fn asset_path_match_retains_existing_asset_id() {
         &[],
         &[AssetInput {
             path: RelativePath::new("assets/diagram.png"),
-            content_hash: ContentHash::from(
+            content_hash: ContentHash::new(
                 "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
             ),
             mime_type: Some("image/png".to_string()),
@@ -368,7 +368,7 @@ fn asset_path_match_retains_existing_asset_id() {
     assert_eq!(actual.asset_id, existing_asset_id());
     assert_eq!(
         actual.content_hash,
-        ContentHash::from("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+        ContentHash::new("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
     );
     assert_eq!(actual.created_at, "2026-04-01T08:00:00Z");
     assert!(actual.updated_at.as_str() > "2026-04-02T09:00:00Z");
@@ -392,7 +392,7 @@ fn asset_hash_match_retains_existing_asset_id_after_path_change() {
         &[],
         &[AssetInput {
             path: RelativePath::new("assets/new-diagram.png"),
-            content_hash: ContentHash::from(
+            content_hash: ContentHash::new(
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             ),
             mime_type: Some("image/png".to_string()),
@@ -431,7 +431,7 @@ fn new_asset_gets_fresh_asset_id() {
         &[],
         &[AssetInput {
             path: RelativePath::new("assets/new.png"),
-            content_hash: ContentHash::from(
+            content_hash: ContentHash::new(
                 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             ),
             mime_type: Some("image/png".to_string()),
@@ -456,7 +456,7 @@ fn rebuild_updates_note_content_hash_on_second_run() {
     rebuild_index(&mut connection, &notes, &[]).expect("first rebuild should succeed");
 
     notes[0].content_hash =
-        ContentHash::from("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        ContentHash::new("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
     rebuild_index(&mut connection, &notes, &[]).expect("second rebuild should succeed");
 
     let actual = NoteRepo::get_note(&connection, &alpha_note_id())
@@ -464,7 +464,7 @@ fn rebuild_updates_note_content_hash_on_second_run() {
         .expect("alpha note should exist");
     assert_eq!(
         actual.content_hash,
-        ContentHash::from("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+        ContentHash::new("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
     );
 }
 
@@ -523,10 +523,10 @@ fn rebuild_preserves_stale_base_rows_but_rebuilds_only_current_derived_rows() {
     ensure_schema(&connection).expect("schema should be ready");
     NoteRepo::upsert_note(
         &connection,
-        &NoteId::from("01HZ3NOTE00000000000000ZZ"),
+        &NoteId::new("01HZ3NOTE00000000000000ZZ"),
         &RelativePath::new("notes/stale.md"),
         "Stale",
-        &ContentHash::from("9999999999999999999999999999999999999999999999999999999999999999"),
+        &ContentHash::new("9999999999999999999999999999999999999999999999999999999999999999"),
         r#"{"id":"01HZ3NOTE00000000000000ZZ","title":"Stale"}"#,
         "2026-04-01T00:00:00Z",
         "2026-04-01T00:00:00Z",
@@ -534,15 +534,15 @@ fn rebuild_preserves_stale_base_rows_but_rebuilds_only_current_derived_rows() {
     .expect("stale note upsert should succeed");
     NoteRepo::replace_tags(
         &connection,
-        &NoteId::from("01HZ3NOTE00000000000000ZZ"),
+        &NoteId::new("01HZ3NOTE00000000000000ZZ"),
         &["stale".to_string()],
     )
     .expect("stale tag replacement should succeed");
     LinkRepo::replace_note_links(
         &connection,
-        &NoteId::from("01HZ3NOTE00000000000000ZZ"),
+        &NoteId::new("01HZ3NOTE00000000000000ZZ"),
         &[ResolvedNoteLink {
-            source_note_id: NoteId::from("01HZ3NOTE00000000000000ZZ"),
+            source_note_id: NoteId::new("01HZ3NOTE00000000000000ZZ"),
             raw_target: "Old".to_string(),
             target_note_id: None,
             link_text: None,
@@ -552,9 +552,9 @@ fn rebuild_preserves_stale_base_rows_but_rebuilds_only_current_derived_rows() {
     .expect("stale link replacement should succeed");
     AssetRepo::replace_asset_references(
         &connection,
-        &NoteId::from("01HZ3NOTE00000000000000ZZ"),
+        &NoteId::new("01HZ3NOTE00000000000000ZZ"),
         &[AssetReference {
-            source_note_id: NoteId::from("01HZ3NOTE00000000000000ZZ"),
+            source_note_id: NoteId::new("01HZ3NOTE00000000000000ZZ"),
             raw_path: "assets/stale.png".to_string(),
             target_asset_id: None,
         }],
@@ -580,24 +580,24 @@ fn rebuild_preserves_stale_base_rows_but_rebuilds_only_current_derived_rows() {
     .expect("rebuild should succeed");
 
     assert!(
-        NoteRepo::get_note(&connection, &NoteId::from("01HZ3NOTE00000000000000ZZ"))
+        NoteRepo::get_note(&connection, &NoteId::new("01HZ3NOTE00000000000000ZZ"))
             .expect("stale note query should succeed")
             .is_some()
     );
     assert_eq!(table_count(&connection, "assets_index"), 3);
     assert_eq!(
-        NoteRepo::get_tags(&connection, &NoteId::from("01HZ3NOTE00000000000000ZZ"))
+        NoteRepo::get_tags(&connection, &NoteId::new("01HZ3NOTE00000000000000ZZ"))
             .expect("stale tag query should succeed"),
         Vec::<String>::new()
     );
     assert_eq!(
-        LinkRepo::get_note_links(&connection, &NoteId::from("01HZ3NOTE00000000000000ZZ"))
+        LinkRepo::get_note_links(&connection, &NoteId::new("01HZ3NOTE00000000000000ZZ"))
             .expect("stale link query should succeed")
             .len(),
         0
     );
     assert_eq!(
-        AssetRepo::get_asset_references(&connection, &NoteId::from("01HZ3NOTE00000000000000ZZ"))
+        AssetRepo::get_asset_references(&connection, &NoteId::new("01HZ3NOTE00000000000000ZZ"))
             .expect("stale asset-reference query should succeed")
             .len(),
         0
@@ -626,7 +626,7 @@ fn new_asset_timestamps_are_initialized_and_known_asset_timestamps_are_preserved
         &[
             AssetInput {
                 path: RelativePath::new("assets/existing.png"),
-                content_hash: ContentHash::from(
+                content_hash: ContentHash::new(
                     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 ),
                 mime_type: Some("image/png".to_string()),
@@ -634,7 +634,7 @@ fn new_asset_timestamps_are_initialized_and_known_asset_timestamps_are_preserved
             },
             AssetInput {
                 path: RelativePath::new("assets/new.png"),
-                content_hash: ContentHash::from(
+                content_hash: ContentHash::new(
                     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                 ),
                 mime_type: Some("image/png".to_string()),
@@ -678,7 +678,7 @@ fn existing_asset_updated_at_bumps_only_on_hash_path_or_size_change() {
         &[],
         &[AssetInput {
             path: RelativePath::new("assets/existing.png"),
-            content_hash: ContentHash::from(
+            content_hash: ContentHash::new(
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             ),
             mime_type: Some("application/octet-stream".to_string()),
@@ -698,7 +698,7 @@ fn existing_asset_updated_at_bumps_only_on_hash_path_or_size_change() {
         &[],
         &[AssetInput {
             path: RelativePath::new("assets/existing.png"),
-            content_hash: ContentHash::from(
+            content_hash: ContentHash::new(
                 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             ),
             mime_type: Some("application/octet-stream".to_string()),
@@ -713,7 +713,7 @@ fn existing_asset_updated_at_bumps_only_on_hash_path_or_size_change() {
     assert!(hash_changed.updated_at > unchanged.updated_at);
     assert_eq!(
         hash_changed.content_hash,
-        ContentHash::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        ContentHash::new("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
     );
 
     thread::sleep(Duration::from_millis(1));
@@ -722,7 +722,7 @@ fn existing_asset_updated_at_bumps_only_on_hash_path_or_size_change() {
         &[],
         &[AssetInput {
             path: RelativePath::new("assets/renamed.png"),
-            content_hash: ContentHash::from(
+            content_hash: ContentHash::new(
                 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             ),
             mime_type: Some("application/octet-stream".to_string()),

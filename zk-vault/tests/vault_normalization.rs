@@ -85,7 +85,7 @@ fn normalize_injects_missing_id_with_deterministic_generator() {
         is_immutable: false,
     };
 
-    let generated_id = NoteId::from("01HARD-CODED-ID-FOR-TEST");
+    let generated_id = NoteId::new("01HARD-CODED-ID-FOR-TEST");
     let (normalized, diagnostics) =
         normalize_frontmatter_with_id_generator(raw, &context, || generated_id.clone());
 
@@ -98,7 +98,7 @@ fn normalize_injects_missing_id_with_deterministic_generator() {
 
 #[test]
 fn normalize_preserves_existing_id_without_id_injection_diagnostic() {
-    let existing_id = NoteId::from("01EXISTINGIDVALUE1234567890");
+    let existing_id = NoteId::new("01EXISTINGIDVALUE1234567890");
     let mut raw = raw_frontmatter();
     raw.id = Some(existing_id.clone());
     raw.title = Some("Stable Title".to_string());
@@ -130,7 +130,7 @@ fn normalize_preserves_existing_id_without_id_injection_diagnostic() {
 #[test]
 fn normalize_uses_frontmatter_title_over_h1_and_filename() {
     let mut raw = raw_frontmatter();
-    raw.id = Some(NoteId::from("01A"));
+    raw.id = Some(NoteId::new("01A"));
     raw.title = Some("Frontmatter Title".to_string());
     raw.tags = vec!["rust".to_string()];
 
@@ -156,7 +156,7 @@ fn normalize_uses_frontmatter_title_over_h1_and_filename() {
 #[test]
 fn normalize_derives_title_from_h1_when_frontmatter_title_is_missing() {
     let mut raw = raw_frontmatter();
-    raw.id = Some(NoteId::from("01B"));
+    raw.id = Some(NoteId::new("01B"));
     raw.tags = vec!["rust".to_string()];
 
     let relative_path = RelativePath::new("notes/file-name.md");
@@ -185,7 +185,7 @@ fn normalize_derives_title_from_h1_when_frontmatter_title_is_missing() {
 #[test]
 fn normalize_derives_title_from_filename_when_h1_is_missing() {
     let mut raw = raw_frontmatter();
-    raw.id = Some(NoteId::from("01C"));
+    raw.id = Some(NoteId::new("01C"));
     raw.tags = vec!["rust".to_string()];
 
     let relative_path = RelativePath::new("deep/my_file-name.md");
@@ -210,7 +210,7 @@ fn normalize_derives_title_from_filename_when_h1_is_missing() {
 #[test]
 fn normalize_derives_title_from_filename_when_h1_derivation_disabled() {
     let mut raw = raw_frontmatter();
-    raw.id = Some(NoteId::from("01D"));
+    raw.id = Some(NoteId::new("01D"));
     raw.tags = vec!["rust".to_string()];
 
     let relative_path = RelativePath::new("notes/h1_is_ignored.md");
@@ -236,7 +236,7 @@ fn normalize_derives_title_from_filename_when_h1_derivation_disabled() {
 #[test]
 fn normalize_emits_info_diagnostic_for_untagged_default() {
     let mut raw = raw_frontmatter();
-    raw.id = Some(NoteId::from("01E"));
+    raw.id = Some(NoteId::new("01E"));
     raw.title = Some("Tagged".to_string());
     raw.tags = vec!["untagged".to_string()];
 
@@ -345,7 +345,7 @@ fn plan_does_not_emit_normalization_info_diagnostics_for_normalizable_notes() {
 #[test]
 fn plan_detects_field_reorder_when_yaml_key_order_is_non_canonical() {
     let mut raw = raw_frontmatter();
-    raw.id = Some(NoteId::from("01ORDER"));
+    raw.id = Some(NoteId::new("01ORDER"));
     raw.title = Some("Order".to_string());
     raw.tags = vec!["rust".to_string()];
 
@@ -373,7 +373,7 @@ fn normalize_preserves_non_required_fields_and_extra_map() {
     raw.updated = Some("2026-04-13T10:05:00Z".to_string());
     raw.source = Some("https://example.com".to_string());
     raw.status = Some("active".to_string());
-    raw.sources = vec![NoteId::from("01SOURCE")];
+    raw.sources = vec![NoteId::new("01SOURCE")];
     raw.extra
         .insert("custom_flag".to_string(), serde_yaml::Value::Bool(true));
 
@@ -390,7 +390,7 @@ fn normalize_preserves_non_required_fields_and_extra_map() {
         is_immutable: false,
     };
 
-    let generated_id = NoteId::from("01GENERATED");
+    let generated_id = NoteId::new("01GENERATED");
     let (normalized, _diagnostics) =
         normalize_frontmatter_with_id_generator(raw, &context, || generated_id.clone());
 
@@ -403,7 +403,7 @@ fn normalize_preserves_non_required_fields_and_extra_map() {
     assert_eq!(normalized.updated, Some("2026-04-13T10:05:00Z".to_string()));
     assert_eq!(normalized.source, Some("https://example.com".to_string()));
     assert_eq!(normalized.status, Some("active".to_string()));
-    assert_eq!(normalized.sources, vec![NoteId::from("01SOURCE")]);
+    assert_eq!(normalized.sources, vec![NoteId::new("01SOURCE")]);
     assert_eq!(
         normalized.extra.get("custom_flag"),
         Some(&serde_yaml::Value::Bool(true))

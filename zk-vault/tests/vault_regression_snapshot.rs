@@ -69,7 +69,7 @@ fn normalize_fixture_output(
     let raw_frontmatter = parsed.frontmatter.unwrap_or_else(default_raw_frontmatter);
     let (normalized_frontmatter, _diagnostics) =
         normalize_frontmatter_with_id_generator(raw_frontmatter, &context, || {
-            NoteId::from("01FIXEDSNAPSHOTTESTID0000000001")
+            NoteId::new("01FIXEDSNAPSHOTTESTID0000000001")
         });
 
     render_note_file(&normalized_frontmatter, &parsed.body_markdown)
@@ -85,7 +85,7 @@ fn full_frontmatter_fixture() -> NoteFrontmatter {
     extra.insert("custom_beta".to_string(), serde_yaml::Value::Bool(true));
 
     NoteFrontmatter {
-        id: NoteId::from("01FULLSNAPSHOTNOTEID0000000001"),
+        id: NoteId::new("01FULLSNAPSHOTNOTEID0000000001"),
         title: "Full Snapshot".to_string(),
         tags: vec!["rust".to_string(), "project/zk".to_string()],
         note_type: Some("concept".to_string()),
@@ -95,8 +95,8 @@ fn full_frontmatter_fixture() -> NoteFrontmatter {
         source: Some("source_ref".to_string()),
         status: Some("active".to_string()),
         sources: vec![
-            NoteId::from("01SOURCEA000000000000000001"),
-            NoteId::from("01SOURCEB000000000000000002"),
+            NoteId::new("01SOURCEA000000000000000001"),
+            NoteId::new("01SOURCEB000000000000000002"),
         ],
         extra,
     }
@@ -104,7 +104,7 @@ fn full_frontmatter_fixture() -> NoteFrontmatter {
 
 fn minimal_frontmatter_fixture() -> NoteFrontmatter {
     NoteFrontmatter {
-        id: NoteId::from("01MINIMALSNAPSHOTNOTEID000001"),
+        id: NoteId::new("01MINIMALSNAPSHOTNOTEID000001"),
         title: "Minimal Snapshot".to_string(),
         tags: vec!["rust".to_string()],
         note_type: None,
@@ -204,7 +204,7 @@ fn snapshot_normalize_preserves_unknown_keys_and_appends_them() {
 #[test]
 fn normalize_already_normalized_output_is_identical_to_input() {
     let frontmatter = NoteFrontmatter {
-        id: NoteId::from("01ALREADYNORMALIZEDSNAPSHOT0001"),
+        id: NoteId::new("01ALREADYNORMALIZEDSNAPSHOT0001"),
         title: "Already Normalized".to_string(),
         tags: vec!["rust".to_string()],
         note_type: None,

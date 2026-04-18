@@ -9,7 +9,7 @@ use zk_domain::note::{NoteDocument, NoteFrontmatter, NoteRecord};
 
 fn sample_frontmatter() -> NoteFrontmatter {
     NoteFrontmatter {
-        id: NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMP"),
+        id: NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP"),
         title: "Knowledge Graph Basics".to_string(),
         tags: vec!["graph".to_string(), "rust".to_string()],
         note_type: Some("concept".to_string()),
@@ -45,7 +45,7 @@ fn frontmatter_optional_fields() {
 #[test]
 fn frontmatter_sources_for_wiki_provenance() {
     let fm = NoteFrontmatter {
-        sources: vec![NoteId::from("01AAA"), NoteId::from("01BBB")],
+        sources: vec![NoteId::new("01AAA"), NoteId::new("01BBB")],
         ..sample_frontmatter()
     };
     assert_eq!(fm.sources.len(), 2);
@@ -55,7 +55,7 @@ fn frontmatter_sources_for_wiki_provenance() {
 #[test]
 fn frontmatter_minimal_with_defaults() {
     let fm = NoteFrontmatter {
-        id: NoteId::from("01MINIMAL"),
+        id: NoteId::new("01MINIMAL"),
         title: "Minimal Note".to_string(),
         tags: vec!["untagged".to_string()],
         note_type: None,
@@ -95,7 +95,7 @@ fn frontmatter_yaml_roundtrip_full() {
 #[test]
 fn frontmatter_yaml_roundtrip_minimal() {
     let fm = NoteFrontmatter {
-        id: NoteId::from("01MINIMAL"),
+        id: NoteId::new("01MINIMAL"),
         title: "Minimal".to_string(),
         tags: vec!["untagged".to_string()],
         note_type: None,
@@ -149,7 +149,7 @@ title: "No Tags"
 #[test]
 fn frontmatter_serialize_tags_always_as_list() {
     let fm = NoteFrontmatter {
-        id: NoteId::from("01TEST"),
+        id: NoteId::new("01TEST"),
         title: "Test".to_string(),
         tags: vec!["single".to_string()],
         note_type: None,
@@ -300,7 +300,7 @@ type: concept
 #[test]
 fn frontmatter_type_field_serializes_as_type() {
     let fm = NoteFrontmatter {
-        id: NoteId::from("01TEST"),
+        id: NoteId::new("01TEST"),
         title: "Test".to_string(),
         tags: vec!["test".to_string()],
         note_type: Some("concept".to_string()),
@@ -365,7 +365,7 @@ fn note_document_body_is_not_serialized_to_yaml() {
 
 fn sample_record() -> NoteRecord {
     NoteRecord {
-        note_id: NoteId::from("01HZ3KQBFG9T2R5XJ4N8VW6YMP"),
+        note_id: NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP"),
         current_path: RelativePath::new("notes/knowledge-graph.md"),
         content_hash: ContentHash::from_bytes(b"sample content"),
         created_at: "2026-04-02T10:00:00Z".to_string(),
@@ -433,7 +433,7 @@ fn note_record_with_deleted_state() {
 #[test]
 fn note_record_with_editor_device() {
     let rec = NoteRecord {
-        last_editor_device_id: Some(DeviceId::from("device-macbook")),
+        last_editor_device_id: Some(DeviceId::new("device-macbook")),
         ..sample_record()
     };
     assert_eq!(

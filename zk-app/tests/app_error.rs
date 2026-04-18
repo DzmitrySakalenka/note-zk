@@ -63,14 +63,14 @@ fn preserves_app_owned_payloads() {
         path: RelativePath::new("raw/source.md"),
     };
     let not_found = AppError::NoteNotFound {
-        note_id: NoteId::from("01TESTNOTEID00000000000000"),
+        note_id: NoteId::new("01TESTNOTEID00000000000000"),
     };
     let path_exists = AppError::NotePathExists {
         path: RelativePath::new("notes/existing.md"),
     };
     let id_mismatch = AppError::NoteIdMismatch {
-        request_note_id: NoteId::from("01REQUESTNOTEID000000000000"),
-        frontmatter_note_id: NoteId::from("01FRONTMATTERID00000000000"),
+        request_note_id: NoteId::new("01REQUESTNOTEID000000000000"),
+        frontmatter_note_id: NoteId::new("01FRONTMATTERID00000000000"),
     };
 
     assert!(matches!(

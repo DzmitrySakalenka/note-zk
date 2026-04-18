@@ -15,7 +15,7 @@ where
 
 fn sample_frontmatter(id: &str, title: &str) -> NoteFrontmatter {
     NoteFrontmatter {
-        id: NoteId::from(id),
+        id: NoteId::new(id),
         title: title.to_string(),
         tags: vec!["tg8".to_string()],
         note_type: Some("note".to_string()),
@@ -24,7 +24,7 @@ fn sample_frontmatter(id: &str, title: &str) -> NoteFrontmatter {
         updated: Some("2026-04-17T00:00:00Z".to_string()),
         source: Some("https://example.com".to_string()),
         status: Some("draft".to_string()),
-        sources: vec![NoteId::from("01SOURCE000000000000000001")],
+        sources: vec![NoteId::new("01SOURCE000000000000000001")],
         extra: BTreeMap::default(),
     }
 }
@@ -54,7 +54,7 @@ fn create_note_request_serde_roundtrip() {
 #[test]
 fn update_note_request_serde_roundtrip() {
     let request = UpdateNoteRequest {
-        note_id: NoteId::from("01UPDATE000000000000000001"),
+        note_id: NoteId::new("01UPDATE000000000000000001"),
         frontmatter: Some(sample_frontmatter("01UPDATE000000000000000001", "Updated")),
         body_markdown: Some("# Updated\n\nNew body\n".to_string()),
     };
@@ -75,7 +75,7 @@ fn batch_write_request_serde_roundtrip() {
             body_markdown: "A body".to_string(),
         }],
         updates: vec![UpdateNoteRequest {
-            note_id: NoteId::from("01BATCH000000000000000002"),
+            note_id: NoteId::new("01BATCH000000000000000002"),
             frontmatter: None,
             body_markdown: Some("Updated body".to_string()),
         }],

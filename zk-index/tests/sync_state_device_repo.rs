@@ -6,27 +6,27 @@ use zk_domain::{
 use zk_index::{DeviceRepo, SyncStateRepo, ensure_schema, open_memory};
 
 fn note_id() -> NoteId {
-    NoteId::from("01HZ3NOTE000000000000000A")
+    NoteId::new("01HZ3NOTE000000000000000A")
 }
 
 fn second_note_id() -> NoteId {
-    NoteId::from("01HZ3NOTE000000000000000B")
+    NoteId::new("01HZ3NOTE000000000000000B")
 }
 
 fn asset_id() -> AssetId {
-    AssetId::from("01HZ3ASSET00000000000000A")
+    AssetId::new("01HZ3ASSET00000000000000A")
 }
 
 fn second_asset_id() -> AssetId {
-    AssetId::from("01HZ3ASSET00000000000000B")
+    AssetId::new("01HZ3ASSET00000000000000B")
 }
 
 fn device_id() -> DeviceId {
-    DeviceId::from("device-alpha")
+    DeviceId::new("device-alpha")
 }
 
 fn second_device_id() -> DeviceId {
-    DeviceId::from("device-beta")
+    DeviceId::new("device-beta")
 }
 
 fn sample_note_sync_state() -> NoteSyncState {
@@ -122,7 +122,7 @@ fn list_notes_by_sync_status_filters_and_orders_ids() {
     SyncStateRepo::upsert_note_sync_state(
         &connection,
         &NoteSyncState {
-            item_id: NoteId::from("01HZ3NOTE000000000000000C"),
+            item_id: NoteId::new("01HZ3NOTE000000000000000C"),
             sync_status: SyncStatus::PendingUpload,
             pending_operation: Some(PendingOperation::Update),
             ..sample_note_sync_state()
@@ -135,8 +135,8 @@ fn list_notes_by_sync_status_filters_and_orders_ids() {
     assert_eq!(
         actual,
         vec![
-            NoteId::from("01HZ3NOTE000000000000000B"),
-            NoteId::from("01HZ3NOTE000000000000000C")
+            NoteId::new("01HZ3NOTE000000000000000B"),
+            NoteId::new("01HZ3NOTE000000000000000C")
         ]
     );
 }
@@ -160,7 +160,7 @@ fn list_assets_by_sync_status_filters_and_orders_ids() {
     SyncStateRepo::upsert_asset_sync_state(
         &connection,
         &AssetSyncState {
-            item_id: AssetId::from("01HZ3ASSET00000000000000C"),
+            item_id: AssetId::new("01HZ3ASSET00000000000000C"),
             sync_status: SyncStatus::Error,
             last_sync_error: Some("server rejected upload".to_string()),
             ..sample_asset_sync_state()
@@ -173,8 +173,8 @@ fn list_assets_by_sync_status_filters_and_orders_ids() {
     assert_eq!(
         actual,
         vec![
-            AssetId::from("01HZ3ASSET00000000000000B"),
-            AssetId::from("01HZ3ASSET00000000000000C")
+            AssetId::new("01HZ3ASSET00000000000000B"),
+            AssetId::new("01HZ3ASSET00000000000000C")
         ]
     );
 }

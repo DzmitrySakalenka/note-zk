@@ -12,7 +12,7 @@ use zk_vault::{
 };
 
 fn note_id(value: &str) -> NoteId {
-    NoteId::from(value)
+    NoteId::new(value)
 }
 
 fn write_text_file(path: &Path, content: &str) {

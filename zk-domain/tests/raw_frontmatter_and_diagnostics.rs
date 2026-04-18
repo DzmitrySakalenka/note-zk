@@ -20,7 +20,7 @@ fn raw_frontmatter_allows_missing_id() {
 fn raw_frontmatter_allows_missing_title() {
     let raw = parse_frontmatter("id: 01J7ABCDEF1234567890ABCDEF\ntags:\n  - rust\n");
 
-    assert_eq!(raw.id, Some(NoteId::from("01J7ABCDEF1234567890ABCDEF")));
+    assert_eq!(raw.id, Some(NoteId::new("01J7ABCDEF1234567890ABCDEF")));
     assert_eq!(raw.title, None);
     assert_eq!(raw.tags, vec!["rust".to_string()]);
 }
@@ -64,7 +64,7 @@ sources:
 "#;
     let raw = parse_frontmatter(yaml);
 
-    assert_eq!(raw.id, Some(NoteId::from("01J7ABCDEF1234567890ABCDEF")));
+    assert_eq!(raw.id, Some(NoteId::new("01J7ABCDEF1234567890ABCDEF")));
     assert_eq!(raw.title, Some("Example Note".to_string()));
     assert_eq!(
         raw.tags,
@@ -79,8 +79,8 @@ sources:
     assert_eq!(
         raw.sources,
         vec![
-            NoteId::from("01J7SOURCE0000000000000001"),
-            NoteId::from("01J7SOURCE0000000000000002")
+            NoteId::new("01J7SOURCE0000000000000001"),
+            NoteId::new("01J7SOURCE0000000000000002")
         ]
     );
 }

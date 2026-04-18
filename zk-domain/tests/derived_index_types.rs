@@ -7,9 +7,9 @@ use zk_domain::id::{AssetId, NoteId};
 
 fn sample_resolved_link() -> ResolvedNoteLink {
     ResolvedNoteLink {
-        source_note_id: NoteId::from("01HZ3NOTE000000000000000A"),
+        source_note_id: NoteId::new("01HZ3NOTE000000000000000A"),
         raw_target: "Some Other Note".to_string(),
-        target_note_id: Some(NoteId::from("01HZ3NOTE000000000000000B")),
+        target_note_id: Some(NoteId::new("01HZ3NOTE000000000000000B")),
         link_text: Some("alias text".to_string()),
         is_ambiguous: false,
     }
@@ -100,7 +100,7 @@ fn resolved_note_link_different_target_not_equal() {
 
 fn sample_external_link() -> ExternalLink {
     ExternalLink {
-        source_note_id: NoteId::from("01HZ3NOTE000000000000000A"),
+        source_note_id: NoteId::new("01HZ3NOTE000000000000000A"),
         url: "https://example.com/article".to_string(),
         link_text: Some("Example Article".to_string()),
     }
@@ -146,9 +146,9 @@ fn external_link_different_url_not_equal() {
 
 fn sample_asset_reference() -> AssetReference {
     AssetReference {
-        source_note_id: NoteId::from("01HZ3NOTE000000000000000A"),
+        source_note_id: NoteId::new("01HZ3NOTE000000000000000A"),
         raw_path: "./assets/diagram.png".to_string(),
-        target_asset_id: Some(AssetId::from("01HZ3ASSET00000000000000A")),
+        target_asset_id: Some(AssetId::new("01HZ3ASSET00000000000000A")),
     }
 }
 
@@ -197,7 +197,7 @@ fn asset_reference_different_path_not_equal() {
 
 fn sample_parsed_note_index() -> ParsedNoteIndex {
     ParsedNoteIndex {
-        note_id: NoteId::from("01HZ3NOTE000000000000000A"),
+        note_id: NoteId::new("01HZ3NOTE000000000000000A"),
         title: "Example Note".to_string(),
         tags: vec!["project/foo".to_string(), "type/concept".to_string()],
         aliases: vec!["Example Alias".to_string()],
@@ -252,7 +252,7 @@ fn parsed_note_index_multiple_links() {
     let link_a = sample_resolved_link();
     let link_b = ResolvedNoteLink {
         raw_target: "Another Note".to_string(),
-        target_note_id: Some(NoteId::from("01HZ3NOTE000000000000000C")),
+        target_note_id: Some(NoteId::new("01HZ3NOTE000000000000000C")),
         link_text: None,
         is_ambiguous: false,
         ..sample_resolved_link()

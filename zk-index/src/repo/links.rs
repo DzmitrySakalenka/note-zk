@@ -207,9 +207,9 @@ fn decode_note_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<ResolvedNoteLin
     let target_note_id = row.get::<_, Option<String>>(2)?;
 
     Ok(ResolvedNoteLink {
-        source_note_id: NoteId::from(&source_note_id),
+        source_note_id: NoteId::new(&source_note_id),
         raw_target: row.get(1)?,
-        target_note_id: target_note_id.as_deref().map(NoteId::from),
+        target_note_id: target_note_id.as_deref().map(NoteId::new),
         link_text: row.get(3)?,
         is_ambiguous: false,
     })
@@ -219,7 +219,7 @@ fn decode_external_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<ExternalLin
     let source_note_id = row.get::<_, String>(0)?;
 
     Ok(ExternalLink {
-        source_note_id: NoteId::from(&source_note_id),
+        source_note_id: NoteId::new(&source_note_id),
         url: row.get(1)?,
         link_text: row.get(2)?,
     })

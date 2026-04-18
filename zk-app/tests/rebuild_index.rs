@@ -14,8 +14,8 @@ use zk_index::{NoteRepo, open_memory};
 fn rebuild_index_orchestrates_scan_bridge_and_rebuild_idempotently() {
     let root = unique_test_dir("rebuild-index");
     let vault_root = root.join("vault");
-    let source_id = NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-    let target_id = NoteId::from("01ARZ3NDEKTSV4RRFFQ69G5FAW");
+    let source_id = NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    let target_id = NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAW");
 
     write_text(
         &vault_root.join("source.md"),
@@ -158,7 +158,7 @@ Body content
     assert_eq!(generated_id.len(), 26);
     assert!(generated_id.chars().all(|ch| ch.is_ascii_alphanumeric()));
 
-    let indexed_note = NoteRepo::get_note(&conn, &NoteId::from(&generated_id))
+    let indexed_note = NoteRepo::get_note(&conn, &NoteId::new(&generated_id))
         .expect("lookup note by generated id")
         .expect("note should be indexed under generated id");
     assert_eq!(

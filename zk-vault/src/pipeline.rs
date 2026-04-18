@@ -183,7 +183,7 @@ pub fn build_note_path_index(
 
     let mut index = NotePathIndex::new();
     for (note_id_text, paths) in paths_by_id {
-        let note_id = NoteId::from(note_id_text.as_str());
+        let note_id = NoteId::new(note_id_text.as_str());
         let has_duplicates = paths.len() > 1;
 
         for path in paths {
@@ -455,7 +455,7 @@ fn collect_duplicate_ids(notes: &[NormalizationResult]) -> Vec<(NoteId, Vec<Rela
             continue;
         }
         paths.sort_by(|left, right| left.as_str().cmp(right.as_str()));
-        duplicates.push((NoteId::from(id_text.as_str()), paths));
+        duplicates.push((NoteId::new(id_text.as_str()), paths));
     }
 
     duplicates

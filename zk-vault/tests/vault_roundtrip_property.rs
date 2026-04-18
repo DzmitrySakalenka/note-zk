@@ -51,7 +51,7 @@ impl ArbitraryFrontmatter {
         }
 
         NoteFrontmatter {
-            id: NoteId::from(self.id.as_str()),
+            id: NoteId::new(self.id.as_str()),
             title: self.title,
             tags: self.tags,
             note_type: self.note_type,
@@ -63,7 +63,7 @@ impl ArbitraryFrontmatter {
             sources: self
                 .sources
                 .into_iter()
-                .map(|value| NoteId::from(value.as_str()))
+                .map(|value| NoteId::new(value.as_str()))
                 .collect(),
             extra,
         }
@@ -78,7 +78,7 @@ impl ArbitraryHostileFrontmatter {
         }
 
         NoteFrontmatter {
-            id: NoteId::from(self.id.as_str()),
+            id: NoteId::new(self.id.as_str()),
             title: self.title,
             tags: self.tags,
             note_type: self.note_type,
@@ -90,7 +90,7 @@ impl ArbitraryHostileFrontmatter {
             sources: self
                 .sources
                 .into_iter()
-                .map(|value| NoteId::from(value.as_str()))
+                .map(|value| NoteId::new(value.as_str()))
                 .collect(),
             extra,
         }
@@ -257,7 +257,7 @@ fn roundtrip_preserves_data(original_frontmatter: NoteFrontmatter) -> bool {
     };
     let (normalized_frontmatter, _diagnostics) =
         normalize_frontmatter_with_id_generator(raw_frontmatter, &context, || {
-            NoteId::from("01UNUSEDPROPERTYGENERATORID0001")
+            NoteId::new("01UNUSEDPROPERTYGENERATORID0001")
         });
     let normalized_serialized = serialize_frontmatter(&normalized_frontmatter)
         .expect("normalized frontmatter should serialize");

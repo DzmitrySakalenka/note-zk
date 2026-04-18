@@ -18,7 +18,7 @@ use zk_index::{NoteRepo, open_memory};
 
 fn sample_frontmatter(note_id: &str, title: &str) -> NoteFrontmatter {
     NoteFrontmatter {
-        id: NoteId::from(note_id),
+        id: NoteId::new(note_id),
         title: title.to_string(),
         tags: vec!["tg8".to_string()],
         note_type: None,
@@ -196,7 +196,7 @@ immutable = true
     let config = bootstrap_effective_config(&vault_root, &CliOverrides::default(), &env)
         .expect("bootstrap effective config");
 
-    let note_id = NoteId::from("01B6S01M2YQWZ6K2H8M7V1QY9A");
+    let note_id = NoteId::new("01B6S01M2YQWZ6K2H8M7V1QY9A");
     create_note(
         &vault_root,
         &config,

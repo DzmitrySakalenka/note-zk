@@ -14,7 +14,7 @@ use zk_vault::parse_note_file;
 
 fn sample_frontmatter(id: &str, title: &str) -> NoteFrontmatter {
     NoteFrontmatter {
-        id: NoteId::from(id),
+        id: NoteId::new(id),
         title: title.to_string(),
         tags: vec!["tg8".to_string()],
         note_type: None,
@@ -78,7 +78,7 @@ fn empty_frontmatter_id_triggers_ulid_generation() {
 fn caller_supplied_id_is_preserved_verbatim() {
     let root = unique_test_dir("create-note-preserve-id");
     let vault_root = root.join("vault");
-    let supplied_id = NoteId::from("01SUPPLIED0000000000000001");
+    let supplied_id = NoteId::new("01SUPPLIED0000000000000001");
     let request = CreateNoteRequest {
         path: RelativePath::new("notes/preserved.md"),
         frontmatter: sample_frontmatter(supplied_id.as_str(), "Preserved Id"),

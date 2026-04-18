@@ -11,7 +11,7 @@ macro_rules! impl_string_newtype {
     ($name:ident) => {
         impl $name {
             /// Creates an identifier wrapper from an existing string value.
-            pub fn from(s: &str) -> Self {
+            pub fn new(s: &str) -> Self {
                 Self(s.to_string())
             }
 
@@ -44,7 +44,7 @@ macro_rules! impl_generated_string_newtype {
             }
 
             /// Creates an identifier wrapper from an existing string value.
-            pub fn from(s: &str) -> Self {
+            pub fn new(s: &str) -> Self {
                 Self(s.to_string())
             }
 

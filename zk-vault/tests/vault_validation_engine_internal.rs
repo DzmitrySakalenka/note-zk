@@ -113,7 +113,7 @@ fn sample_note(path: &str) -> NormalizationResult {
 
 fn sample_note_with_document(path: &str, id: &str, title: &str, body: &str) -> NormalizationResult {
     let frontmatter = zk_domain::note::NoteFrontmatter {
-        id: zk_domain::id::NoteId::from(id),
+        id: zk_domain::id::NoteId::new(id),
         title: title.to_string(),
         tags: vec!["tg8".to_string()],
         note_type: None,

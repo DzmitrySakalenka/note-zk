@@ -2,7 +2,7 @@ use rusqlite::{Connection, Transaction};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use zk_domain::{
     asset::AssetRecord,
-    id::{AssetId, RelativePath, ServerRevision},
+    id::{AssetId, ServerRevision},
 };
 
 use crate::{AssetInput, AssetRepo, LinkRepo, NoteInput, NoteRepo, error::IndexError};
@@ -178,6 +178,3 @@ fn current_timestamp_utc() -> Result<String, IndexError> {
             context: "format current asset timestamp".to_string(),
         })
 }
-
-#[allow(dead_code)]
-fn _assert_relative_path_clone(_: &RelativePath) {}
