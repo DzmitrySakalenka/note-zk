@@ -1,30 +1,35 @@
 use zk_domain::note::NoteFrontmatter;
 
-#[must_use]
-pub fn serialize_frontmatter(frontmatter: &NoteFrontmatter) -> String {
+/// Serializes canonical note frontmatter into the workspace YAML form.
+///
+/// # Errors
+///
+/// Returns [`serde_yaml::Error`] if any frontmatter value cannot be serialized
+/// into YAML.
+pub fn serialize_frontmatter(frontmatter: &NoteFrontmatter) -> Result<String, serde_yaml::Error> {
     let mut output = String::new();
 
-    push_yaml_scalar_line(&mut output, "id", &frontmatter.id.to_string());
-    push_yaml_scalar_line(&mut output, "title", &frontmatter.title);
-    push_yaml_string_list(&mut output, "tags", &frontmatter.tags);
+    push_yaml_scalar_line(&mut output, "id", &frontmatter.id.to_string())?;
+    push_yaml_scalar_line(&mut output, "title", &frontmatter.title)?;
+    push_yaml_string_list(&mut output, "tags", &frontmatter.tags)?;
 
     if let Some(note_type) = &frontmatter.note_type {
-        push_yaml_scalar_line(&mut output, "type", note_type);
+        push_yaml_scalar_line(&mut output, "type", note_type)?;
     }
     if !frontmatter.aliases.is_empty() {
-        push_yaml_string_list(&mut output, "aliases", &frontmatter.aliases);
+        push_yaml_string_list(&mut output, "aliases", &frontmatter.aliases)?;
     }
     if let Some(created) = &frontmatter.created {
-        push_yaml_scalar_line(&mut output, "created", created);
+        push_yaml_scalar_line(&mut output, "created", created)?;
     }
     if let Some(updated) = &frontmatter.updated {
-        push_yaml_scalar_line(&mut output, "updated", updated);
+        push_yaml_scalar_line(&mut output, "updated", updated)?;
     }
     if let Some(source) = &frontmatter.source {
-        push_yaml_scalar_line(&mut output, "source", source);
+        push_yaml_scalar_line(&mut output, "source", source)?;
     }
     if let Some(status) = &frontmatter.status {
-        push_yaml_scalar_line(&mut output, "status", status);
+        push_yaml_scalar_line(&mut output, "status", status)?;
     }
     if !frontmatter.sources.is_empty() {
         let source_values: Vec<String> = frontmatter
@@ -32,19 +37,27 @@ pub fn serialize_frontmatter(frontmatter: &NoteFrontmatter) -> String {
             .iter()
             .map(ToString::to_string)
             .collect();
-        push_yaml_string_list(&mut output, "sources", &source_values);
+        push_yaml_string_list(&mut output, "sources", &source_values)?;
     }
 
     for (key, value) in &frontmatter.extra {
-        push_yaml_extra_value(&mut output, key, value);
+        push_yaml_extra_value(&mut output, key, value)?;
     }
 
-    output
+    Ok(output)
 }
 
-#[must_use]
-pub fn render_note_file(frontmatter: &NoteFrontmatter, body: &str) -> String {
-    let serialized_frontmatter = serialize_frontmatter(frontmatter);
+/// Renders a full note file with YAML frontmatter and markdown body.
+///
+/// # Errors
+///
+/// Returns [`serde_yaml::Error`] if the frontmatter cannot be serialized into
+/// YAML.
+pub fn render_note_file(
+    frontmatter: &NoteFrontmatter,
+    body: &str,
+) -> Result<String, serde_yaml::Error> {
+    let serialized_frontmatter = serialize_frontmatter(frontmatter)?;
     let mut output = String::new();
     output.push_str("---\n");
     output.push_str(&serialized_frontmatter);
@@ -55,26 +68,41 @@ pub fn render_note_file(frontmatter: &NoteFrontmatter, body: &str) -> String {
         output.push('\n');
     }
 
-    output
+    Ok(output)
 }
 
-fn push_yaml_scalar_line(output: &mut String, key: &str, value: &str) {
-    let serialized_value = sanitize_yaml_string_scalar(value);
+fn push_yaml_scalar_line(
+    output: &mut String,
+    key: &str,
+    value: &str,
+) -> Result<(), serde_yaml::Error> {
+    let serialized_value = sanitize_yaml_string_scalar(value)?;
     push_yaml_mapping_value(output, key, &serialized_value);
+    Ok(())
 }
 
-fn push_yaml_string_list(output: &mut String, key: &str, values: &[String]) {
+fn push_yaml_string_list(
+    output: &mut String,
+    key: &str,
+    values: &[String],
+) -> Result<(), serde_yaml::Error> {
     output.push_str(key);
     output.push_str(":\n");
     for value in values {
-        let serialized_value = sanitize_yaml_string_scalar(value);
+        let serialized_value = sanitize_yaml_string_scalar(value)?;
         push_yaml_list_item(output, &serialized_value);
     }
+    Ok(())
 }
 
-fn push_yaml_extra_value(output: &mut String, key: &str, value: &serde_yaml::Value) {
-    let serialized_value = sanitize_serde_yaml_value(value);
+fn push_yaml_extra_value(
+    output: &mut String,
+    key: &str,
+    value: &serde_yaml::Value,
+) -> Result<(), serde_yaml::Error> {
+    let serialized_value = sanitize_serde_yaml_value(value)?;
     push_yaml_mapping_value(output, key, &serialized_value);
+    Ok(())
 }
 
 fn push_yaml_mapping_value(output: &mut String, key: &str, serialized_value: &str) {
@@ -130,16 +158,16 @@ fn strip_leading_spaces(line: &str, spaces_to_strip: usize) -> &str {
     &line[prefix_len..]
 }
 
-fn sanitize_yaml_string_scalar(value: &str) -> String {
+fn sanitize_yaml_string_scalar(value: &str) -> Result<String, serde_yaml::Error> {
     sanitize_serde_yaml_value(&serde_yaml::Value::String(value.to_string()))
 }
 
-fn sanitize_serde_yaml_value(value: &serde_yaml::Value) -> String {
-    let serialized = serde_yaml::to_string(value).expect("extra value should serialize");
+fn sanitize_serde_yaml_value(value: &serde_yaml::Value) -> Result<String, serde_yaml::Error> {
+    let serialized = serde_yaml::to_string(value)?;
     let without_document_start = serialized
         .strip_prefix("---\n")
         .or_else(|| serialized.strip_prefix("---"))
         .unwrap_or(&serialized);
 
-    without_document_start.trim_end().to_string()
+    Ok(without_document_start.trim_end().to_string())
 }

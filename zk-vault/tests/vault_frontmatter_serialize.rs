@@ -95,7 +95,8 @@ fn line_index(content: &str, line: &str) -> usize {
 fn serialize_full_frontmatter_in_canonical_order_with_sorted_extra() {
     let frontmatter = sample_frontmatter_full_with_extra();
 
-    let serialized = serialize_frontmatter(&frontmatter);
+    let serialized =
+        serialize_frontmatter(&frontmatter).expect("full frontmatter should serialize");
 
     let expected = concat!(
         "id: 01FULLNOTEID0000000000000001\n",
@@ -125,7 +126,8 @@ fn serialize_full_frontmatter_in_canonical_order_with_sorted_extra() {
 fn serialize_minimal_frontmatter_contains_only_required_fields() {
     let frontmatter = sample_frontmatter_minimal();
 
-    let serialized = serialize_frontmatter(&frontmatter);
+    let serialized =
+        serialize_frontmatter(&frontmatter).expect("minimal frontmatter should serialize");
 
     let expected = concat!(
         "id: 01MINIMALNOTEID000000000001\n",
@@ -141,7 +143,8 @@ fn serialize_minimal_frontmatter_contains_only_required_fields() {
 fn serialize_omits_none_and_empty_optional_fields() {
     let frontmatter = sample_frontmatter_minimal();
 
-    let serialized = serialize_frontmatter(&frontmatter);
+    let serialized =
+        serialize_frontmatter(&frontmatter).expect("minimal frontmatter should serialize");
 
     assert!(!serialized.contains("type:"));
     assert!(!serialized.contains("aliases:"));
@@ -158,7 +161,8 @@ fn serialize_omits_none_and_empty_optional_fields() {
 fn serialize_lists_use_block_style_not_inline_style() {
     let frontmatter = sample_frontmatter_full_with_extra();
 
-    let serialized = serialize_frontmatter(&frontmatter);
+    let serialized =
+        serialize_frontmatter(&frontmatter).expect("full frontmatter should serialize");
 
     assert!(serialized.contains("tags:\n  - rust\n  - project/foo\n"));
     assert!(serialized.contains("aliases:\n  - Alias A\n  - Alias B\n"));
@@ -175,7 +179,8 @@ fn serialize_lists_use_block_style_not_inline_style() {
 fn serialize_places_extra_keys_after_known_fields_in_alphabetical_order() {
     let frontmatter = sample_frontmatter_full_with_extra();
 
-    let serialized = serialize_frontmatter(&frontmatter);
+    let serialized =
+        serialize_frontmatter(&frontmatter).expect("full frontmatter should serialize");
 
     let status_index = line_index(&serialized, "status: active");
     let sources_index = line_index(&serialized, "sources:");
@@ -192,7 +197,7 @@ fn render_note_file_wraps_yaml_and_body_with_expected_newline_layout() {
     let frontmatter = sample_frontmatter_minimal();
     let body = "# Heading\nBody line";
 
-    let rendered = render_note_file(&frontmatter, body);
+    let rendered = render_note_file(&frontmatter, body).expect("note file should render");
 
     let expected = concat!(
         "---\n",
@@ -215,7 +220,7 @@ fn render_note_file_wraps_yaml_and_body_with_expected_newline_layout() {
 fn render_note_file_with_empty_body_still_has_trailing_newline() {
     let frontmatter = sample_frontmatter_minimal();
 
-    let rendered = render_note_file(&frontmatter, "");
+    let rendered = render_note_file(&frontmatter, "").expect("empty-body note file should render");
 
     let expected = concat!(
         "---\n",
@@ -235,10 +240,13 @@ fn serialization_and_render_outputs_are_deterministic_for_same_input() {
     let frontmatter = sample_frontmatter_full_with_extra();
     let body = "# Deterministic\nSame output expected";
 
-    let serialized_first = serialize_frontmatter(&frontmatter);
-    let serialized_second = serialize_frontmatter(&frontmatter);
-    let rendered_first = render_note_file(&frontmatter, body);
-    let rendered_second = render_note_file(&frontmatter, body);
+    let serialized_first =
+        serialize_frontmatter(&frontmatter).expect("first serialization should succeed");
+    let serialized_second =
+        serialize_frontmatter(&frontmatter).expect("second serialization should succeed");
+    let rendered_first = render_note_file(&frontmatter, body).expect("first render should succeed");
+    let rendered_second =
+        render_note_file(&frontmatter, body).expect("second render should succeed");
 
     assert_eq!(serialized_first, serialized_second);
     assert_eq!(rendered_first, rendered_second);
@@ -251,7 +259,7 @@ fn parse_normalize_serialize_parse_roundtrip_preserves_frontmatter() {
     let frontmatter = sample_frontmatter_full_with_extra();
     let body = "# Full Note\nRoundtrip body";
 
-    let rendered = render_note_file(&frontmatter, body);
+    let rendered = render_note_file(&frontmatter, body).expect("roundtrip note file should render");
     write_text_file(&note_path, &rendered);
 
     let relative_path = RelativePath::new("roundtrip.md");
@@ -289,7 +297,8 @@ fn yaml_hostile_scalars_roundtrip_through_render_and_parse_unchanged() {
             extra: BTreeMap::new(),
         };
 
-        let rendered = render_note_file(&frontmatter, "Body\n");
+        let rendered =
+            render_note_file(&frontmatter, "Body\n").expect("yaml-hostile note file should render");
         write_text_file(&note_path, &rendered);
 
         let normalized = parse_and_normalize(&note_path, &relative_path);

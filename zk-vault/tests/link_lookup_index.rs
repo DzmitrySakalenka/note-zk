@@ -162,6 +162,39 @@ fn path_resolves_as_last_resort() {
 }
 
 #[test]
+fn path_lookup_handles_root_nested_and_dotless_paths_without_panic() {
+    let scan = scan_with_notes(
+        vec![
+            make_note(
+                "root-note.md",
+                "01ARZ3NDEKTSV4RRFFQ69G5FAQ",
+                "Root Note",
+                &[],
+            ),
+            make_note(
+                "notes/nested-note.md",
+                "01ARZ3NDEKTSV4RRFFQ69G5FAR",
+                "Nested Note",
+                &[],
+            ),
+            make_note(
+                "notes/dotless",
+                "01ARZ3NDEKTSV4RRFFQ69G5FAS",
+                "Dotless Note",
+                &[],
+            ),
+        ],
+        Vec::new(),
+    );
+
+    let index = build_from_scan(&scan);
+
+    assert_resolved(&index, "root-note", "01ARZ3NDEKTSV4RRFFQ69G5FAQ");
+    assert_resolved(&index, "notes/nested-note", "01ARZ3NDEKTSV4RRFFQ69G5FAR");
+    assert_resolved(&index, "notes/dotless", "01ARZ3NDEKTSV4RRFFQ69G5FAS");
+}
+
+#[test]
 fn ambiguous_when_two_notes_share_same_title() {
     let scan = scan_with_notes(
         vec![

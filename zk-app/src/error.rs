@@ -72,6 +72,13 @@ pub enum AppError {
         #[source]
         source: serde_json::Error,
     },
+    /// Note frontmatter could not be rendered to YAML for a vault write.
+    #[error("while attempting to render note frontmatter to YAML: {source}")]
+    NoteRender {
+        /// Source YAML serialization error.
+        #[source]
+        source: serde_yaml::Error,
+    },
 }
 
 /// `Result` alias used by `zk-app` public APIs.

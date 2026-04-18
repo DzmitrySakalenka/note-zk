@@ -209,7 +209,8 @@ fn render_after_parsing_crlf_frontmatter_uses_lf_only_output() {
     let parsed = parse_note_file(&note_path).expect("crlf fixture should parse");
     let frontmatter = into_note_frontmatter(parsed.frontmatter.expect("frontmatter should exist"));
 
-    let rendered = render_note_file(&frontmatter, &parsed.body_markdown);
+    let rendered = render_note_file(&frontmatter, &parsed.body_markdown)
+        .expect("parsed CRLF frontmatter should re-render");
 
     assert!(!rendered.contains('\r'));
 }

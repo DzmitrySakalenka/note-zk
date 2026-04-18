@@ -73,6 +73,7 @@ fn normalize_fixture_output(
         });
 
     render_note_file(&normalized_frontmatter, &parsed.body_markdown)
+        .expect("normalized note fixture should render")
 }
 
 fn full_frontmatter_fixture() -> NoteFrontmatter {
@@ -119,13 +120,15 @@ fn minimal_frontmatter_fixture() -> NoteFrontmatter {
 
 #[test]
 fn snapshot_serialize_full_frontmatter() {
-    let serialized = serialize_frontmatter(&full_frontmatter_fixture());
+    let serialized = serialize_frontmatter(&full_frontmatter_fixture())
+        .expect("full snapshot frontmatter should serialize");
     assert_snapshot!("serialize_full_frontmatter", &serialized);
 }
 
 #[test]
 fn snapshot_serialize_minimal_frontmatter() {
-    let serialized = serialize_frontmatter(&minimal_frontmatter_fixture());
+    let serialized = serialize_frontmatter(&minimal_frontmatter_fixture())
+        .expect("minimal snapshot frontmatter should serialize");
     assert_snapshot!("serialize_minimal_frontmatter", &serialized);
 }
 
@@ -139,7 +142,8 @@ fn snapshot_serialize_frontmatter_with_unknown_keys() {
     frontmatter
         .extra
         .insert("z_custom".to_string(), serde_yaml::Value::Number(7.into()));
-    let serialized = serialize_frontmatter(&frontmatter);
+    let serialized = serialize_frontmatter(&frontmatter)
+        .expect("frontmatter with unknown keys should serialize");
     assert_snapshot!("serialize_with_unknown_keys", &serialized);
 }
 
@@ -149,7 +153,8 @@ fn snapshot_serialize_optional_field_combinations() {
     frontmatter.note_type = Some("note".to_string());
     frontmatter.created = Some("2026-04-14T09:00:00Z".to_string());
     frontmatter.status = Some("draft".to_string());
-    let serialized = serialize_frontmatter(&frontmatter);
+    let serialized =
+        serialize_frontmatter(&frontmatter).expect("optional field combination should serialize");
     assert_snapshot!("serialize_optional_field_combo", &serialized);
 }
 
@@ -212,7 +217,8 @@ fn normalize_already_normalized_output_is_identical_to_input() {
         extra: BTreeMap::new(),
     };
     let body = "Body line\n";
-    let input = render_note_file(&frontmatter, body);
+    let input =
+        render_note_file(&frontmatter, body).expect("already normalized note should render");
     let output = normalize_fixture_output("notes/already.md", &input, true);
     assert_eq!(output, input);
 }

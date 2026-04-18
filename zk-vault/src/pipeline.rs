@@ -353,7 +353,20 @@ pub fn apply_normalization(
         };
 
         let rendered_content =
-            render_note_file(&note_document.frontmatter, &note_document.body_markdown);
+            match render_note_file(&note_document.frontmatter, &note_document.body_markdown) {
+                Ok(rendered_content) => rendered_content,
+                Err(render_error) => {
+                    summary.files_errored += 1;
+                    summary.diagnostics.push(ScanDiagnostic {
+                        level: DiagnosticLevel::Error,
+                        path: note_result.relative_path.clone(),
+                        message: format!(
+                            "failed to render normalized note content: {render_error}"
+                        ),
+                    });
+                    continue;
+                }
+            };
         let target_path = resolve_note_path(vault_root, &note_result.relative_path);
         let current_bytes = match fs::read(&target_path) {
             Ok(bytes) => bytes,

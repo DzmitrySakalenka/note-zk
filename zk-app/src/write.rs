@@ -106,7 +106,8 @@ pub fn create_note(
     }
     let final_note_id = frontmatter.id.clone();
 
-    let rendered = zk_vault::render_note_file(&frontmatter, &request.body_markdown);
+    let rendered = zk_vault::render_note_file(&frontmatter, &request.body_markdown)
+        .map_err(|source| AppError::NoteRender { source })?;
     zk_vault::atomic_write_file(&absolute_path, rendered.as_bytes())?;
 
     Ok(final_note_id)
@@ -140,7 +141,8 @@ pub fn update_note(
 
     ensure_writable(&relative_path, &config.folders)?;
 
-    let rendered = zk_vault::render_note_file(&final_frontmatter, &final_body);
+    let rendered = zk_vault::render_note_file(&final_frontmatter, &final_body)
+        .map_err(|source| AppError::NoteRender { source })?;
     zk_vault::atomic_write_file(
         &vault_root.join(relative_path.as_str()),
         rendered.as_bytes(),

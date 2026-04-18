@@ -272,7 +272,9 @@ fn report_to_json_parses_as_valid_json_value() {
     write_broken_fixture_vault(vault_root);
 
     let report = run_validation(vault_root, &config);
-    let json_text = report.to_json();
+    let json_text = report
+        .to_json()
+        .expect("validation report JSON should serialize");
     let parsed: serde_json::Value =
         serde_json::from_str(&json_text).expect("validation report JSON should parse");
 

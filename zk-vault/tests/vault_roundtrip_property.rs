@@ -234,9 +234,11 @@ fn write_text_file(path: &Path, content: &str) {
     reason = "quickcheck property functions receive owned arbitrary values by design"
 )]
 fn roundtrip_preserves_data(original_frontmatter: NoteFrontmatter) -> bool {
-    let original_serialized = serialize_frontmatter(&original_frontmatter);
+    let original_serialized = serialize_frontmatter(&original_frontmatter)
+        .expect("original frontmatter should serialize");
     let original_body = "property_body_line\n";
-    let original_file = render_note_file(&original_frontmatter, original_body);
+    let original_file = render_note_file(&original_frontmatter, original_body)
+        .expect("original note file should render");
 
     let tempdir = TempDir::new().expect("tempdir should be created");
     let note_path = tempdir.path().join("property-note.md");
@@ -257,7 +259,8 @@ fn roundtrip_preserves_data(original_frontmatter: NoteFrontmatter) -> bool {
         normalize_frontmatter_with_id_generator(raw_frontmatter, &context, || {
             NoteId::from("01UNUSEDPROPERTYGENERATORID0001")
         });
-    let normalized_serialized = serialize_frontmatter(&normalized_frontmatter);
+    let normalized_serialized = serialize_frontmatter(&normalized_frontmatter)
+        .expect("normalized frontmatter should serialize");
 
     normalized_frontmatter == original_frontmatter && normalized_serialized == original_serialized
 }

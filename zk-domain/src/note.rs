@@ -248,24 +248,20 @@ pub struct ValidationReport {
 impl ValidationReport {
     /// Serializes this report as pretty JSON.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if serialization fails.
-    #[must_use]
-    pub fn to_json(&self) -> String {
+    /// Returns [`serde_json::Error`] if serialization fails.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
-            .expect("validation report should always serialize to pretty json")
     }
 
     /// Serializes this report as compact JSON.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if serialization fails.
-    #[must_use]
-    pub fn to_json_compact(&self) -> String {
+    /// Returns [`serde_json::Error`] if serialization fails.
+    pub fn to_json_compact(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(self)
-            .expect("validation report should always serialize to compact json")
     }
 }
 
