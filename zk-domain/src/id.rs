@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::fmt;
+use std::{
+    fmt,
+    io::{self, Read},
+};
+
+const CONTENT_HASH_CHUNK_SIZE: usize = 64 * 1024;
 
 macro_rules! impl_string_newtype {
     ($name:ident) => {
@@ -118,12 +123,41 @@ impl_string_newtype!(DeviceId);
 pub struct ContentHash(String);
 
 impl ContentHash {
-    /// Computes a SHA-256 hash from raw bytes and returns it as lowercase hex.
-    pub fn from_bytes(data: &[u8]) -> Self {
+    /// Computes a SHA-256 hash from a reader in fixed-size chunks and returns
+    /// both the final hash and the total byte count consumed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::Error`] when the underlying reader fails.
+    pub fn from_reader<R: Read>(mut reader: R) -> io::Result<(Self, u64)> {
         let mut hasher = Sha256::new();
-        hasher.update(data);
-        let result = hasher.finalize();
-        Self(hex::encode(result))
+        let mut buffer = vec![0_u8; CONTENT_HASH_CHUNK_SIZE];
+        let mut total_bytes = 0_u64;
+
+        loop {
+            let bytes_read = reader.read(&mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+
+            hasher.update(&buffer[..bytes_read]);
+            total_bytes += u64::try_from(bytes_read).map_err(|_| {
+                io::Error::other("reader chunk size exceeds u64 byte counter capacity")
+            })?;
+        }
+
+        Ok((Self(hex::encode(hasher.finalize())), total_bytes))
+    }
+
+    /// Computes a SHA-256 hash from raw bytes and returns it as lowercase hex.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if hashing a byte slice returns an I/O error, which cannot
+    /// happen for in-memory slices.
+    pub fn from_bytes(data: &[u8]) -> Self {
+        let (hash, _) = Self::from_reader(data).expect("byte slice reads cannot fail");
+        hash
     }
 }
 

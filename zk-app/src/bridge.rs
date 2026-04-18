@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
-    fs,
+    fs::File,
+    io::BufReader,
     path::Path,
 };
 
@@ -88,7 +89,7 @@ pub fn build_note_inputs(
 ///
 /// # Errors
 ///
-/// Returns [`AppError::Io`] when asset reads or metadata lookups fail.
+/// Returns [`AppError::Io`] when asset reads fail.
 pub fn build_asset_inputs(
     scan_result: &VaultScanResult,
     vault_root: &Path,
@@ -97,20 +98,21 @@ pub fn build_asset_inputs(
 
     for asset in &scan_result.assets {
         let asset_path = vault_root.join(asset.relative_path.as_str());
-        let bytes = fs::read(&asset_path).map_err(|source| AppError::Io {
+        let file = File::open(&asset_path).map_err(|source| AppError::Io {
             path: asset_path.clone(),
             source,
         })?;
-        let metadata = fs::metadata(&asset_path).map_err(|source| AppError::Io {
-            path: asset_path.clone(),
-            source,
-        })?;
+        let (content_hash, size_bytes) =
+            ContentHash::from_reader(BufReader::new(file)).map_err(|source| AppError::Io {
+                path: asset_path.clone(),
+                source,
+            })?;
 
         asset_inputs.push(AssetInput {
             path: asset.relative_path.clone(),
-            content_hash: ContentHash::from_bytes(&bytes),
+            content_hash,
             mime_type: mime_type_for_path(&asset_path),
-            size_bytes: metadata.len(),
+            size_bytes,
         });
     }
 

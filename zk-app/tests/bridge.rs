@@ -194,6 +194,34 @@ fn build_asset_inputs_populates_hash_size_and_mime_type() {
 }
 
 #[test]
+fn build_asset_inputs_stream_hashes_large_assets() {
+    let root = unique_test_dir("bridge-assets-large");
+    let vault_root = root.join("vault");
+    let asset_path = vault_root.join("assets").join("large.bin");
+    fs::create_dir_all(asset_path.parent().expect("asset parent")).expect("create asset directory");
+    let bytes: Vec<u8> = (0..(256 * 1024)).map(|index| (index % 251) as u8).collect();
+    fs::write(&asset_path, &bytes).expect("write large asset");
+
+    let scan_result = VaultScanResult {
+        notes: Vec::new(),
+        assets: vec![asset_candidate("assets/large.bin", &asset_path)],
+        diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
+        duplicate_ids: Vec::new(),
+    };
+
+    let asset_inputs = build_asset_inputs(&scan_result, &vault_root).expect("build asset inputs");
+
+    assert_eq!(asset_inputs.len(), 1);
+    assert_eq!(
+        asset_inputs[0].content_hash,
+        ContentHash::from_bytes(&bytes),
+    );
+    assert_eq!(asset_inputs[0].size_bytes, bytes.len() as u64);
+    assert_eq!(asset_inputs[0].mime_type, None);
+}
+
+#[test]
 fn build_asset_inputs_surfaces_io_failures() {
     let root = unique_test_dir("bridge-missing-asset");
     let vault_root = root.join("vault");
