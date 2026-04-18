@@ -171,9 +171,9 @@ fn bootstrap_effective_config_invalid_retention_surfaces_as_config_validation() 
     let home_root = root.join("home");
     write_text(
         &vault_root.join(".zk").join("config.toml"),
-        r#"
+        r"
 retention_days = 0
-"#,
+",
     );
 
     let env = |name: &str| match name {

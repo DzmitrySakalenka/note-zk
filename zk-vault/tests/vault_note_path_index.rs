@@ -16,10 +16,11 @@ fn write_text_file(path: &Path, content: &str) {
 }
 
 fn base_config(vault_root: &Path) -> EffectiveConfig {
-    let mut config = EffectiveConfig::default();
-    config.vault_path = vault_root.to_path_buf();
-    config.allowed_note_extensions = vec!["md".to_string()];
-    config
+    EffectiveConfig {
+        vault_path: vault_root.to_path_buf(),
+        allowed_note_extensions: vec!["md".to_string()],
+        ..EffectiveConfig::default()
+    }
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs, io::ErrorKind, path::PathBuf};
+use std::{collections::BTreeMap, fs, io::ErrorKind, path::Path};
 
 mod common;
 
@@ -199,7 +199,9 @@ fn build_asset_inputs_stream_hashes_large_assets() {
     let vault_root = root.join("vault");
     let asset_path = vault_root.join("assets").join("large.bin");
     fs::create_dir_all(asset_path.parent().expect("asset parent")).expect("create asset directory");
-    let bytes: Vec<u8> = (0..(256 * 1024)).map(|index| (index % 251) as u8).collect();
+    let bytes: Vec<u8> = (0..(256 * 1024))
+        .map(|index| u8::try_from(index % 251).expect("value should always fit into u8"))
+        .collect();
     fs::write(&asset_path, &bytes).expect("write large asset");
 
     let scan_result = VaultScanResult {
@@ -280,10 +282,10 @@ fn normalization_result(
     }
 }
 
-fn asset_candidate(relative_path: &str, absolute_path: &PathBuf) -> AssetCandidate {
+fn asset_candidate(relative_path: &str, absolute_path: &Path) -> AssetCandidate {
     AssetCandidate {
         relative_path: RelativePath::new(relative_path),
-        absolute_path: absolute_path.clone(),
+        absolute_path: absolute_path.to_path_buf(),
     }
 }
 

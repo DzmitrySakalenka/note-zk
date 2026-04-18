@@ -48,9 +48,10 @@ impl ValidationRule for StubNoteRule {
 }
 
 fn base_config() -> EffectiveConfig {
-    let mut config = EffectiveConfig::default();
-    config.validation = ValidationConfig::default();
-    config
+    EffectiveConfig {
+        validation: ValidationConfig::default(),
+        ..EffectiveConfig::default()
+    }
 }
 
 fn sample_note(path: &str) -> NormalizationResult {

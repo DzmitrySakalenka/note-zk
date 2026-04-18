@@ -30,10 +30,11 @@ fn read_file_text(path: &Path) -> String {
 }
 
 fn base_config(vault_root: &Path) -> EffectiveConfig {
-    let mut config = EffectiveConfig::default();
-    config.vault_path = vault_root.to_path_buf();
-    config.allowed_note_extensions = vec!["md".to_string()];
-    config
+    EffectiveConfig {
+        vault_path: vault_root.to_path_buf(),
+        allowed_note_extensions: vec!["md".to_string()],
+        ..EffectiveConfig::default()
+    }
 }
 
 fn find_note_result<'a>(
@@ -49,7 +50,7 @@ fn find_note_result<'a>(
 
 fn contains_path(paths: &[RelativePath], target: &str) -> bool {
     let normalized_target = RelativePath::new(target);
-    paths.iter().any(|path| *path == normalized_target)
+    paths.contains(&normalized_target)
 }
 
 #[test]

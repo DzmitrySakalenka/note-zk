@@ -103,10 +103,10 @@ fn pipeline_validation_rejects_invalid_explicit_vault_values() {
 
     write_text(
         &vault_path,
-        r#"
+        r"
 retention_days = 0
 allowed_note_extensions = []
-"#,
+",
     );
 
     let global = load_global_config(&root.join("global-missing.toml")).expect("missing global");
@@ -143,7 +143,9 @@ default_vault = "/notes
         GlobalConfigError::Parse { path: got, .. } => {
             assert_eq!(got, path);
         }
-        other => panic!("expected GlobalConfigError::Parse, got {other:?}"),
+        other @ GlobalConfigError::Io { .. } => {
+            panic!("expected GlobalConfigError::Parse, got {other:?}");
+        }
     }
 }
 
@@ -163,6 +165,8 @@ trash_dir = "bad
         VaultConfigError::Parse { path: got, .. } => {
             assert_eq!(got, path);
         }
-        other => panic!("expected VaultConfigError::Parse, got {other:?}"),
+        other @ VaultConfigError::Io { .. } => {
+            panic!("expected VaultConfigError::Parse, got {other:?}");
+        }
     }
 }

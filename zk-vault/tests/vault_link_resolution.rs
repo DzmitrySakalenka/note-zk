@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{fmt::Write as _, fs, path::Path};
 
 use insta::assert_debug_snapshot;
 use tempfile::TempDir;
@@ -24,10 +24,11 @@ fn write_text_file(path: &Path, content: &str) {
 }
 
 fn base_config(vault_root: &Path) -> EffectiveConfig {
-    let mut config = EffectiveConfig::default();
-    config.vault_path = vault_root.to_path_buf();
-    config.allowed_note_extensions = vec!["md".to_string()];
-    config
+    EffectiveConfig {
+        vault_path: vault_root.to_path_buf(),
+        allowed_note_extensions: vec!["md".to_string()],
+        ..EffectiveConfig::default()
+    }
 }
 
 fn note_content(id: &str, title: &str, aliases: &[&str], body: &str) -> String {
@@ -36,7 +37,7 @@ fn note_content(id: &str, title: &str, aliases: &[&str], body: &str) -> String {
     if !aliases.is_empty() {
         content.push_str("aliases:\n");
         for alias in aliases {
-            content.push_str(&format!("  - {alias}\n"));
+            let _ = writeln!(content, "  - {alias}");
         }
     }
 

@@ -6,13 +6,17 @@ use zk_domain::config::EffectiveConfig;
 use zk_index::open_memory;
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the report grouping acceptance test is clearer as one end-to-end scenario"
+)]
 fn doctor_report_groups_expected_errors_and_warnings() {
     let root = unique_test_dir("doctor-report");
     let vault_root = root.join("vault");
 
     write_text(
         &vault_root.join("dup-a.md"),
-        r#"---
+        r"---
 id: 01ARZ3NDEKTSV4RRFFQ69G5FEE
 title: Duplicate A
 tags:
@@ -21,11 +25,11 @@ tags:
 # Duplicate A
 
 Body content
-"#,
+",
     );
     write_text(
         &vault_root.join("dup-b.md"),
-        r#"---
+        r"---
 id: 01ARZ3NDEKTSV4RRFFQ69G5FEE
 title: Duplicate B
 tags:
@@ -34,11 +38,11 @@ tags:
 # Duplicate B
 
 Body content
-"#,
+",
     );
     write_text(
         &vault_root.join("issues.md"),
-        r#"---
+        r"---
 id: 01ARZ3NDEKTSV4RRFFQ69G5FEF
 title: Issues
 tags:
@@ -48,26 +52,28 @@ tags:
 
 Unresolved wiki: [[Missing Note]]
 Missing asset: ![Missing](./assets/missing.png)
-"#,
+",
     );
     write_text(
         &vault_root.join("empty.md"),
-        r#"---
+        r"---
 id: 01ARZ3NDEKTSV4RRFFQ69G5FEG
 title: Empty
 tags:
   - tg8
 ---
-"#,
+",
     );
     write_text(
         &vault_root.join("invalid.md"),
         "---\ninvalid: [yaml\n---\nBody\n",
     );
 
-    let mut config = EffectiveConfig::default();
-    config.vault_path = vault_root.clone();
-    config.allowed_note_extensions = vec!["md".to_string()];
+    let config = EffectiveConfig {
+        vault_path: vault_root.clone(),
+        allowed_note_extensions: vec!["md".to_string()],
+        ..EffectiveConfig::default()
+    };
 
     let conn = open_memory().expect("open in-memory SQLite");
     let report = doctor_report(&vault_root, &config, &conn).expect("doctor report should succeed");

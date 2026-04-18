@@ -44,9 +44,10 @@ impl ValidationRule for StubVaultFindingsRule {
 }
 
 fn base_config() -> EffectiveConfig {
-    let mut config = EffectiveConfig::default();
-    config.validation = ValidationConfig::default();
-    config
+    EffectiveConfig {
+        validation: ValidationConfig::default(),
+        ..EffectiveConfig::default()
+    }
 }
 
 fn empty_scan_result() -> VaultScanResult {

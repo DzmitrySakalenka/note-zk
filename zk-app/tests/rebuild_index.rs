@@ -19,7 +19,7 @@ fn rebuild_index_orchestrates_scan_bridge_and_rebuild_idempotently() {
 
     write_text(
         &vault_root.join("source.md"),
-        r#"---
+        r"---
 id: 01ARZ3NDEKTSV4RRFFQ69G5FAV
 title: Source
 tags:
@@ -30,11 +30,11 @@ tags:
 Resolved wiki: [[Target Note]]
 External link: [Example](https://example.com)
 Asset link: ![Diagram](./assets/diagram.png)
-"#,
+",
     );
     write_text(
         &vault_root.join("target.md"),
-        r#"---
+        r"---
 id: 01ARZ3NDEKTSV4RRFFQ69G5FAW
 title: Target Note
 tags:
@@ -43,13 +43,15 @@ tags:
 # Target Note
 
 Body content
-"#,
+",
     );
     write_text(&vault_root.join("assets").join("diagram.png"), "png-bytes");
 
-    let mut config = EffectiveConfig::default();
-    config.vault_path = vault_root.clone();
-    config.allowed_note_extensions = vec!["md".to_string()];
+    let config = EffectiveConfig {
+        vault_path: vault_root.clone(),
+        allowed_note_extensions: vec!["md".to_string()],
+        ..EffectiveConfig::default()
+    };
 
     let mut conn = open_memory().expect("open in-memory SQLite");
     let first_outcome = rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
@@ -114,7 +116,7 @@ fn rebuild_index_write_normalized_writes_id_and_indexes_generated_note() {
 
     write_text(
         &note_path,
-        r#"---
+        r"---
 title: Missing Id
 tags:
   - tg8
@@ -122,12 +124,14 @@ tags:
 # Missing Id
 
 Body content
-"#,
+",
     );
 
-    let mut config = EffectiveConfig::default();
-    config.vault_path = vault_root.clone();
-    config.allowed_note_extensions = vec!["md".to_string()];
+    let config = EffectiveConfig {
+        vault_path: vault_root.clone(),
+        allowed_note_extensions: vec!["md".to_string()],
+        ..EffectiveConfig::default()
+    };
 
     let mut conn = open_memory().expect("open in-memory SQLite");
     let outcome = rebuild_index(

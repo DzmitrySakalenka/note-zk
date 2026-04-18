@@ -97,6 +97,8 @@ retention_days = 21
         VaultConfigError::Parse { path, .. } => {
             assert_eq!(path, config_path);
         }
-        other => panic!("expected parse error, got {other:?}"),
+        other @ VaultConfigError::Io { .. } => {
+            panic!("expected parse error, got {other:?}");
+        }
     }
 }

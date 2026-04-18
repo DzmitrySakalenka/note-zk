@@ -298,7 +298,7 @@ fn round_trip_preserves_nullable_and_boolean_fields() {
 
     connection
         .execute(
-            r#"
+            r"
             UPDATE notes_index
             SET trashed_at = ?1,
                 deleted_at = ?2,
@@ -307,7 +307,7 @@ fn round_trip_preserves_nullable_and_boolean_fields() {
                 last_editor_device_id = ?5,
                 server_revision = ?6
             WHERE note_id = ?7
-            "#,
+            ",
             rusqlite::params![
                 "2026-04-06T08:00:00Z",
                 "2026-04-07T09:00:00Z",

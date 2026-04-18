@@ -11,9 +11,10 @@ use zk_vault::{
 };
 
 fn base_config() -> EffectiveConfig {
-    let mut config = EffectiveConfig::default();
-    config.allowed_note_extensions = vec!["md".to_string()];
-    config
+    EffectiveConfig {
+        allowed_note_extensions: vec!["md".to_string()],
+        ..EffectiveConfig::default()
+    }
 }
 
 fn empty_plan() -> NormalizationPlan {

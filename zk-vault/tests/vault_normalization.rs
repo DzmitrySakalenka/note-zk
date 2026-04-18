@@ -52,6 +52,10 @@ fn raw_doc(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "call sites pass enum literals and the helper stays simple in tests"
+)]
 fn has_diagnostic(
     diagnostics: &[ScanDiagnostic],
     level: DiagnosticLevel,

@@ -21,7 +21,9 @@ fn resolved_note_link_construction() {
     assert_eq!(link.source_note_id.to_string(), "01HZ3NOTE000000000000000A");
     assert_eq!(link.raw_target, "Some Other Note");
     assert_eq!(
-        link.target_note_id.as_ref().map(|id| id.to_string()),
+        link.target_note_id
+            .as_ref()
+            .map(std::string::ToString::to_string),
         Some("01HZ3NOTE000000000000000B".to_string())
     );
     assert_eq!(link.link_text.as_deref(), Some("alias text"));
@@ -156,7 +158,9 @@ fn asset_reference_construction() {
     assert_eq!(r.source_note_id.to_string(), "01HZ3NOTE000000000000000A");
     assert_eq!(r.raw_path, "./assets/diagram.png");
     assert_eq!(
-        r.target_asset_id.as_ref().map(|id| id.to_string()),
+        r.target_asset_id
+            .as_ref()
+            .map(std::string::ToString::to_string),
         Some("01HZ3ASSET00000000000000A".to_string())
     );
 }

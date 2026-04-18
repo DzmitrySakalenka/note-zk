@@ -199,6 +199,10 @@ fn token_vec(
         .collect()
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the generator helper is clearer with separate key/value and count bounds"
+)]
 fn pair_vec(
     g: &mut Gen,
     key_prefix: &str,
@@ -225,6 +229,10 @@ fn write_text_file(path: &Path, content: &str) {
     fs::write(path, content).expect("file should be written");
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "quickcheck property functions receive owned arbitrary values by design"
+)]
 fn roundtrip_preserves_data(original_frontmatter: NoteFrontmatter) -> bool {
     let original_serialized = serialize_frontmatter(&original_frontmatter);
     let original_body = "property_body_line\n";

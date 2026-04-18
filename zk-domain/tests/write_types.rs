@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{collections::BTreeMap, fmt::Debug};
 
 use serde::{Serialize, de::DeserializeOwned};
 use zk_domain::{
@@ -25,7 +25,7 @@ fn sample_frontmatter(id: &str, title: &str) -> NoteFrontmatter {
         source: Some("https://example.com".to_string()),
         status: Some("draft".to_string()),
         sources: vec![NoteId::from("01SOURCE000000000000000001")],
-        extra: Default::default(),
+        extra: BTreeMap::default(),
     }
 }
 

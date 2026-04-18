@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use serde_json;
 use zk_domain::id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision};
 
 // ==========================================================================

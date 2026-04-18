@@ -87,9 +87,10 @@ impl ValidationRule for StubVaultRule {
 }
 
 fn base_config() -> EffectiveConfig {
-    let mut config = EffectiveConfig::default();
-    config.validation = ValidationConfig::default();
-    config
+    EffectiveConfig {
+        validation: ValidationConfig::default(),
+        ..EffectiveConfig::default()
+    }
 }
 
 fn sample_note(path: &str) -> NormalizationResult {
@@ -122,7 +123,7 @@ fn sample_note_with_document(path: &str, id: &str, title: &str, body: &str) -> N
         source: None,
         status: None,
         sources: Vec::new(),
-        extra: Default::default(),
+        extra: BTreeMap::default(),
     };
     let document = zk_domain::note::NoteDocument {
         frontmatter: frontmatter.clone(),

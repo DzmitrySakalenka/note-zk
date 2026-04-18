@@ -28,7 +28,9 @@ fn note_sync_state_construction() {
     assert!(s.last_local_hash.is_some());
     assert!(s.last_synced_hash.is_some());
     assert_eq!(
-        s.last_known_server_revision.as_ref().map(|r| r.value()),
+        s.last_known_server_revision
+            .as_ref()
+            .map(ServerRevision::value),
         Some(5)
     );
     assert_eq!(s.sync_status, SyncStatus::Synced);
@@ -92,7 +94,9 @@ fn note_sync_state_pending_download() {
     };
     assert_eq!(s.sync_status, SyncStatus::PendingDownload);
     assert_eq!(
-        s.last_known_server_revision.as_ref().map(|r| r.value()),
+        s.last_known_server_revision
+            .as_ref()
+            .map(ServerRevision::value),
         Some(10)
     );
 }
@@ -140,7 +144,9 @@ fn asset_sync_state_construction() {
     assert!(s.last_local_hash.is_some());
     assert!(s.last_synced_hash.is_some());
     assert_eq!(
-        s.last_known_server_revision.as_ref().map(|r| r.value()),
+        s.last_known_server_revision
+            .as_ref()
+            .map(ServerRevision::value),
         Some(3)
     );
     assert_eq!(s.sync_status, SyncStatus::Synced);
@@ -335,7 +341,10 @@ fn delete_record_hard_deleted() {
         ..sample_delete_record()
     };
     assert_eq!(r.deleted_at.as_deref(), Some("2026-05-06T00:00:00Z"));
-    assert_eq!(r.delete_revision.as_ref().map(|r| r.value()), Some(99));
+    assert_eq!(
+        r.delete_revision.as_ref().map(ServerRevision::value),
+        Some(99)
+    );
 }
 
 #[test]

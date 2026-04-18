@@ -87,12 +87,12 @@ sources:
 
 #[test]
 fn raw_frontmatter_preserves_unknown_keys_in_extra() {
-    let yaml = r#"
+    let yaml = r"
 title: With Extra
 custom_flag: true
 metadata:
   owner: team-a
-"#;
+";
     let raw = parse_frontmatter(yaml);
 
     assert_eq!(raw.title, Some("With Extra".to_string()));
@@ -114,11 +114,11 @@ metadata:
 
 #[test]
 fn raw_frontmatter_round_trips_unknown_keys() {
-    let yaml = r#"
+    let yaml = r"
 title: Round Trip
 labels:
   - keep
-"#;
+";
     let raw = parse_frontmatter(yaml);
     let serialized = serde_yaml::to_string(&raw).expect("raw frontmatter should serialize");
     let reparsed: RawNoteFrontmatter =

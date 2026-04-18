@@ -24,7 +24,7 @@ fn sample_frontmatter(id: &str, title: &str) -> NoteFrontmatter {
         source: None,
         status: None,
         sources: vec![],
-        extra: Default::default(),
+        extra: BTreeMap::default(),
     }
 }
 
@@ -64,14 +64,14 @@ fn update_note_missing_id_returns_note_not_found() {
     let vault_root = root.join("vault");
     write_text(
         &vault_root.join("notes").join("existing.md"),
-        r#"---
+        r"---
 id: 01EXISTING0000000000000001
 title: Existing
 tags:
   - tg8
 ---
 Existing body
-"#,
+",
     );
     let config = EffectiveConfig::default();
 
@@ -110,8 +110,8 @@ fn batch_write_two_creates_and_one_update_reports_expected_counts() {
     )
     .expect("seed existing note");
 
-    let create_a_id = NoteId::from("01BATCHCREATEA0000000000001");
-    let create_b_id = NoteId::from("01BATCHCREATEB0000000000001");
+    let first_created_id = NoteId::from("01BATCHCREATEA0000000000001");
+    let second_created_id = NoteId::from("01BATCHCREATEB0000000000001");
     let outcome = batch_write(
         &vault_root,
         &config,
@@ -119,12 +119,12 @@ fn batch_write_two_creates_and_one_update_reports_expected_counts() {
             creates: vec![
                 CreateNoteRequest {
                     path: RelativePath::new("notes/a.md"),
-                    frontmatter: sample_frontmatter(create_a_id.as_str(), "A"),
+                    frontmatter: sample_frontmatter(first_created_id.as_str(), "A"),
                     body_markdown: "A body\n".to_string(),
                 },
                 CreateNoteRequest {
                     path: RelativePath::new("notes/b.md"),
-                    frontmatter: sample_frontmatter(create_b_id.as_str(), "B"),
+                    frontmatter: sample_frontmatter(second_created_id.as_str(), "B"),
                     body_markdown: "B body\n".to_string(),
                 },
             ],
@@ -137,7 +137,7 @@ fn batch_write_two_creates_and_one_update_reports_expected_counts() {
     )
     .expect("batch write should succeed");
 
-    assert_eq!(outcome.created, vec![create_a_id, create_b_id]);
+    assert_eq!(outcome.created, vec![first_created_id, second_created_id]);
     assert_eq!(outcome.updated, vec![existing_id]);
     assert!(outcome.failures.is_empty());
 
@@ -151,13 +151,15 @@ fn batch_write_immutable_middle_create_records_failure_and_keeps_earlier_success
     let root = unique_test_dir("write-api-batch-immutable");
     let vault_root = root.join("vault");
     fs::create_dir_all(&vault_root).expect("create vault root directory");
-    let mut config = EffectiveConfig::default();
-    config.folders = BTreeMap::from([(
-        "raw".to_string(),
-        FolderPolicy {
-            immutable: Some(true),
-        },
-    )]);
+    let config = EffectiveConfig {
+        folders: BTreeMap::from([(
+            "raw".to_string(),
+            FolderPolicy {
+                immutable: Some(true),
+            },
+        )]),
+        ..EffectiveConfig::default()
+    };
 
     let first_id = NoteId::from("01BATCHOK000000000000000001");
     let blocked_id = NoteId::from("01BATCHBLOCKED000000000001");

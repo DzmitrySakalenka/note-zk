@@ -28,7 +28,7 @@ fn sample_frontmatter(note_id: &str, title: &str) -> NoteFrontmatter {
         source: None,
         status: None,
         sources: vec![],
-        extra: Default::default(),
+        extra: std::collections::BTreeMap::default(),
     }
 }
 
@@ -41,6 +41,10 @@ fn env_for_home(home_root: &Path) -> impl Fn(&str) -> Option<String> {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the app pipeline acceptance test is clearer as one end-to-end scenario"
+)]
 fn full_read_pipeline() {
     let temp_dir = TempDir::new().expect("create temp dir");
     let vault_root = temp_dir.path().join("vault");
@@ -48,7 +52,7 @@ fn full_read_pipeline() {
 
     write_text(
         &vault_root.join("a.md"),
-        r#"---
+        r"---
 id: 01ARZ3NDEKTSV4RRFFQ69G5FAA
 title: Note A
 tags:
@@ -57,11 +61,11 @@ tags:
 # Note A
 
 Body A
-"#,
+",
     );
     write_text(
         &vault_root.join("b.md"),
-        r#"---
+        r"---
 id: 01ARZ3NDEKTSV4RRFFQ69G5FAB
 title: Note B
 tags:
@@ -72,11 +76,11 @@ tags:
 Resolved wiki: [[Note C]]
 Unresolved wiki: [[NonExistent]]
 Asset: ![Diagram](./assets/diagram.png)
-"#,
+",
     );
     write_text(
         &vault_root.join("c.md"),
-        r#"---
+        r"---
 id: 01ARZ3NDEKTSV4RRFFQ69G5FAC
 title: Note C
 tags:
@@ -85,11 +89,11 @@ tags:
 # Note C
 
 Body C
-"#,
+",
     );
     write_text(
         &vault_root.join("sibling").join("dup-a.md"),
-        r#"---
+        r"---
 id: 01ARZ3NDEKTSV4RRFFQ69G5FAA
 title: Duplicate A
 tags:
@@ -98,11 +102,11 @@ tags:
 # Duplicate A
 
 Duplicate id content
-"#,
+",
     );
     write_text(
         &vault_root.join("invalid-frontmatter.md"),
-        r#"---
+        r"---
 id: 01ARZ3NDEKTSV4RRFFQ69G5FAD
 title: Invalid Frontmatter
 tags:
@@ -110,11 +114,11 @@ tags:
 bad: [unterminated
 ---
 Body with malformed frontmatter
-"#,
+",
     );
     write_text(
         &vault_root.join("99_trash").join("old.md"),
-        r#"---
+        r"---
 id: 01ARZ3NDEKTSV4RRFFQ69G5FAE
 title: Old Note
 tags:
@@ -123,7 +127,7 @@ tags:
 # Old Note
 
 Trashed content
-"#,
+",
     );
     write_text(&vault_root.join("assets").join("diagram.png"), "png-bytes");
 

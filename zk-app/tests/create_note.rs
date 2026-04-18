@@ -24,7 +24,7 @@ fn sample_frontmatter(id: &str, title: &str) -> NoteFrontmatter {
         source: None,
         status: None,
         sources: vec![],
-        extra: Default::default(),
+        extra: BTreeMap::default(),
     }
 }
 
@@ -99,14 +99,14 @@ fn duplicate_path_yields_note_path_exists_error() {
     let target_path = vault_root.join("notes").join("existing.md");
     write_text(
         &target_path,
-        r#"---
+        r"---
 id: 01EXISTING0000000000000001
 title: Existing
 tags:
   - tg8
 ---
 Existing body
-"#,
+",
     );
     let request = CreateNoteRequest {
         path: RelativePath::new("notes/existing.md"),
@@ -131,13 +131,15 @@ fn immutable_folder_target_yields_immutable_folder_error() {
         frontmatter: sample_frontmatter("01IMMUTABLE000000000000001", "Immutable"),
         body_markdown: "body".to_string(),
     };
-    let mut config = EffectiveConfig::default();
-    config.folders = BTreeMap::from([(
-        "raw".to_string(),
-        FolderPolicy {
-            immutable: Some(true),
-        },
-    )]);
+    let config = EffectiveConfig {
+        folders: BTreeMap::from([(
+            "raw".to_string(),
+            FolderPolicy {
+                immutable: Some(true),
+            },
+        )]),
+        ..EffectiveConfig::default()
+    };
 
     let err = create_note(&vault_root, &config, request).expect_err("raw path should be blocked");
     assert!(matches!(

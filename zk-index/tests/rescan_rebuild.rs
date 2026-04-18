@@ -212,6 +212,10 @@ fn table_count(conn: &Connection, table_name: &str) -> i64 {
     .expect("count query should succeed")
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "named scalar expectations keep rebuild stat assertions readable in tests"
+)]
 fn assert_stats(
     stats: &RebuildStats,
     notes_upserted: usize,

@@ -13,7 +13,7 @@ fn scan_vault_facade_returns_scan_links_and_validation() {
 
     write_text(
         &vault_root.join("source.md"),
-        r#"---
+        r"---
 id: 01SOURCE000000000000000001
 title: Source
 tags:
@@ -25,11 +25,11 @@ Resolved wiki: [[Target Note]]
 Unresolved wiki: [[Missing Note]]
 External: [Example](https://example.com)
 Asset: ![Diagram](./assets/diagram.png)
-"#,
+",
     );
     write_text(
         &vault_root.join("target.md"),
-        r#"---
+        r"---
 id: 01TARGET000000000000000001
 title: Target Note
 tags:
@@ -38,27 +38,29 @@ tags:
 # Target
 
 Body content
-"#,
+",
     );
     write_text(
         &vault_root.join("no-h1.md"),
-        r#"---
+        r"---
 id: 01NOH10000000000000000001
 title: No H1
 tags:
   - scan
 ---
 This body has no H1 heading.
-"#,
+",
     );
     write_text(&vault_root.join("assets").join("diagram.png"), "png-bytes");
 
-    let mut config = EffectiveConfig::default();
-    config.vault_path = vault_root.clone();
-    config.allowed_note_extensions = vec!["md".to_string()];
-    config.validation = zk_domain::config::ValidationConfig {
-        disabled_rules: Vec::new(),
-        severity_overrides: BTreeMap::from([("NoH1InBody".to_string(), "error".to_string())]),
+    let config = EffectiveConfig {
+        vault_path: vault_root.clone(),
+        allowed_note_extensions: vec!["md".to_string()],
+        validation: zk_domain::config::ValidationConfig {
+            disabled_rules: Vec::new(),
+            severity_overrides: BTreeMap::from([("NoH1InBody".to_string(), "error".to_string())]),
+        },
+        ..EffectiveConfig::default()
     };
 
     let outcome = scan_vault(&vault_root, &config).expect("scan_vault should succeed");

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use zk_domain::id::{ContentHash, DeviceId, NoteId, RelativePath, ServerRevision};
 use zk_domain::note::{NoteDocument, NoteFrontmatter, NoteRecord};
 
@@ -17,7 +19,7 @@ fn sample_frontmatter() -> NoteFrontmatter {
         source: Some("https://example.com".to_string()),
         status: Some("active".to_string()),
         sources: vec![],
-        extra: Default::default(),
+        extra: BTreeMap::default(),
     }
 }
 
@@ -63,7 +65,7 @@ fn frontmatter_minimal_with_defaults() {
         source: None,
         status: None,
         sources: vec![],
-        extra: Default::default(),
+        extra: BTreeMap::default(),
     };
     assert_eq!(fm.tags, vec!["untagged"]);
     assert!(fm.note_type.is_none());
@@ -103,7 +105,7 @@ fn frontmatter_yaml_roundtrip_minimal() {
         source: None,
         status: None,
         sources: vec![],
-        extra: Default::default(),
+        extra: BTreeMap::default(),
     };
     let yaml = serde_yaml::to_string(&fm).expect("serialize");
     let back: NoteFrontmatter = serde_yaml::from_str(&yaml).expect("deserialize");
@@ -157,7 +159,7 @@ fn frontmatter_serialize_tags_always_as_list() {
         source: None,
         status: None,
         sources: vec![],
-        extra: Default::default(),
+        extra: BTreeMap::default(),
     };
     let yaml = serde_yaml::to_string(&fm).expect("serialize");
     assert!(
@@ -237,7 +239,10 @@ priority: 5
         fm.extra.get("custom_field").and_then(|v| v.as_str()),
         Some("hello"),
     );
-    assert_eq!(fm.extra.get("priority").and_then(|v| v.as_u64()), Some(5),);
+    assert_eq!(
+        fm.extra.get("priority").and_then(serde_yaml::Value::as_u64),
+        Some(5),
+    );
 }
 
 #[test]
@@ -305,7 +310,7 @@ fn frontmatter_type_field_serializes_as_type() {
         source: None,
         status: None,
         sources: vec![],
-        extra: Default::default(),
+        extra: BTreeMap::default(),
     };
     let yaml = serde_yaml::to_string(&fm).expect("serialize");
     assert!(
@@ -432,7 +437,9 @@ fn note_record_with_editor_device() {
         ..sample_record()
     };
     assert_eq!(
-        rec.last_editor_device_id.as_ref().map(|d| d.to_string()),
+        rec.last_editor_device_id
+            .as_ref()
+            .map(std::string::ToString::to_string),
         Some("device-macbook".to_string())
     );
 }

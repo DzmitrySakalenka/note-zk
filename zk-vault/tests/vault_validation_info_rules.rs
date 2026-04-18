@@ -86,7 +86,7 @@ fn scan_with_notes(notes: Vec<NormalizationResult>) -> VaultScanResult {
     }
 }
 
-fn findings_for_rule<'a>(report: &'a ValidationReport, rule: RuleId) -> Vec<&'a ValidationFinding> {
+fn findings_for_rule(report: &ValidationReport, rule: RuleId) -> Vec<&ValidationFinding> {
     report
         .findings
         .iter()
