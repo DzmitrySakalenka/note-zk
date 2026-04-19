@@ -5,6 +5,7 @@ use std::{
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use serde_json::Value;
 use tempfile::TempDir;
 use zk_vault::parse_note_file;
 
@@ -27,6 +28,10 @@ fn scan_command(vault_root: &Path, home_root: &Path) -> Command {
         .env("HOME", home_root)
         .env("APPDATA", home_root);
     command
+}
+
+fn parse_stdout_json(stdout: &[u8]) -> Value {
+    serde_json::from_slice(stdout).expect("stdout should contain valid JSON")
 }
 
 #[test]
@@ -107,6 +112,53 @@ fn scan_check_reports_duplicate_ids_as_errors() {
 }
 
 #[test]
+fn scan_check_json_emits_machine_readable_summary() {
+    let (_tempdir, vault_root, home_root) = test_roots();
+
+    let assert = scan_command(&vault_root, &home_root)
+        .arg("--check")
+        .arg("--json")
+        .assert()
+        .success();
+    let stdout = &assert.get_output().stdout;
+    let json = parse_stdout_json(stdout);
+
+    assert!(
+        stdout.ends_with(b"\n"),
+        "json output should end with newline"
+    );
+    assert_eq!(
+        json.get("command"),
+        Some(&Value::String("scan".to_string()))
+    );
+    assert_eq!(json.get("mode"), Some(&Value::String("check".to_string())));
+
+    let summary = json
+        .get("summary")
+        .and_then(Value::as_object)
+        .expect("scan check payload should contain summary object");
+    for field in [
+        "notes_scanned",
+        "assets_scanned",
+        "errors",
+        "warnings",
+        "infos",
+        "duplicate_ids",
+        "unresolved_links",
+    ] {
+        assert!(
+            summary.contains_key(field),
+            "scan summary should contain {field}"
+        );
+    }
+
+    assert!(
+        !String::from_utf8_lossy(stdout).contains("Notes scanned:"),
+        "json mode should suppress human-readable labels"
+    );
+}
+
+#[test]
 fn scan_write_inserts_frontmatter_and_reports_normalization_counts() {
     let (_tempdir, vault_root, home_root) = test_roots();
     let note_path = vault_root.join("missing-frontmatter.md");
@@ -123,6 +175,49 @@ fn scan_write_inserts_frontmatter_and_reports_normalization_counts() {
                 .and(predicate::str::contains("Files unchanged: 0"))
                 .and(predicate::str::contains("Files skipped (immutable): 0")),
         );
+
+    let parsed = parse_note_file(&note_path).expect("rewritten note should parse");
+    let frontmatter = parsed
+        .frontmatter
+        .expect("rewritten note should contain frontmatter");
+
+    assert!(frontmatter.id.is_some(), "rewritten note should have an id");
+}
+
+#[test]
+fn scan_write_json_emits_normalization_payload() {
+    let (_tempdir, vault_root, home_root) = test_roots();
+    let note_path = vault_root.join("missing-frontmatter.md");
+    fs::write(&note_path, "# Missing Frontmatter\n\nBody text\n")
+        .expect("note fixture should be written");
+
+    let assert = scan_command(&vault_root, &home_root)
+        .arg("--write")
+        .arg("--json")
+        .assert()
+        .success();
+    let stdout = &assert.get_output().stdout;
+    let json = parse_stdout_json(stdout);
+
+    assert!(
+        stdout.ends_with(b"\n"),
+        "json output should end with newline"
+    );
+    assert_eq!(
+        json.get("command"),
+        Some(&Value::String("scan".to_string()))
+    );
+    assert_eq!(json.get("mode"), Some(&Value::String("write".to_string())));
+    assert!(
+        json.get("normalization")
+            .and_then(Value::as_object)
+            .is_some(),
+        "scan write payload should contain normalization object"
+    );
+    assert!(
+        !String::from_utf8_lossy(stdout).contains("Files normalized:"),
+        "json mode should suppress human-readable labels"
+    );
 
     let parsed = parse_note_file(&note_path).expect("rewritten note should parse");
     let frontmatter = parsed

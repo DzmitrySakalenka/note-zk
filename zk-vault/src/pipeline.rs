@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use serde::Serialize;
 use zk_domain::{
     config::EffectiveConfig,
     id::{ContentHash, NoteId, RelativePath},
@@ -99,7 +100,7 @@ pub struct NotePathIndexBuild {
     pub diagnostics: Vec<ScanDiagnostic>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NormalizationSummary {
     pub files_written: u32,
     pub files_skipped_immutable: u32,

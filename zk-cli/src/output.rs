@@ -1,8 +1,12 @@
+use std::io::{self, Write};
+
+use serde::Serialize;
 use zk_app::ScanOutcome;
 use zk_domain::note::DiagnosticLevel;
+use zk_vault::NormalizationSummary;
 
 /// Aggregate counters rendered by the `scan` command.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ScanSummary {
     /// Number of notes scanned from the vault.
     pub notes_scanned: u32,
@@ -18,6 +22,29 @@ pub struct ScanSummary {
     pub duplicate_ids: u32,
     /// Number of unresolved outbound note links.
     pub unresolved_links: u32,
+}
+
+/// JSON payload variants emitted by the `scan` command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "mode", rename_all = "lowercase")]
+pub enum ScanCommandPayload {
+    /// Dry-run scan counters.
+    Check { summary: ScanSummary },
+    /// Write-mode scan counters and normalization summary.
+    Write {
+        summary: ScanSummary,
+        normalization: NormalizationSummary,
+    },
+}
+
+/// Top-level JSON object emitted by `scan --json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ScanJsonOutput {
+    /// Stable command identifier for script consumers.
+    pub command: &'static str,
+    /// Mode-specific payload fields.
+    #[serde(flatten)]
+    pub payload: ScanCommandPayload,
 }
 
 /// Derives the user-facing `scan` counters from a full `ScanOutcome`.
@@ -51,6 +78,13 @@ pub fn build_scan_summary(scan_outcome: &ScanOutcome) -> ScanSummary {
             })
             .sum(),
     }
+}
+
+pub(crate) fn write_json_line<T: Serialize>(payload: &T) -> io::Result<()> {
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    serde_json::to_writer(&mut handle, payload).map_err(io::Error::other)?;
+    writeln!(handle)
 }
 
 fn count_findings(findings: &[zk_domain::note::ValidationFinding], level: &DiagnosticLevel) -> u32 {

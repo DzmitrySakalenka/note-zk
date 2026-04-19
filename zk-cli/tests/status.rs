@@ -5,6 +5,7 @@ use std::{
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use serde_json::Value;
 use tempfile::TempDir;
 
 fn test_roots() -> (TempDir, PathBuf, PathBuf) {
@@ -38,6 +39,10 @@ fn scan_write_command(vault_root: &Path, home_root: &Path) -> Command {
         .env("HOME", home_root)
         .env("APPDATA", home_root);
     command
+}
+
+fn parse_stdout_json(stdout: &[u8]) -> Value {
+    serde_json::from_slice(stdout).expect("stdout should contain valid JSON")
 }
 
 #[test]
@@ -108,4 +113,40 @@ Body
             predicate::str::contains("Total notes: 2")
                 .and(predicate::str::contains("Notes with errors: 1")),
         );
+}
+
+#[test]
+fn status_json_emits_summary_fields() {
+    let (_tempdir, vault_root, home_root) = test_roots();
+
+    let assert = status_command(&vault_root, &home_root)
+        .arg("--json")
+        .assert()
+        .success();
+    let stdout = &assert.get_output().stdout;
+    let json = parse_stdout_json(stdout);
+
+    assert!(
+        stdout.ends_with(b"\n"),
+        "json output should end with newline"
+    );
+    for field in [
+        "total_notes",
+        "total_assets",
+        "notes_with_errors",
+        "notes_with_warnings",
+        "unresolved_link_count",
+        "duplicate_id_count",
+        "trash_count",
+    ] {
+        assert!(
+            json.get(field).is_some(),
+            "status JSON should contain {field}"
+        );
+    }
+
+    assert!(
+        !String::from_utf8_lossy(stdout).contains("Total notes:"),
+        "json mode should suppress human-readable labels"
+    );
 }

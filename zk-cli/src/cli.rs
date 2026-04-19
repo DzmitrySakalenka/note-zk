@@ -90,7 +90,7 @@ pub struct ScanArgs {
     /// Enable normalization writes before rebuilding the index.
     #[arg(long)]
     pub write: bool,
-    /// Render the result as JSON.
+    /// Render compact JSON to stdout.
     #[arg(long)]
     pub json: bool,
 }
@@ -98,7 +98,7 @@ pub struct ScanArgs {
 /// Arguments for the `status` subcommand.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub struct StatusArgs {
-    /// Render the result as JSON.
+    /// Render compact JSON to stdout.
     #[arg(long)]
     pub json: bool,
 }
@@ -106,7 +106,7 @@ pub struct StatusArgs {
 /// Arguments for the `doctor` subcommand.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub struct DoctorArgs {
-    /// Render the result as JSON.
+    /// Render compact JSON to stdout.
     #[arg(long)]
     pub json: bool,
 }
