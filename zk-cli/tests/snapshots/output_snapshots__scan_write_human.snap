@@ -1,0 +1,16 @@
+---
+source: zk-cli/tests/output_snapshots.rs
+expression: render_scan(&scan_write_fixture())
+---
+Notes scanned:  88
+Assets scanned:   7
+Errors:   9
+Warnings:  10
+Infos:  11
+Duplicate IDs:  12
+Unresolved links:  13
+
+Files normalized:   5
+Files unchanged:  22
+Files skipped (immutable):   1
+Files failed: 333

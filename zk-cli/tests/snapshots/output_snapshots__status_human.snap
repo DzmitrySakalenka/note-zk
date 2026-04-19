@@ -1,0 +1,11 @@
+---
+source: zk-cli/tests/output_snapshots.rs
+expression: render_status(&status_fixture())
+---
+Total notes: 12
+Total assets:  3
+Notes with errors:  1
+Notes with warnings: 99
+Unresolved links:  4
+Duplicate IDs:  7
+Trash:  2
