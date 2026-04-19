@@ -1,5 +1,6 @@
 //! Command-line shell for the local Phase 1 workflows.
 
+pub mod bootstrap;
 pub mod cli;
 pub mod error;
 
@@ -7,6 +8,10 @@ mod commands;
 
 use cli::{Cli, Command};
 use error::CliError;
+
+pub use bootstrap::{
+    build_overrides, load_effective_config, open_index_connection, resolve_vault_root,
+};
 
 /// Dispatches a parsed CLI invocation to the matching subcommand handler.
 ///

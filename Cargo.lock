@@ -1368,9 +1368,12 @@ dependencies = [
  "clap",
  "rusqlite",
  "serde_json",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
  "zk-app",
+ "zk-domain",
+ "zk-index",
 ]
 
 [[package]]
