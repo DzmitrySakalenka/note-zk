@@ -19,7 +19,7 @@ pub struct Cli {
 pub enum Command {
     /// Scan the vault and optionally normalize it.
     Scan(ScanArgs),
-    /// Summarize vault and index health.
+    /// Summarize vault and index health. Run `scan --write` to refresh index-derived counts.
     Status(StatusArgs),
     /// Print grouped diagnostics for the vault.
     Doctor(DoctorArgs),
