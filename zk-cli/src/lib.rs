@@ -3,6 +3,7 @@
 pub mod bootstrap;
 pub mod cli;
 pub mod error;
+pub mod output;
 
 mod commands;
 

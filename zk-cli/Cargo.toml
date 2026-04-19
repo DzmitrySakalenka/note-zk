@@ -20,4 +20,7 @@ zk-domain = { version = "0.1.0", path = "../zk-domain" }
 zk-index = { version = "0.1.0", path = "../zk-index" }
 
 [dev-dependencies]
+assert_cmd = "2.2.1"
+predicates = "3.1.4"
 tempfile = "3.27.0"
+zk-vault = { path = "../zk-vault" }
