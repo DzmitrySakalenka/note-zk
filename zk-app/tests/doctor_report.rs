@@ -3,7 +3,6 @@ mod common;
 use common::{unique_test_dir, write_text};
 use zk_app::doctor_report;
 use zk_domain::config::EffectiveConfig;
-use zk_index::open_memory;
 
 #[test]
 #[allow(
@@ -75,8 +74,7 @@ tags:
         ..EffectiveConfig::default()
     };
 
-    let conn = open_memory().expect("open in-memory SQLite");
-    let report = doctor_report(&vault_root, &config, &conn).expect("doctor report should succeed");
+    let report = doctor_report(&vault_root, &config).expect("doctor report should succeed");
 
     assert!(
         report

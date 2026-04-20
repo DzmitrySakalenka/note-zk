@@ -154,7 +154,7 @@ Trashed content
     assert_eq!(summary.duplicate_id_count, 1);
     assert_eq!(summary.trash_count, 1);
 
-    let doctor = doctor_report(&vault_root, &config, &conn).expect("doctor report should succeed");
+    let doctor = doctor_report(&vault_root, &config).expect("doctor report should succeed");
     assert!(
         doctor
             .errors

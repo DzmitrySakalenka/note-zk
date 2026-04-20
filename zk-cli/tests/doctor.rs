@@ -44,6 +44,23 @@ fn doctor_reports_clean_vault_as_healthy() {
 }
 
 #[test]
+fn doctor_does_not_create_index_database() {
+    let (_tempdir, vault_root, home_root) = test_roots();
+    let database_path = vault_root.join(".zk").join("index.sqlite");
+
+    doctor_command(&vault_root, &home_root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No issues detected."));
+
+    assert!(
+        !database_path.exists(),
+        "doctor should not create index database at {}",
+        database_path.display()
+    );
+}
+
+#[test]
 fn doctor_groups_duplicate_ids_and_unresolved_links() {
     let (_tempdir, vault_root, home_root) = test_roots();
     let duplicate_id = "01ARZ3NDEKTSV4RRFFQ69G5FEE";
