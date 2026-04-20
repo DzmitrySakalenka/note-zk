@@ -35,6 +35,8 @@ fn insert_sample_note(conn: &rusqlite::Connection) {
         r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
         &record.created_at,
         &record.updated_at,
+        None,
+        false,
     )
     .expect("sample note should be inserted");
 }
@@ -67,6 +69,8 @@ fn count_returns_inserted_row_total() {
         r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YPN","title":"SQLite Indexing"}"#,
         "2026-04-05T09:00:00Z",
         "2026-04-05T09:00:00Z",
+        None,
+        false,
     )
     .expect("second note should insert");
 
@@ -107,6 +111,8 @@ fn upsert_note_with_changed_path_updates_existing_row() {
         r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics Renamed"}"#,
         "2026-04-02T00:00:00Z",
         "2026-04-03T12:00:00Z",
+        None,
+        false,
     )
     .expect("upsert should succeed");
 
@@ -123,6 +129,59 @@ fn upsert_note_with_changed_path_updates_existing_row() {
     assert_eq!(actual.created_at, "2026-04-02T10:00:00Z");
     assert_eq!(actual.updated_at, "2026-04-03T12:00:00Z");
     assert_eq!(actual.server_revision, ServerRevision::new(0));
+}
+
+#[test]
+fn upsert_note_persists_and_clears_trash_fields() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+
+    let note_id = sample_note_id();
+    let trashed_path = RelativePath::new("99_trash/knowledge-graph.md");
+    let live_path = RelativePath::new("notes/knowledge-graph.md");
+    let content_hash = ContentHash::from_bytes(b"sample content");
+
+    NoteRepo::upsert_note(
+        &connection,
+        &note_id,
+        &trashed_path,
+        "Knowledge Graph Basics",
+        &content_hash,
+        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
+        "2026-04-02T10:00:00Z",
+        "2026-04-02T12:00:00Z",
+        Some("2026-04-20T08:00:00Z"),
+        true,
+    )
+    .expect("trashed note upsert should succeed");
+
+    let trashed = NoteRepo::get_note(&connection, &note_id)
+        .expect("query should succeed")
+        .expect("trashed note should exist");
+    assert!(trashed.is_trashed);
+    assert_eq!(trashed.trashed_at.as_deref(), Some("2026-04-20T08:00:00Z"));
+    assert_eq!(trashed.current_path, trashed_path);
+
+    NoteRepo::upsert_note(
+        &connection,
+        &note_id,
+        &live_path,
+        "Knowledge Graph Basics",
+        &content_hash,
+        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
+        "2026-04-02T10:00:00Z",
+        "2026-04-02T12:00:00Z",
+        None,
+        false,
+    )
+    .expect("live note upsert should succeed");
+
+    let live = NoteRepo::get_note(&connection, &note_id)
+        .expect("query should succeed")
+        .expect("live note should exist");
+    assert!(!live.is_trashed);
+    assert_eq!(live.trashed_at, None);
+    assert_eq!(live.current_path, live_path);
 }
 
 #[test]
@@ -218,6 +277,8 @@ fn get_notes_by_tag_filters_matching_notes() {
         r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YPN","title":"SQLite Indexing"}"#,
         "2026-04-05T09:00:00Z",
         "2026-04-05T09:00:00Z",
+        None,
+        false,
     )
     .expect("second note should insert");
 
@@ -281,6 +342,8 @@ fn list_notes_returns_all_rows_in_deterministic_order() {
         r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YPN","title":"SQLite Indexing"}"#,
         "2026-04-05T09:00:00Z",
         "2026-04-05T09:00:00Z",
+        None,
+        false,
     )
     .expect("second note should insert");
 

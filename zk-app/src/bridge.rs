@@ -10,7 +10,7 @@ use zk_domain::{
     id::{ContentHash, NoteId},
 };
 use zk_index::{AssetInput, NoteInput};
-use zk_vault::VaultScanResult;
+use zk_vault::{TrashState, VaultScanResult};
 
 use crate::{AppError, Result};
 
@@ -49,6 +49,19 @@ pub fn build_note_inputs(
     let mut note_inputs = Vec::with_capacity(scan_result.notes.len());
 
     for note in &scan_result.notes {
+        if note.trash_state == TrashState::Trashed && note.note_id.is_none() {
+            let error = AppError::TrashedItemMissingId {
+                path: note.relative_path.clone(),
+            };
+            tracing::warn!(
+                target: "zk_app::bridge",
+                path = %note.relative_path,
+                message = %error,
+                "dropping trashed note from index due to missing stable id"
+            );
+            continue;
+        }
+
         let Some(document) = &note.document else {
             continue;
         };
@@ -85,6 +98,8 @@ pub fn build_note_inputs(
             asset_references: parsed_index.map_or_else(Vec::new, |parsed_index| {
                 parsed_index.asset_references.clone()
             }),
+            is_trashed: note.trash_state == TrashState::Trashed,
+            trashed_at: note.trashed_at.clone(),
         });
     }
 
@@ -119,6 +134,8 @@ pub fn build_asset_inputs(
             content_hash,
             mime_type: mime_type_for_path(&asset_path),
             size_bytes,
+            is_trashed: asset.trash_state == TrashState::Trashed,
+            trashed_at: asset.trashed_at.clone(),
         });
     }
 
