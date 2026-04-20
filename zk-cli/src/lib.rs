@@ -14,14 +14,9 @@ pub mod output;
 use cli::{Cli, Command};
 use error::CliError;
 
-/// Re-exports `build_overrides` for direct CLI bootstrap testing.
-pub use bootstrap::build_overrides;
-/// Re-exports `load_effective_config` for direct CLI bootstrap testing.
-pub use bootstrap::load_effective_config;
-/// Re-exports `open_index_connection` for direct CLI bootstrap testing.
-pub use bootstrap::open_index_connection;
-/// Re-exports `resolve_vault_root` for direct CLI bootstrap testing.
-pub use bootstrap::resolve_vault_root;
+pub use bootstrap::{
+    build_overrides, load_effective_config, open_index_connection, resolve_vault_root,
+};
 
 /// Dispatches a parsed CLI invocation to the matching subcommand handler.
 ///
