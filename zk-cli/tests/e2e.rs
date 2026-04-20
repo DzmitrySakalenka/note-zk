@@ -30,6 +30,29 @@ fn parse_stdout_json(stdout: &[u8]) -> Value {
 }
 
 #[test]
+fn e2e_cli_without_args_returns_usage_exit_code() {
+    let (_tempdir, _vault_root, home_root) = test_roots();
+
+    base_command(&home_root)
+        .assert()
+        .code(2)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Usage: zk-cli"));
+}
+
+#[test]
+fn e2e_cli_help_exits_zero_and_prints_to_stdout() {
+    let (_tempdir, _vault_root, home_root) = test_roots();
+
+    base_command(&home_root)
+        .arg("--help")
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("Usage: zk-cli"))
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
 fn e2e_scan_rejects_conflicting_flags() {
     let (_tempdir, _vault_root, home_root) = test_roots();
 
