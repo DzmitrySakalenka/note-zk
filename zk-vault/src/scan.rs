@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use time::{OffsetDateTime, UtcOffset, format_description::well_known::Rfc3339};
 use walkdir::{DirEntry, WalkDir};
 use zk_domain::{
     config::{EffectiveConfig, FolderPolicy},
@@ -14,17 +15,27 @@ use zk_domain::{
 
 use crate::error::{NON_UTF8_PATH_COMPONENT_SCAN_DIAGNOSTIC_PREFIX, VaultError};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrashState {
+    Live,
+    Trashed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoteCandidate {
     pub relative_path: RelativePath,
     pub absolute_path: PathBuf,
     pub is_immutable: bool,
+    pub trash_state: TrashState,
+    pub trashed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetCandidate {
     pub relative_path: RelativePath,
     pub absolute_path: PathBuf,
+    pub trash_state: TrashState,
+    pub trashed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +44,7 @@ pub struct VaultFileSet {
     pub assets: Vec<AssetCandidate>,
     pub diagnostics: Vec<ScanDiagnostic>,
     pub trashed_note_count: u32,
+    pub trashed_asset_count: u32,
 }
 
 #[derive(Debug)]
@@ -64,7 +76,6 @@ pub fn scan_vault_files(
     let mut notes = Vec::new();
     let mut assets = Vec::new();
     let mut diagnostics = Vec::new();
-    let mut trashed_note_count = 0_u32;
     let trash_prefix = RelativePath::new(&config.trash_dir);
 
     for entry_result in WalkDir::new(vault_root)
@@ -91,39 +102,39 @@ pub fn scan_vault_files(
                     continue;
                 }
 
-                if let Err(source) = fs::metadata(entry.path()) {
-                    diagnostics.push(ScanDiagnostic {
-                        level: DiagnosticLevel::Error,
-                        path: relative_path,
-                        message: format!("while attempting to read metadata: {source}"),
-                    });
-                    continue;
-                }
-
-                let is_trashed =
-                    is_path_within_prefix(relative_path.as_str(), trash_prefix.as_str());
-                let is_note = is_note_file(entry.path(), &config.allowed_note_extensions);
-
-                if is_trashed {
-                    if is_note {
-                        trashed_note_count += 1;
+                let metadata = match fs::metadata(entry.path()) {
+                    Ok(metadata) => metadata,
+                    Err(source) => {
+                        diagnostics.push(ScanDiagnostic {
+                            level: DiagnosticLevel::Error,
+                            path: relative_path,
+                            message: format!("while attempting to read metadata: {source}"),
+                        });
+                        continue;
                     }
-                    continue;
-                }
+                };
 
+                let trash_state =
+                    classify_trash_state(relative_path.as_str(), trash_prefix.as_str());
+                let is_note = is_note_file(entry.path(), &config.allowed_note_extensions);
+                let trashed_at = trashed_at_for_candidate(
+                    &relative_path,
+                    &metadata,
+                    trash_state,
+                    &mut diagnostics,
+                );
                 let absolute_path = entry.path().to_path_buf();
-                if is_note {
-                    notes.push(NoteCandidate {
-                        relative_path: relative_path.clone(),
-                        absolute_path,
-                        is_immutable: resolve_folder_immutable(&relative_path, &config.folders),
-                    });
-                } else {
-                    assets.push(AssetCandidate {
-                        relative_path,
-                        absolute_path,
-                    });
-                }
+
+                push_candidate(
+                    &mut notes,
+                    &mut assets,
+                    relative_path,
+                    absolute_path,
+                    is_note,
+                    trash_state,
+                    trashed_at,
+                    &config.folders,
+                );
             }
             Err(error) => {
                 diagnostics.push(diagnostic_from_walk_error(vault_root, &error));
@@ -141,12 +152,15 @@ pub fn scan_vault_files(
             .as_str()
             .cmp(right.relative_path.as_str())
     });
+    let trashed_note_count = count_trashed_notes(&notes);
+    let trashed_asset_count = count_trashed_assets(&assets);
 
     Ok(VaultFileSet {
         notes,
         assets,
         diagnostics,
         trashed_note_count,
+        trashed_asset_count,
     })
 }
 
@@ -204,6 +218,47 @@ fn is_note_file(path: &Path, allowed_extensions: &[String]) -> bool {
         })
 }
 
+#[allow(clippy::too_many_arguments)]
+fn push_candidate(
+    notes: &mut Vec<NoteCandidate>,
+    assets: &mut Vec<AssetCandidate>,
+    relative_path: RelativePath,
+    absolute_path: PathBuf,
+    is_note: bool,
+    trash_state: TrashState,
+    trashed_at: Option<String>,
+    folders: &BTreeMap<String, FolderPolicy>,
+) {
+    if is_note {
+        notes.push(NoteCandidate {
+            is_immutable: if trash_state == TrashState::Trashed {
+                false
+            } else {
+                resolve_folder_immutable(&relative_path, folders)
+            },
+            relative_path,
+            absolute_path,
+            trash_state,
+            trashed_at,
+        });
+    } else {
+        assets.push(AssetCandidate {
+            relative_path,
+            absolute_path,
+            trash_state,
+            trashed_at,
+        });
+    }
+}
+
+fn classify_trash_state(path: &str, trash_prefix: &str) -> TrashState {
+    if is_path_within_prefix(path, trash_prefix) {
+        TrashState::Trashed
+    } else {
+        TrashState::Live
+    }
+}
+
 fn resolve_folder_immutable(path: &RelativePath, folders: &BTreeMap<String, FolderPolicy>) -> bool {
     let mut best_match: Option<(usize, bool)> = None;
 
@@ -224,6 +279,60 @@ fn resolve_folder_immutable(path: &RelativePath, folders: &BTreeMap<String, Fold
     }
 
     best_match.is_some_and(|(_, immutable)| immutable)
+}
+
+fn trashed_at_for_candidate(
+    relative_path: &RelativePath,
+    metadata: &fs::Metadata,
+    trash_state: TrashState,
+    diagnostics: &mut Vec<ScanDiagnostic>,
+) -> Option<String> {
+    if trash_state == TrashState::Live {
+        return None;
+    }
+
+    let modified_at = match metadata.modified() {
+        Ok(modified_at) => modified_at,
+        Err(source) => {
+            diagnostics.push(ScanDiagnostic {
+                level: DiagnosticLevel::Warning,
+                path: relative_path.clone(),
+                message: format!(
+                    "while attempting to read trashed file modified timestamp: {source}"
+                ),
+            });
+            return None;
+        }
+    };
+    let timestamp = OffsetDateTime::from(modified_at).to_offset(UtcOffset::UTC);
+
+    match timestamp.format(&Rfc3339) {
+        Ok(formatted) => Some(formatted),
+        Err(source) => {
+            diagnostics.push(ScanDiagnostic {
+                level: DiagnosticLevel::Warning,
+                path: relative_path.clone(),
+                message: format!(
+                    "while attempting to format trashed file modified timestamp: {source}"
+                ),
+            });
+            None
+        }
+    }
+}
+
+fn count_trashed_notes(notes: &[NoteCandidate]) -> u32 {
+    notes
+        .iter()
+        .filter(|candidate| candidate.trash_state == TrashState::Trashed)
+        .count() as u32
+}
+
+fn count_trashed_assets(assets: &[AssetCandidate]) -> u32 {
+    assets
+        .iter()
+        .filter(|candidate| candidate.trash_state == TrashState::Trashed)
+        .count() as u32
 }
 
 fn is_path_within_prefix(path: &str, prefix: &str) -> bool {

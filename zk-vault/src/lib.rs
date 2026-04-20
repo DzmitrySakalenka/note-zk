@@ -26,7 +26,7 @@ pub use pipeline::{
     FrontmatterParseFailure, NormalizationResult, NormalizationSummary, NotePathIndex,
     NotePathIndexBuild, VaultScanResult, apply_normalization, build_note_path_index, scan_vault,
 };
-pub use scan::{AssetCandidate, NoteCandidate, VaultFileSet, scan_vault_files};
+pub use scan::{AssetCandidate, NoteCandidate, TrashState, VaultFileSet, scan_vault_files};
 pub use serialize::{render_note_file, serialize_frontmatter};
 pub use validate::{validate_vault, validate_vault_with_parsed_indexes};
 pub use write::atomic_write_file;

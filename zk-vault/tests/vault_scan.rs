@@ -9,7 +9,7 @@ use zk_domain::{
     config::{EffectiveConfig, FolderPolicy},
     id::RelativePath,
 };
-use zk_vault::{AssetCandidate, NoteCandidate, VaultFileSet, scan_vault_files};
+use zk_vault::{AssetCandidate, NoteCandidate, TrashState, VaultFileSet, scan_vault_files};
 
 #[cfg(unix)]
 use zk_domain::note::DiagnosticLevel;
@@ -69,6 +69,13 @@ fn find_note<'a>(notes: &'a [NoteCandidate], path: &str) -> &'a NoteCandidate {
         .expect("expected note candidate should exist")
 }
 
+fn find_asset<'a>(assets: &'a [AssetCandidate], path: &str) -> &'a AssetCandidate {
+    assets
+        .iter()
+        .find(|candidate| candidate.relative_path == RelativePath::new(path))
+        .expect("expected asset candidate should exist")
+}
+
 #[test]
 fn scan_classifies_mixed_note_and_asset_files() {
     let tempdir = TempDir::new().expect("tempdir should be created");
@@ -93,6 +100,8 @@ fn scan_classifies_mixed_note_and_asset_files() {
 
     let note = find_note(&scanned.notes, "note.md");
     assert_eq!(note.absolute_path, vault_root.join("note.md"));
+    assert_eq!(note.trash_state, TrashState::Live);
+    assert_eq!(note.trashed_at, None);
 }
 
 #[test]
@@ -144,24 +153,46 @@ fn scan_skips_hidden_files_and_directories_including_dot_zk() {
 }
 
 #[test]
-fn scan_skips_trash_directory_tree() {
+fn scan_surfaces_trashed_note_and_asset_candidates() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let vault_root = tempdir.path();
     let mut config = base_config(vault_root);
     config.trash_dir = "99_trash".to_string();
 
-    write_text_file(&vault_root.join("99_trash/trashed.md"), "# Trashed");
-    write_binary_file(&vault_root.join("99_trash/asset.bin"), b"trash");
+    write_text_file(&vault_root.join("99_trash/old.md"), "# Trashed");
+    write_binary_file(&vault_root.join("99_trash/image.png"), b"trash");
     write_text_file(&vault_root.join("notes/kept.md"), "# Kept");
 
     let scanned = scan_vault_files(vault_root, &config).expect("scan should succeed");
-    let notes = note_paths(&scanned.notes);
-    let assets = asset_paths(&scanned.assets);
+    let trashed_note = find_note(&scanned.notes, "99_trash/old.md");
+    let live_note = find_note(&scanned.notes, "notes/kept.md");
+    let trashed_asset = find_asset(&scanned.assets, "99_trash/image.png");
 
-    assert!(notes.contains(&"notes/kept.md".to_string()));
-    assert!(!notes.iter().any(|path| path.starts_with("99_trash/")));
-    assert!(!assets.iter().any(|path| path.starts_with("99_trash/")));
+    assert_eq!(trashed_note.trash_state, TrashState::Trashed);
+    assert!(trashed_note.trashed_at.is_some());
+    assert!(!trashed_note.is_immutable);
+    assert_eq!(live_note.trash_state, TrashState::Live);
+    assert_eq!(live_note.trashed_at, None);
+    assert_eq!(trashed_asset.trash_state, TrashState::Trashed);
+    assert!(trashed_asset.trashed_at.is_some());
     assert_eq!(scanned.trashed_note_count, 1);
+    assert_eq!(scanned.trashed_asset_count, 1);
+}
+
+#[test]
+fn scan_classifies_nested_trash_paths_as_trashed() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let vault_root = tempdir.path();
+    let mut config = base_config(vault_root);
+    config.trash_dir = "99_trash".to_string();
+
+    write_text_file(&vault_root.join("99_trash/2026/01/old.md"), "# Old");
+
+    let scanned = scan_vault_files(vault_root, &config).expect("scan should succeed");
+    let trashed_note = find_note(&scanned.notes, "99_trash/2026/01/old.md");
+
+    assert_eq!(trashed_note.trash_state, TrashState::Trashed);
+    assert!(trashed_note.trashed_at.is_some());
 }
 
 #[test]
@@ -201,6 +232,10 @@ fn scan_marks_note_immutability_using_longest_prefix_match() {
     assert!(!find_note(&scanned.notes, "raw/safe/override.md").is_immutable);
     assert!(find_note(&scanned.notes, "wiki/meta/generated.md").is_immutable);
     assert!(!find_note(&scanned.notes, "notes/regular.md").is_immutable);
+    assert_eq!(
+        find_note(&scanned.notes, "raw/input.md").trash_state,
+        TrashState::Live
+    );
 }
 
 #[test]

@@ -112,7 +112,7 @@ Trashed content
     let summary =
         status_summary(&vault_root, &config, &conn).expect("status summary should succeed");
 
-    assert_eq!(summary.total_notes, 3);
+    assert_eq!(summary.total_notes, 4);
     assert_eq!(summary.total_assets, 1);
     assert!(summary.notes_with_errors >= 1);
     assert_eq!(summary.unresolved_link_count, 1);

@@ -21,7 +21,8 @@ use zk_domain::{
     note::{DiagnosticLevel, NoteDocument, NoteFrontmatter, ScanDiagnostic},
 };
 use zk_vault::{
-    AssetCandidate, NormalizationPlan, NormalizationResult, TitleSource, VaultScanResult,
+    AssetCandidate, NormalizationPlan, NormalizationResult, TitleSource, TrashState,
+    VaultScanResult,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -446,6 +447,8 @@ fn asset_candidate(relative_path: &str, absolute_path: &Path) -> AssetCandidate 
     AssetCandidate {
         relative_path: RelativePath::new(relative_path),
         absolute_path: absolute_path.to_path_buf(),
+        trash_state: TrashState::Live,
+        trashed_at: None,
     }
 }
 
