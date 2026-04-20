@@ -28,6 +28,7 @@ fn build_note_inputs_populates_links_and_roundtrips_frontmatter() {
         diagnostics: Vec::new(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     };
     let parsed_indexes = vec![ParsedNoteIndex {
         note_id: note_id.clone(),
@@ -114,6 +115,7 @@ fn build_note_inputs_omits_notes_without_document() {
         }],
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: vec![(note_id, vec![RelativePath::new("notes/no-document.md")])],
+        trashed_note_count: 0,
     };
 
     let note_inputs = build_note_inputs(&scan_result, &[]).expect("build note inputs");
@@ -139,6 +141,7 @@ fn build_note_inputs_omits_duplicate_note_ids() {
             note_id.clone(),
             vec![RelativePath::new("notes/duplicate.md")],
         )],
+        trashed_note_count: 0,
     };
     let parsed_indexes = vec![ParsedNoteIndex {
         note_id,
@@ -177,6 +180,7 @@ fn build_asset_inputs_populates_hash_size_and_mime_type() {
         diagnostics: Vec::new(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     };
 
     let asset_inputs = build_asset_inputs(&scan_result, &vault_root).expect("build asset inputs");
@@ -210,6 +214,7 @@ fn build_asset_inputs_stream_hashes_large_assets() {
         diagnostics: Vec::new(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     };
 
     let asset_inputs = build_asset_inputs(&scan_result, &vault_root).expect("build asset inputs");
@@ -235,6 +240,7 @@ fn build_asset_inputs_surfaces_io_failures() {
         diagnostics: Vec::new(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     };
 
     let err = build_asset_inputs(&scan_result, &vault_root).expect_err("missing asset should fail");

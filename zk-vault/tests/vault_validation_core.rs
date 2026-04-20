@@ -16,6 +16,7 @@ fn empty_scan_result() -> VaultScanResult {
         diagnostics: Vec::new(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     }
 }
 
@@ -63,6 +64,7 @@ fn validate_vault_passes_scan_diagnostics_through_unchanged() {
         diagnostics: diagnostics.clone(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     };
     let config = base_config();
 

@@ -40,6 +40,7 @@ pub struct VaultScanResult {
     pub diagnostics: Vec<ScanDiagnostic>,
     pub frontmatter_parse_failures: Vec<FrontmatterParseFailure>,
     pub duplicate_ids: Vec<(NoteId, Vec<RelativePath>)>,
+    pub trashed_note_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,6 +151,7 @@ pub fn scan_vault(
         diagnostics,
         frontmatter_parse_failures,
         duplicate_ids,
+        trashed_note_count: file_set.trashed_note_count,
     })
 }
 

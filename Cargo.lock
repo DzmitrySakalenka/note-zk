@@ -1462,6 +1462,8 @@ dependencies = [
  "tempfile",
  "thiserror",
  "toml",
+ "tracing",
+ "tracing-subscriber",
  "zk-domain",
  "zk-index",
  "zk-vault",

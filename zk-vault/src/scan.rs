@@ -32,6 +32,7 @@ pub struct VaultFileSet {
     pub notes: Vec<NoteCandidate>,
     pub assets: Vec<AssetCandidate>,
     pub diagnostics: Vec<ScanDiagnostic>,
+    pub trashed_note_count: u32,
 }
 
 #[derive(Debug)]
@@ -63,6 +64,7 @@ pub fn scan_vault_files(
     let mut notes = Vec::new();
     let mut assets = Vec::new();
     let mut diagnostics = Vec::new();
+    let mut trashed_note_count = 0_u32;
     let trash_prefix = RelativePath::new(&config.trash_dir);
 
     for entry_result in WalkDir::new(vault_root)
@@ -82,7 +84,7 @@ pub fn scan_vault_files(
                         continue;
                     }
                 };
-                if should_skip_entry(&entry, &relative_path, &trash_prefix) {
+                if should_skip_entry(&entry, &relative_path) {
                     continue;
                 }
                 if !entry.file_type().is_file() {
@@ -98,8 +100,19 @@ pub fn scan_vault_files(
                     continue;
                 }
 
+                let is_trashed =
+                    is_path_within_prefix(relative_path.as_str(), trash_prefix.as_str());
+                let is_note = is_note_file(entry.path(), &config.allowed_note_extensions);
+
+                if is_trashed {
+                    if is_note {
+                        trashed_note_count += 1;
+                    }
+                    continue;
+                }
+
                 let absolute_path = entry.path().to_path_buf();
-                if is_note_file(entry.path(), &config.allowed_note_extensions) {
+                if is_note {
                     notes.push(NoteCandidate {
                         relative_path: relative_path.clone(),
                         absolute_path,
@@ -133,21 +146,15 @@ pub fn scan_vault_files(
         notes,
         assets,
         diagnostics,
+        trashed_note_count,
     })
 }
 
-fn should_skip_entry(
-    entry: &DirEntry,
-    relative_path: &RelativePath,
-    trash_prefix: &RelativePath,
-) -> bool {
+fn should_skip_entry(entry: &DirEntry, relative_path: &RelativePath) -> bool {
     if entry.file_type().is_symlink() {
         return true;
     }
     if is_hidden_relative_path(relative_path) {
-        return true;
-    }
-    if is_path_within_prefix(relative_path.as_str(), trash_prefix.as_str()) {
         return true;
     }
     false

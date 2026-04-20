@@ -78,6 +78,7 @@ fn scan_with_notes(
         diagnostics: Vec::new(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids,
+        trashed_note_count: 0,
     }
 }
 

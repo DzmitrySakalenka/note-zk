@@ -161,6 +161,7 @@ fn scan_skips_trash_directory_tree() {
     assert!(notes.contains(&"notes/kept.md".to_string()));
     assert!(!notes.iter().any(|path| path.starts_with("99_trash/")));
     assert!(!assets.iter().any(|path| path.starts_with("99_trash/")));
+    assert_eq!(scanned.trashed_note_count, 1);
 }
 
 #[test]
