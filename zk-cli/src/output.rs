@@ -161,11 +161,27 @@ pub fn write_doctor_human(out: &mut dyn io::Write, report: &DoctorReport) -> io:
         report.infos.len() as u32,
     ]);
 
-    write_doctor_section(out, "Errors", &report.errors, width)?;
-    writeln!(out)?;
-    write_doctor_section(out, "Warnings", &report.warnings, width)?;
-    writeln!(out)?;
-    write_doctor_section(out, "Infos", &report.infos, width)
+    let sections = [
+        ("Errors", report.errors.as_slice()),
+        ("Warnings", report.warnings.as_slice()),
+        ("Infos", report.infos.as_slice()),
+    ];
+    let mut wrote_section = false;
+
+    for (label, issues) in sections {
+        if issues.is_empty() {
+            continue;
+        }
+
+        if wrote_section {
+            writeln!(out)?;
+        }
+
+        write_doctor_section(out, label, issues, width)?;
+        wrote_section = true;
+    }
+
+    Ok(())
 }
 
 fn count_findings(findings: &[zk_domain::note::ValidationFinding], level: &DiagnosticLevel) -> u32 {

@@ -95,6 +95,37 @@ fn doctor_fixture() -> DoctorReport {
     }
 }
 
+fn doctor_warnings_only_fixture() -> DoctorReport {
+    DoctorReport {
+        errors: Vec::new(),
+        warnings: vec![DoctorIssue {
+            rule_id: "unresolved-link".to_string(),
+            path: Some(RelativePath::new("notes/issues.md")),
+            level: DiagnosticLevel::Warning,
+            message: "wiki link points to a missing note".to_string(),
+        }],
+        infos: Vec::new(),
+    }
+}
+
+fn doctor_errors_and_infos_fixture() -> DoctorReport {
+    DoctorReport {
+        errors: vec![DoctorIssue {
+            rule_id: "duplicate-id".to_string(),
+            path: Some(RelativePath::new("notes/dup-a.md")),
+            level: DiagnosticLevel::Error,
+            message: "duplicate note id detected".to_string(),
+        }],
+        warnings: Vec::new(),
+        infos: vec![DoctorIssue {
+            rule_id: "title-derived-from-h1".to_string(),
+            path: None,
+            level: DiagnosticLevel::Info,
+            message: "title derived from the first heading".to_string(),
+        }],
+    }
+}
+
 #[test]
 fn scan_check_human_snapshot() {
     assert_snapshot!("scan_check_human", render_scan(&scan_check_fixture()));
@@ -113,6 +144,22 @@ fn status_human_snapshot() {
 #[test]
 fn doctor_human_snapshot() {
     assert_snapshot!("doctor_human", render_doctor(&doctor_fixture()));
+}
+
+#[test]
+fn doctor_human_warnings_only_snapshot() {
+    assert_snapshot!(
+        "doctor_human_warnings_only",
+        render_doctor(&doctor_warnings_only_fixture())
+    );
+}
+
+#[test]
+fn doctor_human_errors_and_infos_snapshot() {
+    assert_snapshot!(
+        "doctor_human_errors_and_infos",
+        render_doctor(&doctor_errors_and_infos_fixture())
+    );
 }
 
 #[test]

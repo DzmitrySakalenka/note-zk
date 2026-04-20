@@ -1,0 +1,10 @@
+---
+source: zk-cli/tests/output_snapshots.rs
+assertion_line: 159
+expression: render_doctor(&doctor_errors_and_infos_fixture())
+---
+Errors (1):
+  duplicate-id notes/dup-a.md: duplicate note id detected
+
+Infos (1):
+  title-derived-from-h1: title derived from the first heading
