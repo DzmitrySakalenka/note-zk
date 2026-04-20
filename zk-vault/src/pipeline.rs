@@ -9,7 +9,7 @@ use serde::Serialize;
 use zk_domain::{
     config::EffectiveConfig,
     id::{ContentHash, NoteId, RelativePath},
-    note::{DiagnosticLevel, NoteDocument, NoteFrontmatter, ScanDiagnostic},
+    note::{DiagnosticLevel, NoteDocument, NoteFrontmatter, RuleId, ScanDiagnostic},
 };
 
 use crate::{
@@ -18,8 +18,11 @@ use crate::{
         NormalizationContext, NormalizationPlan, TitleSource, empty_raw_frontmatter,
         normalize_frontmatter, plan_normalization_with_body_analysis,
     },
-    parse::{analyze_body, parse_note_file, parse_note_frontmatter},
-    scan::{AssetCandidate, NoteCandidate, scan_vault_files},
+    parse::{
+        TrashedUnknownIdentityReason, analyze_body, parse_note_file, parse_note_file_lenient,
+        parse_note_frontmatter,
+    },
+    scan::{AssetCandidate, NoteCandidate, TrashState, scan_vault_files},
     serialize::render_note_file,
     write::atomic_write_file,
 };
@@ -27,6 +30,9 @@ use crate::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalizationResult {
     pub relative_path: RelativePath,
+    pub note_id: Option<NoteId>,
+    pub trash_state: TrashState,
+    pub trashed_at: Option<String>,
     pub plan: NormalizationPlan,
     pub frontmatter: Option<NoteFrontmatter>,
     pub document: Option<NoteDocument>,
@@ -220,6 +226,10 @@ fn scan_note_candidate(
     })?;
     let content_hash = ContentHash::from_bytes(&original_bytes);
 
+    if candidate.trash_state == TrashState::Trashed {
+        return scan_trashed_note_candidate(candidate, config, content_hash);
+    }
+
     match parse_note_file(&candidate.absolute_path) {
         Ok(raw_document) => {
             let body_analysis = analyze_body(&raw_document.body_markdown);
@@ -260,6 +270,9 @@ fn scan_note_candidate(
             Ok(NoteScanOutcome {
                 note: NormalizationResult {
                     relative_path: candidate.relative_path.clone(),
+                    note_id: Some(normalized_frontmatter.id.clone()),
+                    trash_state: candidate.trash_state,
+                    trashed_at: candidate.trashed_at.clone(),
                     plan,
                     frontmatter: Some(normalized_frontmatter),
                     document: Some(document),
@@ -432,6 +445,9 @@ fn empty_normalization_result(
 ) -> NormalizationResult {
     NormalizationResult {
         relative_path: candidate.relative_path.clone(),
+        note_id: None,
+        trash_state: candidate.trash_state,
+        trashed_at: candidate.trashed_at.clone(),
         plan,
         frontmatter: None,
         document: None,
@@ -443,11 +459,11 @@ fn collect_duplicate_ids(notes: &[NormalizationResult]) -> Vec<(NoteId, Vec<Rela
     let mut paths_by_id: BTreeMap<String, Vec<RelativePath>> = BTreeMap::new();
 
     for note in notes {
-        let Some(frontmatter) = &note.frontmatter else {
+        let Some(note_id) = &note.note_id else {
             continue;
         };
         paths_by_id
-            .entry(frontmatter.id.to_string())
+            .entry(note_id.to_string())
             .or_default()
             .push(note.relative_path.clone());
     }
@@ -485,4 +501,101 @@ fn plan_has_changes(plan: &NormalizationPlan) -> bool {
 
 fn resolve_note_path(vault_root: &Path, relative_path: &RelativePath) -> PathBuf {
     vault_root.join(relative_path.as_str())
+}
+
+fn scan_trashed_note_candidate(
+    candidate: &NoteCandidate,
+    config: &EffectiveConfig,
+    content_hash: ContentHash,
+) -> Result<NoteScanOutcome, VaultError> {
+    let lenient_parse = parse_note_file_lenient(&candidate.absolute_path)?;
+
+    if let Some(reason) = lenient_parse.unknown_identity_reason {
+        return Ok(NoteScanOutcome {
+            note: empty_normalization_result(
+                candidate,
+                content_hash,
+                empty_plan(candidate.is_immutable),
+            ),
+            diagnostics: vec![trashed_unknown_identity_diagnostic(candidate, reason)],
+            frontmatter_parse_failure: None,
+        });
+    }
+
+    let body_analysis = analyze_body(&lenient_parse.document.body_markdown);
+    let mut plan = plan_normalization_with_body_analysis(
+        &lenient_parse.document,
+        candidate,
+        config,
+        &body_analysis,
+    );
+    disable_plan_writes_for_trashed_note(&mut plan);
+    let mut diagnostics = plan.diagnostics.clone();
+
+    let normalization_context = NormalizationContext {
+        relative_path: &candidate.relative_path,
+        body_analysis: &body_analysis,
+        config,
+        is_immutable: candidate.is_immutable,
+    };
+    let raw_frontmatter = lenient_parse
+        .document
+        .frontmatter
+        .unwrap_or_else(empty_raw_frontmatter);
+    let (normalized_frontmatter, normalize_diagnostics) =
+        normalize_frontmatter(raw_frontmatter, &normalization_context);
+    diagnostics.extend(normalize_diagnostics);
+
+    let document = NoteDocument {
+        frontmatter: normalized_frontmatter.clone(),
+        body_markdown: lenient_parse.document.body_markdown,
+    };
+
+    Ok(NoteScanOutcome {
+        note: NormalizationResult {
+            relative_path: candidate.relative_path.clone(),
+            note_id: Some(normalized_frontmatter.id.clone()),
+            trash_state: candidate.trash_state,
+            trashed_at: candidate.trashed_at.clone(),
+            plan,
+            frontmatter: Some(normalized_frontmatter),
+            document: Some(document),
+            content_hash,
+        },
+        diagnostics,
+        frontmatter_parse_failure: None,
+    })
+}
+
+fn disable_plan_writes_for_trashed_note(plan: &mut NormalizationPlan) {
+    plan.needs_id_injection = false;
+    plan.needs_title_derivation = false;
+    plan.needs_frontmatter_insertion = false;
+    plan.needs_field_reorder = false;
+}
+
+fn trashed_unknown_identity_diagnostic(
+    candidate: &NoteCandidate,
+    reason: TrashedUnknownIdentityReason,
+) -> ScanDiagnostic {
+    let (level, reason_text) = match reason {
+        TrashedUnknownIdentityReason::MissingFrontmatter => {
+            (DiagnosticLevel::Info, "frontmatter is missing")
+        }
+        TrashedUnknownIdentityReason::InvalidFrontmatter => {
+            (DiagnosticLevel::Warning, "frontmatter is invalid")
+        }
+        TrashedUnknownIdentityReason::MissingId => {
+            (DiagnosticLevel::Warning, "frontmatter id is missing")
+        }
+    };
+
+    ScanDiagnostic {
+        level,
+        path: candidate.relative_path.clone(),
+        message: format!(
+            "{}: {reason_text}",
+            RuleId::TrashedUnknownIdentity.description()
+        ),
+    }
 }

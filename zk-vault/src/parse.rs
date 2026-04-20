@@ -18,6 +18,19 @@ pub struct BodyAnalysis {
     pub has_mermaid: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TrashedUnknownIdentityReason {
+    MissingFrontmatter,
+    InvalidFrontmatter,
+    MissingId,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct LenientNoteParse {
+    pub document: RawNoteDocument,
+    pub unknown_identity_reason: Option<TrashedUnknownIdentityReason>,
+}
+
 /// Parses a markdown file into raw frontmatter and body sections.
 ///
 /// # Errors
@@ -29,22 +42,51 @@ pub fn parse_note_file(path: &Path) -> Result<RawNoteDocument, VaultError> {
     let file_content = read_note_text(path)?;
 
     let Some((raw_yaml, body_markdown)) = split_frontmatter_sections(&file_content) else {
-        return Ok(RawNoteDocument {
-            frontmatter: None,
-            raw_frontmatter_yaml: None,
-            body_markdown: file_content,
-            has_frontmatter_delimiters: false,
-        });
+        return Ok(document_without_frontmatter(file_content));
     };
 
     let parsed_frontmatter = parse_raw_frontmatter_yaml(path, raw_yaml)?;
 
-    Ok(RawNoteDocument {
-        frontmatter: Some(parsed_frontmatter),
-        raw_frontmatter_yaml: Some(raw_yaml.to_string()),
-        body_markdown: body_markdown.to_string(),
-        has_frontmatter_delimiters: true,
-    })
+    Ok(document_with_frontmatter(
+        Some(parsed_frontmatter),
+        raw_yaml,
+        body_markdown,
+    ))
+}
+
+pub(crate) fn parse_note_file_lenient(path: &Path) -> Result<LenientNoteParse, VaultError> {
+    let file_content = read_note_text(path)?;
+
+    let Some((raw_yaml, body_markdown)) = split_frontmatter_sections(&file_content) else {
+        return Ok(LenientNoteParse {
+            document: document_without_frontmatter(file_content),
+            unknown_identity_reason: Some(TrashedUnknownIdentityReason::MissingFrontmatter),
+        });
+    };
+
+    match parse_raw_frontmatter_yaml(path, raw_yaml) {
+        Ok(parsed_frontmatter) => {
+            let unknown_identity_reason = if parsed_frontmatter.id.is_some() {
+                None
+            } else {
+                Some(TrashedUnknownIdentityReason::MissingId)
+            };
+
+            Ok(LenientNoteParse {
+                document: document_with_frontmatter(
+                    Some(parsed_frontmatter),
+                    raw_yaml,
+                    body_markdown,
+                ),
+                unknown_identity_reason,
+            })
+        }
+        Err(VaultError::FrontmatterParse { .. }) => Ok(LenientNoteParse {
+            document: document_with_frontmatter(None, raw_yaml, body_markdown),
+            unknown_identity_reason: Some(TrashedUnknownIdentityReason::InvalidFrontmatter),
+        }),
+        Err(other) => Err(other),
+    }
 }
 
 pub(crate) fn parse_note_frontmatter(
@@ -83,6 +125,28 @@ fn read_note_text(path: &Path) -> Result<String, VaultError> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+fn document_without_frontmatter(body_markdown: String) -> RawNoteDocument {
+    RawNoteDocument {
+        frontmatter: None,
+        raw_frontmatter_yaml: None,
+        body_markdown,
+        has_frontmatter_delimiters: false,
+    }
+}
+
+fn document_with_frontmatter(
+    frontmatter: Option<RawNoteFrontmatter>,
+    raw_yaml: &str,
+    body_markdown: &str,
+) -> RawNoteDocument {
+    RawNoteDocument {
+        frontmatter,
+        raw_frontmatter_yaml: Some(raw_yaml.to_string()),
+        body_markdown: body_markdown.to_string(),
+        has_frontmatter_delimiters: true,
+    }
 }
 
 fn parse_raw_frontmatter_yaml(

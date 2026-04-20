@@ -6,7 +6,8 @@ use zk_domain::{
     note::{NoteDocument, NoteFrontmatter, RuleId, ValidationFinding, ValidationReport},
 };
 use zk_vault::{
-    NormalizationPlan, NormalizationResult, TitleSource, VaultScanResult, validate_vault,
+    NormalizationPlan, NormalizationResult, TitleSource, TrashState, VaultScanResult,
+    validate_vault,
 };
 
 fn base_config() -> EffectiveConfig {
@@ -50,6 +51,9 @@ fn make_note(path: &str, id: &str, title: &str, body: Option<&str>) -> Normaliza
 
     NormalizationResult {
         relative_path: RelativePath::new(path),
+        note_id: Some(frontmatter.id.clone()),
+        trash_state: TrashState::Live,
+        trashed_at: None,
         plan: empty_plan(),
         frontmatter: Some(frontmatter),
         document,

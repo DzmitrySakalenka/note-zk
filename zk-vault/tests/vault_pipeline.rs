@@ -343,6 +343,40 @@ fn apply_normalization_skips_notes_with_duplicate_ids() {
 }
 
 #[test]
+fn apply_normalization_does_not_rewrite_trashed_notes_even_when_live_mode_would_normalize_them() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let vault_root = tempdir.path();
+    let mut config = base_config(vault_root);
+    config.trash_dir = "99_trash".to_string();
+
+    let trashed_path = vault_root.join("99_trash/derived-title.md");
+    let original_content =
+        "---\nid: 01TRASHEDDERIVEDTITLE00000001\ntags:\n  - rust\n---\n# Derived Title\nBody\n";
+    write_text_file(&trashed_path, original_content);
+
+    let scan_result = scan_vault(vault_root, &config).expect("scan should succeed");
+    let note_result = find_note_result(&scan_result.notes, "99_trash/derived-title.md");
+    let summary = apply_normalization(vault_root, &scan_result).expect("apply should succeed");
+
+    assert_eq!(note_result.trash_state, zk_vault::TrashState::Trashed);
+    assert_eq!(
+        note_result.note_id.as_ref().map(ToString::to_string),
+        Some("01TRASHEDDERIVEDTITLE00000001".to_string())
+    );
+    assert_eq!(
+        note_result
+            .document
+            .as_ref()
+            .map(|document| document.frontmatter.title.clone()),
+        Some("Derived Title".to_string())
+    );
+    assert!(!note_result.plan.needs_title_derivation);
+    assert_eq!(summary.files_written, 0);
+    assert_eq!(summary.files_skipped_no_change, 1);
+    assert_eq!(read_file_text(&trashed_path), original_content);
+}
+
+#[test]
 fn atomic_write_file_replaces_target_content_without_leftover_temp_files() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let target_path = tempdir.path().join("atomic.md");

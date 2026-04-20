@@ -183,6 +183,9 @@ fn build_note_inputs_omits_notes_without_document() {
     let scan_result = VaultScanResult {
         notes: vec![NormalizationResult {
             relative_path: RelativePath::new("notes/no-document.md"),
+            note_id: None,
+            trash_state: TrashState::Live,
+            trashed_at: None,
             plan: empty_plan(),
             frontmatter: None,
             document: None,
@@ -433,6 +436,9 @@ fn normalization_result(
 ) -> NormalizationResult {
     NormalizationResult {
         relative_path: RelativePath::new(relative_path),
+        note_id: Some(frontmatter.id.clone()),
+        trash_state: TrashState::Live,
+        trashed_at: None,
         plan: empty_plan(),
         frontmatter: Some(frontmatter.clone()),
         document: Some(NoteDocument {

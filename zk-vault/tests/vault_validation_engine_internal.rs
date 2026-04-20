@@ -96,6 +96,9 @@ fn base_config() -> EffectiveConfig {
 fn sample_note(path: &str) -> NormalizationResult {
     NormalizationResult {
         relative_path: RelativePath::new(path),
+        note_id: None,
+        trash_state: TrashState::Live,
+        trashed_at: None,
         plan: NormalizationPlan {
             needs_id_injection: false,
             needs_title_derivation: false,
@@ -132,6 +135,9 @@ fn sample_note_with_document(path: &str, id: &str, title: &str, body: &str) -> N
 
     NormalizationResult {
         relative_path: RelativePath::new(path),
+        note_id: Some(frontmatter.id.clone()),
+        trash_state: TrashState::Live,
+        trashed_at: None,
         plan: NormalizationPlan {
             needs_id_injection: false,
             needs_title_derivation: false,
