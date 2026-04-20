@@ -1,0 +1,12 @@
+---
+source: zk-cli/tests/output_snapshots.rs
+expression: render_doctor(&doctor_fixture())
+---
+Errors (1):
+  duplicate-id notes/dup-a.md: duplicate note id detected
+
+Warnings (1):
+  unresolved-link notes/issues.md: wiki link points to a missing note
+
+Infos (1):
+  title-derived-from-h1: title derived from the first heading

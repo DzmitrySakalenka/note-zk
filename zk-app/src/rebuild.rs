@@ -16,13 +16,23 @@ pub struct RebuildOptions {
 
 /// Aggregated outputs returned by [`rebuild_index`].
 #[derive(Debug, Clone)]
-pub struct RebuildOutcome {
-    /// Final scan outcome used as rebuild input.
-    pub scan_outcome: ScanOutcome,
-    /// Index-layer rebuild statistics.
-    pub index_stats: RebuildStats,
-    /// Normalization summary when write-back normalization was enabled.
-    pub normalization: Option<NormalizationSummary>,
+pub enum RebuildOutcome {
+    /// Rebuild output for read-only scan mode.
+    ScanOnly {
+        /// Final scan outcome used as rebuild input.
+        scan_outcome: ScanOutcome,
+        /// Index-layer rebuild statistics.
+        index_stats: RebuildStats,
+    },
+    /// Rebuild output after normalization writes were applied.
+    Normalized {
+        /// Final scan outcome used as rebuild input.
+        scan_outcome: ScanOutcome,
+        /// Index-layer rebuild statistics.
+        index_stats: RebuildStats,
+        /// Summary of normalization writes performed before rebuilding.
+        normalization: NormalizationSummary,
+    },
 }
 
 /// Scans a vault and rebuilds the local `SQLite` index from scan output.
@@ -39,22 +49,30 @@ pub fn rebuild_index(
 ) -> Result<RebuildOutcome, AppError> {
     let mut scan_outcome = scan_vault(vault_root, config)?;
 
-    let normalization = if options.write_normalized {
-        let summary = zk_vault::apply_normalization(vault_root, &scan_outcome.scan_result)?;
+    if options.write_normalized {
+        let normalization = zk_vault::apply_normalization(vault_root, &scan_outcome.scan_result)?;
         scan_outcome = scan_vault(vault_root, config)?;
-        Some(summary)
-    } else {
-        None
-    };
+
+        zk_index::ensure_schema(conn)?;
+        let note_inputs =
+            build_note_inputs(&scan_outcome.scan_result, &scan_outcome.parsed_indexes)?;
+        let asset_inputs = build_asset_inputs(&scan_outcome.scan_result, vault_root)?;
+        let index_stats = zk_index::rebuild_index(conn, &note_inputs, &asset_inputs)?;
+
+        return Ok(RebuildOutcome::Normalized {
+            scan_outcome,
+            index_stats,
+            normalization,
+        });
+    }
 
     zk_index::ensure_schema(conn)?;
     let note_inputs = build_note_inputs(&scan_outcome.scan_result, &scan_outcome.parsed_indexes)?;
     let asset_inputs = build_asset_inputs(&scan_outcome.scan_result, vault_root)?;
     let index_stats = zk_index::rebuild_index(conn, &note_inputs, &asset_inputs)?;
 
-    Ok(RebuildOutcome {
+    Ok(RebuildOutcome::ScanOnly {
         scan_outcome,
         index_stats,
-        normalization,
     })
 }

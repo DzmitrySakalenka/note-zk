@@ -3,7 +3,7 @@ use std::fs;
 mod common;
 
 use common::{unique_test_dir, write_text};
-use zk_app::{RebuildOptions, rebuild_index};
+use zk_app::{RebuildOptions, RebuildOutcome, rebuild_index};
 use zk_domain::{
     config::EffectiveConfig,
     id::{NoteId, RelativePath},
@@ -57,10 +57,16 @@ Body content
     let first_outcome = rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
         .expect("first rebuild should succeed");
 
-    assert!(first_outcome.normalization.is_none());
-    assert!(first_outcome.index_stats.notes_upserted >= 2);
-    assert!(first_outcome.index_stats.assets_upserted >= 1);
-    assert!(first_outcome.index_stats.note_links_inserted >= 1);
+    let first_index_stats = match &first_outcome {
+        RebuildOutcome::ScanOnly { index_stats, .. } => index_stats,
+        RebuildOutcome::Normalized { .. } => {
+            panic!("default rebuild should not return normalization payload")
+        }
+    };
+
+    assert!(first_index_stats.notes_upserted >= 2);
+    assert!(first_index_stats.assets_upserted >= 1);
+    assert!(first_index_stats.note_links_inserted >= 1);
 
     let first_source_note = NoteRepo::get_note(&conn, &source_id)
         .expect("lookup source note after first rebuild")
@@ -73,7 +79,14 @@ Body content
     let second_outcome = rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
         .expect("second rebuild should succeed");
 
-    assert_eq!(second_outcome.index_stats, first_outcome.index_stats);
+    let second_index_stats = match &second_outcome {
+        RebuildOutcome::ScanOnly { index_stats, .. } => index_stats,
+        RebuildOutcome::Normalized { .. } => {
+            panic!("default rebuild should not return normalization payload")
+        }
+    };
+
+    assert_eq!(second_index_stats, first_index_stats);
     assert_eq!(read_table_counts(&conn), first_counts);
 
     let second_source_note = NoteRepo::get_note(&conn, &source_id)
@@ -144,12 +157,19 @@ Body content
     )
     .expect("rebuild with normalization write should succeed");
 
-    let normalization = outcome
-        .normalization
-        .as_ref()
-        .expect("normalization summary should be present");
+    let (index_stats, normalization) = match &outcome {
+        RebuildOutcome::Normalized {
+            index_stats,
+            normalization,
+            ..
+        } => (index_stats, normalization),
+        RebuildOutcome::ScanOnly { .. } => {
+            panic!("write-normalized rebuild should return normalization payload")
+        }
+    };
+
     assert!(normalization.files_written >= 1);
-    assert!(outcome.index_stats.notes_upserted >= 1);
+    assert!(index_stats.notes_upserted >= 1);
 
     let normalized_contents =
         fs::read_to_string(&note_path).expect("read note after normalization write");

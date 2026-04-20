@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use serde::Serialize;
 use zk_domain::{
     config::EffectiveConfig,
     id::{ContentHash, NoteId, RelativePath},
@@ -39,6 +40,7 @@ pub struct VaultScanResult {
     pub diagnostics: Vec<ScanDiagnostic>,
     pub frontmatter_parse_failures: Vec<FrontmatterParseFailure>,
     pub duplicate_ids: Vec<(NoteId, Vec<RelativePath>)>,
+    pub trashed_note_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,7 +101,7 @@ pub struct NotePathIndexBuild {
     pub diagnostics: Vec<ScanDiagnostic>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NormalizationSummary {
     pub files_written: u32,
     pub files_skipped_immutable: u32,
@@ -149,6 +151,7 @@ pub fn scan_vault(
         diagnostics,
         frontmatter_parse_failures,
         duplicate_ids,
+        trashed_note_count: file_set.trashed_note_count,
     })
 }
 

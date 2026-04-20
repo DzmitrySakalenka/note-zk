@@ -53,6 +53,12 @@ pub fn build_note_inputs(
             continue;
         };
         if duplicate_note_ids.contains(&document.frontmatter.id) {
+            tracing::warn!(
+                target: "zk_app::bridge",
+                note_id = %document.frontmatter.id,
+                path = %note.relative_path,
+                "dropping note from index due to duplicate id"
+            );
             continue;
         }
 

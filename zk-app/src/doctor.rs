@@ -41,7 +41,6 @@ pub struct DoctorReport {
 pub fn doctor_report(
     vault_root: &Path,
     config: &EffectiveConfig,
-    _conn: &rusqlite::Connection,
 ) -> Result<DoctorReport, AppError> {
     let scan_outcome = scan_vault(vault_root, config)?;
     let mut errors = Vec::new();

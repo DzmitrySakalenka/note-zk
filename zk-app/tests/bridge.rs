@@ -1,8 +1,19 @@
-use std::{collections::BTreeMap, fs, io::ErrorKind, path::Path};
+use std::{
+    collections::BTreeMap,
+    fmt, fs,
+    io::ErrorKind,
+    path::Path,
+    sync::{Arc, Mutex},
+};
 
 mod common;
 
 use common::{unique_test_dir, write_text};
+use tracing::{
+    Event, Level, Subscriber,
+    field::{Field, Visit},
+};
+use tracing_subscriber::{Layer, layer::Context, prelude::*};
 use zk_app::{AppError, build_asset_inputs, build_note_inputs};
 use zk_domain::{
     derived::{AssetReference, ExternalLink, ParsedNoteIndex, ResolvedNoteLink},
@@ -12,6 +23,75 @@ use zk_domain::{
 use zk_vault::{
     AssetCandidate, NormalizationPlan, NormalizationResult, TitleSource, VaultScanResult,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DuplicateDropWarning {
+    target: String,
+    note_id: String,
+    path: String,
+    message: String,
+}
+
+#[derive(Clone, Default)]
+struct DuplicateDropWarningLayer {
+    warnings: Arc<Mutex<Vec<DuplicateDropWarning>>>,
+}
+
+impl<S> Layer<S> for DuplicateDropWarningLayer
+where
+    S: Subscriber,
+{
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        if *event.metadata().level() != Level::WARN || event.metadata().target() != "zk_app::bridge"
+        {
+            return;
+        }
+
+        let mut visitor = DuplicateDropWarningVisitor::default();
+        event.record(&mut visitor);
+
+        self.warnings
+            .lock()
+            .expect("warning collection mutex should not be poisoned")
+            .push(DuplicateDropWarning {
+                target: event.metadata().target().to_string(),
+                note_id: visitor.note_id.unwrap_or_default(),
+                path: visitor.path.unwrap_or_default(),
+                message: visitor.message.unwrap_or_default(),
+            });
+    }
+}
+
+#[derive(Default)]
+struct DuplicateDropWarningVisitor {
+    note_id: Option<String>,
+    path: Option<String>,
+    message: Option<String>,
+}
+
+impl Visit for DuplicateDropWarningVisitor {
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        let value = format!("{value:?}");
+        self.record_value(field.name(), &value);
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.record_value(field.name(), value);
+    }
+}
+
+impl DuplicateDropWarningVisitor {
+    fn record_value(&mut self, field_name: &str, value: &str) {
+        let normalized = value.trim_matches('"').to_string();
+
+        match field_name {
+            "note_id" => self.note_id = Some(normalized),
+            "path" => self.path = Some(normalized),
+            "message" => self.message = Some(normalized),
+            _ => {}
+        }
+    }
+}
 
 #[test]
 fn build_note_inputs_populates_links_and_roundtrips_frontmatter() {
@@ -28,6 +108,7 @@ fn build_note_inputs_populates_links_and_roundtrips_frontmatter() {
         diagnostics: Vec::new(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     };
     let parsed_indexes = vec![ParsedNoteIndex {
         note_id: note_id.clone(),
@@ -114,6 +195,7 @@ fn build_note_inputs_omits_notes_without_document() {
         }],
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: vec![(note_id, vec![RelativePath::new("notes/no-document.md")])],
+        trashed_note_count: 0,
     };
 
     let note_inputs = build_note_inputs(&scan_result, &[]).expect("build note inputs");
@@ -139,6 +221,7 @@ fn build_note_inputs_omits_duplicate_note_ids() {
             note_id.clone(),
             vec![RelativePath::new("notes/duplicate.md")],
         )],
+        trashed_note_count: 0,
     };
     let parsed_indexes = vec![ParsedNoteIndex {
         note_id,
@@ -154,6 +237,80 @@ fn build_note_inputs_omits_duplicate_note_ids() {
     let note_inputs = build_note_inputs(&scan_result, &parsed_indexes).expect("build note inputs");
 
     assert!(note_inputs.is_empty());
+}
+
+#[test]
+fn build_note_inputs_drops_duplicate_id_notes_and_reports_count() {
+    let duplicate_id = NoteId::new("01DUPLICATENOTEID0000000001");
+    let scan_result = VaultScanResult {
+        notes: vec![
+            normalization_result(
+                "notes/dup-a.md",
+                note_frontmatter(&duplicate_id, "Duplicate A"),
+                "body",
+                "hash-dup-a",
+            ),
+            normalization_result(
+                "notes/dup-b.md",
+                note_frontmatter(&duplicate_id, "Duplicate B"),
+                "body",
+                "hash-dup-b",
+            ),
+        ],
+        assets: Vec::new(),
+        diagnostics: Vec::new(),
+        frontmatter_parse_failures: Vec::new(),
+        duplicate_ids: vec![(
+            duplicate_id.clone(),
+            vec![
+                RelativePath::new("notes/dup-a.md"),
+                RelativePath::new("notes/dup-b.md"),
+            ],
+        )],
+        trashed_note_count: 0,
+    };
+    let layer = DuplicateDropWarningLayer::default();
+    let warnings = Arc::clone(&layer.warnings);
+    let subscriber = tracing_subscriber::registry().with(layer);
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let note_inputs = build_note_inputs(&scan_result, &[]).expect("build note inputs");
+
+    assert!(
+        note_inputs.is_empty(),
+        "duplicate-id notes should be excluded"
+    );
+
+    let warnings = warnings
+        .lock()
+        .expect("warning collection mutex should not be poisoned")
+        .clone();
+    assert_eq!(warnings.len(), 2);
+    assert!(
+        warnings
+            .iter()
+            .all(|warning| warning.target == "zk_app::bridge"),
+        "duplicate-id drops should be emitted from zk_app::bridge",
+    );
+    assert!(
+        warnings.iter().all(|warning| {
+            warning.note_id == duplicate_id.to_string()
+                && warning.message == "dropping note from index due to duplicate id"
+        }),
+        "duplicate-id drops should include the duplicated id and message",
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.path == "notes/dup-a.md"),
+        "expected warning for notes/dup-a.md",
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.path == "notes/dup-b.md"),
+        "expected warning for notes/dup-b.md",
+    );
 }
 
 #[test]
@@ -177,6 +334,7 @@ fn build_asset_inputs_populates_hash_size_and_mime_type() {
         diagnostics: Vec::new(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     };
 
     let asset_inputs = build_asset_inputs(&scan_result, &vault_root).expect("build asset inputs");
@@ -210,6 +368,7 @@ fn build_asset_inputs_stream_hashes_large_assets() {
         diagnostics: Vec::new(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     };
 
     let asset_inputs = build_asset_inputs(&scan_result, &vault_root).expect("build asset inputs");
@@ -235,6 +394,7 @@ fn build_asset_inputs_surfaces_io_failures() {
         diagnostics: Vec::new(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     };
 
     let err = build_asset_inputs(&scan_result, &vault_root).expect_err("missing asset should fail");

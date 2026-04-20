@@ -57,6 +57,7 @@ fn empty_scan_result() -> VaultScanResult {
         diagnostics: Vec::new(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     }
 }
 

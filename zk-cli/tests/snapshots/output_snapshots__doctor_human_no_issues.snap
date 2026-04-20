@@ -1,0 +1,5 @@
+---
+source: zk-cli/tests/output_snapshots.rs
+expression: "render_doctor(&DoctorReport\n{ errors: Vec::new(), warnings: Vec::new(), infos: Vec::new(), })"
+---
+No issues detected.

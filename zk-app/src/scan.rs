@@ -22,6 +22,7 @@ pub struct ScanOutcome {
 ///
 /// Returns [`crate::AppError`] when vault scanning fails.
 pub fn scan_vault(vault_root: &Path, config: &EffectiveConfig) -> Result<ScanOutcome> {
+    let _scan_span = tracing::info_span!("zk_app.scan_vault").entered();
     let scan_result = zk_vault::scan_vault(vault_root, config)?;
     let parsed_indexes = zk_vault::resolve_vault_links(&scan_result, config);
     let validation_report =

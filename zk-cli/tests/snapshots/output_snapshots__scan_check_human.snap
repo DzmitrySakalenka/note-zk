@@ -1,0 +1,11 @@
+---
+source: zk-cli/tests/output_snapshots.rs
+expression: render_scan(&scan_check_fixture())
+---
+Notes scanned: 123
+Assets scanned:   4
+Errors:  12
+Warnings:   3
+Infos:   1
+Duplicate IDs:   2
+Unresolved links:  45

@@ -1,0 +1,7 @@
+---
+source: zk-cli/tests/output_snapshots.rs
+assertion_line: 151
+expression: render_doctor(&doctor_warnings_only_fixture())
+---
+Warnings (1):
+  unresolved-link notes/issues.md: wiki link points to a missing note

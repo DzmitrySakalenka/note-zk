@@ -158,6 +158,7 @@ fn disabled_rule_is_skipped_using_stub_rule() {
         diagnostics: Vec::new(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     };
     let rules: Vec<Box<dyn ValidationRule>> = vec![Box::new(StubNoteRule {
         id: RuleId::EmptyBody,
@@ -183,6 +184,7 @@ fn severity_override_changes_finding_level_using_stub_rule() {
         diagnostics: Vec::new(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     };
     let rules: Vec<Box<dyn ValidationRule>> = vec![Box::new(StubNoteRule {
         id: RuleId::EmptyBody,
@@ -207,6 +209,7 @@ fn engine_runs_note_rules_per_note_and_vault_rules_once() {
         diagnostics: Vec::new(),
         frontmatter_parse_failures: Vec::new(),
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     };
 
     let rules: Vec<Box<dyn ValidationRule>> = vec![
@@ -279,6 +282,7 @@ fn tg8_016_rules_emit_expected_findings_for_each_new_rule() {
             message: "did not find expected ',' or ']'".to_string(),
         }],
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     };
 
     let report = validate_impl::validate_vault_with_rules(
@@ -360,6 +364,7 @@ fn tg8_016_rules_respect_severity_overrides() {
             message: "yaml parse error".to_string(),
         }],
         duplicate_ids: Vec::new(),
+        trashed_note_count: 0,
     };
 
     let report = validate_impl::validate_vault_with_rules(

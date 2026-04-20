@@ -18,6 +18,8 @@ zk-vault = { path = "../zk-vault" }
 zk-index = { path = "../zk-index" }
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 serde_yaml = "0.9.34"
+tracing = "0.1.44"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+tracing-subscriber = "0.3.23"

@@ -208,6 +208,12 @@ Phase 1 recommendation:
 - mark both notes as error
 - require manual resolution
 
+During rebuild, notes whose IDs appear in the duplicate-id set are excluded
+from `build_note_inputs` entirely rather than picking a winner for indexing.
+The bridge emits a `warn` event per dropped note (`target = "zk_app::bridge"`)
+so operators can correlate missing index rows with duplicate-id validation
+errors.
+
 ## Unresolved Link Handling
 
 Unresolved note links should be warnings, not errors.
