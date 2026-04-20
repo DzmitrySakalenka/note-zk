@@ -23,7 +23,7 @@ pub enum Command {
     Scan(ScanArgs),
     /// Summarize vault and index health (full vault scan + DB read; run scan --write to refresh DB-side counts).
     Status(StatusArgs),
-    /// Print grouped diagnostics for the vault.
+    /// Print grouped diagnostics (header conveys severity).
     Doctor(DoctorArgs),
 }
 

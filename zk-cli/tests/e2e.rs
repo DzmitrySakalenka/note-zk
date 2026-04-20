@@ -53,6 +53,19 @@ fn e2e_cli_help_exits_zero_and_prints_to_stdout() {
 }
 
 #[test]
+fn e2e_doctor_help_mentions_header_conveys_severity() {
+    let (_tempdir, _vault_root, home_root) = test_roots();
+
+    base_command(&home_root)
+        .arg("doctor")
+        .arg("--help")
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("header conveys severity"))
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
 fn e2e_scan_rejects_conflicting_flags() {
     let (_tempdir, _vault_root, home_root) = test_roots();
 
