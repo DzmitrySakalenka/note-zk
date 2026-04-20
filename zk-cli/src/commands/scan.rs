@@ -3,7 +3,7 @@
 use std::io;
 
 use anyhow::Context;
-use zk_app::{RebuildOptions, rebuild_index, scan_vault};
+use zk_app::{RebuildOptions, RebuildOutcome, rebuild_index, scan_vault};
 
 use crate::{
     bootstrap::{load_effective_config, open_index_connection, resolve_vault_root},
@@ -88,12 +88,16 @@ fn run_write(
     )
     .context("while attempting to rebuild index")
     .map_err(CliError::Internal)?;
-    let summary = build_scan_summary(&rebuild_outcome.scan_outcome);
+    let RebuildOutcome::Normalized {
+        scan_outcome,
+        normalization,
+        ..
+    } = rebuild_outcome
+    else {
+        unreachable!("write rebuild should return normalization payload");
+    };
+    let summary = build_scan_summary(&scan_outcome);
     let exit_code = exit_code_for(&summary);
-    let normalization = rebuild_outcome
-        .normalization
-        .context("while attempting to read normalization summary")
-        .map_err(CliError::Internal)?;
     let payload = ScanCommandPayload::Write {
         summary,
         normalization,

@@ -5,8 +5,8 @@ mod common;
 use common::{unique_test_dir, write_text};
 use tempfile::TempDir;
 use zk_app::{
-    AppError, RebuildOptions, bootstrap_effective_config, create_note, doctor_report,
-    rebuild_index, scan_vault, status_summary, update_note,
+    AppError, RebuildOptions, RebuildOutcome, bootstrap_effective_config, create_note,
+    doctor_report, rebuild_index, scan_vault, status_summary, update_note,
 };
 use zk_domain::{
     config::CliOverrides,
@@ -141,10 +141,16 @@ Trashed content
     let mut conn = open_memory().expect("open in-memory sqlite");
     let rebuild_outcome = rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
         .expect("rebuild index should succeed");
-    assert_eq!(rebuild_outcome.index_stats.notes_upserted, 2);
-    assert_eq!(rebuild_outcome.index_stats.assets_upserted, 1);
-    assert!(rebuild_outcome.index_stats.note_links_inserted >= 1);
-    assert!(rebuild_outcome.index_stats.asset_references_inserted >= 1);
+    let rebuild_index_stats = match &rebuild_outcome {
+        RebuildOutcome::ScanOnly { index_stats, .. } => index_stats,
+        RebuildOutcome::Normalized { .. } => {
+            panic!("default rebuild should not return normalization payload")
+        }
+    };
+    assert_eq!(rebuild_index_stats.notes_upserted, 2);
+    assert_eq!(rebuild_index_stats.assets_upserted, 1);
+    assert!(rebuild_index_stats.note_links_inserted >= 1);
+    assert!(rebuild_index_stats.asset_references_inserted >= 1);
 
     let summary =
         status_summary(&vault_root, &config, &conn).expect("status summary should succeed");
