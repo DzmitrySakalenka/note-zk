@@ -1,3 +1,5 @@
+//! Implements the `doctor` CLI subcommand.
+
 use crate::{
     bootstrap::{load_effective_config, open_index_connection, resolve_vault_root},
     cli::{DoctorArgs, OutputMode, SharedFlags},
@@ -9,7 +11,13 @@ use std::io;
 use anyhow::Context;
 use zk_app::doctor_report;
 
-pub(crate) fn run(args: &DoctorArgs, shared: &SharedFlags) -> Result<i32, CliError> {
+/// Runs the `doctor` subcommand.
+///
+/// # Errors
+///
+/// Returns [`CliError`] when bootstrap, report generation, or output rendering
+/// fails.
+pub fn run(args: &DoctorArgs, shared: &SharedFlags) -> Result<i32, CliError> {
     let vault_root = resolve_vault_root(shared)?;
     let config = load_effective_config(&vault_root, shared)?;
     let connection = open_index_connection(&config)?;

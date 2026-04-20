@@ -1,3 +1,5 @@
+//! Shared output shaping and rendering helpers for CLI subcommands.
+
 use std::io::{self, Write};
 
 use serde::Serialize;

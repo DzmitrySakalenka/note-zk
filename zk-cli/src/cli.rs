@@ -1,3 +1,5 @@
+//! Argument parser definitions for the `zk-cli` binary.
+
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, builder::BoolishValueParser};

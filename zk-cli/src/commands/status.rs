@@ -1,3 +1,5 @@
+//! Implements the `status` CLI subcommand.
+
 use std::io;
 
 use anyhow::Context;
@@ -10,7 +12,13 @@ use crate::{
     output::{write_json_line, write_status_human},
 };
 
-pub(crate) fn run(args: &StatusArgs, shared: &SharedFlags) -> Result<i32, CliError> {
+/// Runs the `status` subcommand.
+///
+/// # Errors
+///
+/// Returns [`CliError`] when bootstrap, status computation, or output
+/// rendering fails.
+pub fn run(args: &StatusArgs, shared: &SharedFlags) -> Result<i32, CliError> {
     let vault_root = resolve_vault_root(shared)?;
     let config = load_effective_config(&vault_root, shared)?;
     let connection = open_index_connection(&config)?;

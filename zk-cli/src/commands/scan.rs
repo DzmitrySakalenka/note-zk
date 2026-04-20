@@ -1,3 +1,5 @@
+//! Implements the `scan` CLI subcommand.
+
 use std::io;
 
 use anyhow::Context;
@@ -24,7 +26,13 @@ impl From<&ScanArgs> for ScanMode {
     }
 }
 
-pub(crate) fn run(args: &ScanArgs, shared: &SharedFlags) -> Result<i32, CliError> {
+/// Runs the `scan` subcommand.
+///
+/// # Errors
+///
+/// Returns [`CliError`] when bootstrap, scan execution, or output rendering
+/// fails.
+pub fn run(args: &ScanArgs, shared: &SharedFlags) -> Result<i32, CliError> {
     let vault_root = resolve_vault_root(shared)?;
     let config = load_effective_config(&vault_root, shared)?;
     let output_mode = OutputMode::from(args.json);

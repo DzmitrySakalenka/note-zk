@@ -1,18 +1,27 @@
 //! Command-line shell for the local Phase 1 workflows.
 
+/// CLI bootstrap helpers for config loading and index setup.
 pub mod bootstrap;
+/// Parsed CLI argument types and shared flags.
 pub mod cli;
+/// Phase 1 subcommand handlers.
+pub mod commands;
+/// CLI error categories and exit-code mapping.
 pub mod error;
+/// Shared human-readable and JSON output helpers.
 pub mod output;
-
-mod commands;
 
 use cli::{Cli, Command};
 use error::CliError;
 
-pub use bootstrap::{
-    build_overrides, load_effective_config, open_index_connection, resolve_vault_root,
-};
+/// Re-exports `build_overrides` for direct CLI bootstrap testing.
+pub use bootstrap::build_overrides;
+/// Re-exports `load_effective_config` for direct CLI bootstrap testing.
+pub use bootstrap::load_effective_config;
+/// Re-exports `open_index_connection` for direct CLI bootstrap testing.
+pub use bootstrap::open_index_connection;
+/// Re-exports `resolve_vault_root` for direct CLI bootstrap testing.
+pub use bootstrap::resolve_vault_root;
 
 /// Dispatches a parsed CLI invocation to the matching subcommand handler.
 ///

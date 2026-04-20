@@ -31,6 +31,17 @@ cargo fmt --check
 cargo clippy --workspace -- -D warnings
 ```
 
+Phase 1 CLI examples:
+
+```bash
+zk-cli scan --vault <path> --check
+zk-cli scan --vault <path> --write
+zk-cli status --vault <path>
+zk-cli doctor --vault <path>
+```
+
+Add `--json` to any subcommand for machine-readable output on stdout.
+
 ## Architecture Documentation
 
 Detailed design documents live under `docs/`:

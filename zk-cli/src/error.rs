@@ -1,3 +1,5 @@
+//! Error types and exit-code mapping for the CLI entry point.
+
 use std::fmt;
 
 /// Successful CLI exit code.

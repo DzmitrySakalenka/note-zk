@@ -1,3 +1,5 @@
+//! CLI-local helpers for config bootstrap and index setup.
+
 use std::{
     fs,
     path::{Path, PathBuf},
