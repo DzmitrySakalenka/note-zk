@@ -18,3 +18,9 @@ pub mod sync;
 pub mod sync_state;
 /// Write-request models for create/update/batch note operations.
 pub mod write;
+/// Write-request models for trash, restore, and purge operations.
+pub mod write_request;
+
+pub use write_request::{
+    ItemKind, PurgeRequest, PurgeScope, RestoreRequest, TargetSelector, TrashRequest,
+};

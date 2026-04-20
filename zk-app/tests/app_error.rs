@@ -94,3 +94,47 @@ fn preserves_app_owned_payloads() {
             && frontmatter_note_id.as_str() == "01FRONTMATTERID00000000000"
     ));
 }
+
+#[test]
+fn preserves_trash_lifecycle_error_payloads() {
+    let item_not_trashed = AppError::ItemNotTrashed {
+        target: "notes/live.md".to_string(),
+    };
+    let already_purged = AppError::AlreadyPurged {
+        target: "notes/purged.md".to_string(),
+    };
+    let restore_target_exists = AppError::RestoreTargetExists {
+        path: RelativePath::new("notes/existing.md"),
+    };
+    let retention_not_expired = AppError::RetentionNotExpired {
+        target: "notes/fresh.md".to_string(),
+        retention_until: "2026-05-01T00:00:00Z".to_string(),
+    };
+    let trashed_item_missing_id = AppError::TrashedItemMissingId {
+        path: RelativePath::new("99_trash/lost.md"),
+    };
+
+    assert!(matches!(
+        item_not_trashed,
+        AppError::ItemNotTrashed { target } if target == "notes/live.md"
+    ));
+    assert!(matches!(
+        already_purged,
+        AppError::AlreadyPurged { target } if target == "notes/purged.md"
+    ));
+    assert!(matches!(
+        restore_target_exists,
+        AppError::RestoreTargetExists { path } if path.as_str() == "notes/existing.md"
+    ));
+    assert!(matches!(
+        retention_not_expired,
+        AppError::RetentionNotExpired {
+            target,
+            retention_until
+        } if target == "notes/fresh.md" && retention_until == "2026-05-01T00:00:00Z"
+    ));
+    assert!(matches!(
+        trashed_item_missing_id,
+        AppError::TrashedItemMissingId { path } if path.as_str() == "99_trash/lost.md"
+    ));
+}
