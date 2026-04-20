@@ -185,6 +185,66 @@ fn upsert_note_persists_and_clears_trash_fields() {
 }
 
 #[test]
+fn upsert_note_preserves_delete_columns_while_toggling_trash_fields() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    insert_sample_note(&connection);
+
+    let note_id = sample_note_id();
+    let deleted_at = "2026-04-18T11:00:00Z";
+    connection
+        .execute(
+            "UPDATE notes_index SET deleted_at = ?1, is_deleted = ?2 WHERE note_id = ?3",
+            rusqlite::params![deleted_at, 1_i64, note_id.as_str()],
+        )
+        .expect("delete columns should seed successfully");
+
+    NoteRepo::upsert_note(
+        &connection,
+        &note_id,
+        &RelativePath::new("99_trash/knowledge-graph.md"),
+        "Knowledge Graph Basics",
+        &ContentHash::from_bytes(b"sample content"),
+        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
+        "2026-04-02T10:00:00Z",
+        "2026-04-20T08:00:00Z",
+        Some("2026-04-20T08:00:00Z"),
+        true,
+    )
+    .expect("trashed note upsert should succeed");
+
+    let trashed = NoteRepo::get_note(&connection, &note_id)
+        .expect("query should succeed")
+        .expect("trashed note should exist");
+    assert!(trashed.is_trashed);
+    assert_eq!(trashed.trashed_at.as_deref(), Some("2026-04-20T08:00:00Z"));
+    assert_eq!(trashed.deleted_at.as_deref(), Some(deleted_at));
+    assert!(trashed.is_deleted);
+
+    NoteRepo::upsert_note(
+        &connection,
+        &note_id,
+        &RelativePath::new("notes/knowledge-graph.md"),
+        "Knowledge Graph Basics",
+        &ContentHash::from_bytes(b"sample content"),
+        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
+        "2026-04-02T10:00:00Z",
+        "2026-04-21T08:00:00Z",
+        None,
+        false,
+    )
+    .expect("restored note upsert should succeed");
+
+    let restored = NoteRepo::get_note(&connection, &note_id)
+        .expect("query should succeed")
+        .expect("restored note should exist");
+    assert!(!restored.is_trashed);
+    assert_eq!(restored.trashed_at, None);
+    assert_eq!(restored.deleted_at.as_deref(), Some(deleted_at));
+    assert!(restored.is_deleted);
+}
+
+#[test]
 fn replace_tags_replaces_full_tag_set() {
     let connection = open_memory().expect("in-memory database should open");
     ensure_schema(&connection).expect("schema should be ready");
