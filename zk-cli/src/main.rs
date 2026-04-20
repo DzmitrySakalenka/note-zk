@@ -14,12 +14,12 @@ fn main() {
         Ok(cli) => zk_cli::run(cli),
         Err(parse_error) => match parse_error.kind() {
             ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
-                parse_error.print().expect("clap help should print");
+                let _ = parse_error.print();
                 Ok(error::EXIT_OK)
             }
             ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
             | ErrorKind::MissingRequiredArgument => {
-                parse_error.print().expect("clap help should print");
+                let _ = parse_error.print();
                 Ok(error::EXIT_USAGE)
             }
             _ => Err(error::CliError::Argument(parse_error.to_string())),
