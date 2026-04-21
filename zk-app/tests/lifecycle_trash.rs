@@ -50,7 +50,7 @@ fn manual_trash_rebuild_marks_note_trashed_and_creates_delete_record() {
         rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
             .expect("rebuild after manual trash should succeed"),
     );
-    assert_eq!(reconciliation.inserted, 1);
+    assert_eq!(reconciliation.inserted, 1u32);
 
     let note_row = NoteRepo::get_note(&conn, &note_id)
         .expect("note query should succeed")
@@ -93,7 +93,7 @@ fn manual_restore_rebuild_clears_trash_fields_and_delete_record() {
         rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
             .expect("rebuild after manual restore should succeed"),
     );
-    assert_eq!(reconciliation.cleared, 1);
+    assert_eq!(reconciliation.cleared, 1u32);
 
     let note_row = NoteRepo::get_note(&conn, &note_id)
         .expect("note query should succeed")
@@ -338,7 +338,7 @@ fn rebuild_warns_about_orphan_and_doctor_reports_it() {
         rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
             .expect("rebuild with orphan should succeed"),
     );
-    assert_eq!(reconciliation.orphans_warned, 1);
+    assert_eq!(reconciliation.orphans_warned, 1u32);
 
     let captured = warnings
         .lock()

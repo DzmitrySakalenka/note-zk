@@ -206,10 +206,10 @@ title: Archived Note
         }
     };
 
-    assert_eq!(reconciliation.inserted, 2);
-    assert_eq!(reconciliation.refreshed, 0);
-    assert_eq!(reconciliation.cleared, 0);
-    assert_eq!(reconciliation.orphans_warned, 0);
+    assert_eq!(reconciliation.inserted, 2u32);
+    assert_eq!(reconciliation.refreshed, 0u32);
+    assert_eq!(reconciliation.cleared, 0u32);
+    assert_eq!(reconciliation.orphans_warned, 0u32);
     assert!(
         DeleteRecordRepo::get_delete_record(&conn, trashed_note_id.as_str(), ItemType::Note)
             .expect("trashed note delete-record query should succeed")
@@ -304,8 +304,8 @@ fn expect_normalized(
 }
 
 fn assert_zero_reconciliation(reconciliation: &ReconciliationStats) {
-    assert_eq!(reconciliation.inserted, 0);
-    assert_eq!(reconciliation.refreshed, 0);
-    assert_eq!(reconciliation.cleared, 0);
-    assert_eq!(reconciliation.orphans_warned, 0);
+    assert_eq!(reconciliation.inserted, 0u32);
+    assert_eq!(reconciliation.refreshed, 0u32);
+    assert_eq!(reconciliation.cleared, 0u32);
+    assert_eq!(reconciliation.orphans_warned, 0u32);
 }

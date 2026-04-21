@@ -15,13 +15,13 @@ use crate::{AppError, config::ConfigValidationError};
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReconciliationStats {
     /// Number of active delete records inserted for newly trashed items.
-    pub inserted: usize,
+    pub inserted: u32,
     /// Number of active delete records refreshed in place.
-    pub refreshed: usize,
+    pub refreshed: u32,
     /// Number of active delete records cleared for restored items.
-    pub cleared: usize,
+    pub cleared: u32,
     /// Number of orphaned active delete records that were only warned about.
-    pub orphans_warned: usize,
+    pub orphans_warned: u32,
 }
 
 /// Time source abstraction for retention calculations.

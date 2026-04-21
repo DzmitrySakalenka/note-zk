@@ -98,6 +98,17 @@ impl RetentionWarningVisitor {
 }
 
 #[test]
+fn reconciliation_stats_fields_are_u32() {
+    fn expect_u32(_: u32) {}
+
+    let stats = ReconciliationStats::default();
+    expect_u32(stats.inserted);
+    expect_u32(stats.refreshed);
+    expect_u32(stats.cleared);
+    expect_u32(stats.orphans_warned);
+}
+
+#[test]
 fn reconcile_delete_records_inserts_note_and_asset_rows_for_first_trash() {
     let mut connection = open_memory().expect("in-memory database should open");
     ensure_schema(&connection).expect("schema should be ready");
@@ -127,10 +138,10 @@ fn reconcile_delete_records_inserts_note_and_asset_rows_for_first_trash() {
     assert_eq!(
         stats,
         ReconciliationStats {
-            inserted: 2,
-            refreshed: 0,
-            cleared: 0,
-            orphans_warned: 0,
+            inserted: 2u32,
+            refreshed: 0u32,
+            cleared: 0u32,
+            orphans_warned: 0u32,
         }
     );
 
@@ -194,10 +205,10 @@ fn reconcile_delete_records_skips_refresh_when_retention_is_unchanged() {
     assert_eq!(
         stats,
         ReconciliationStats {
-            inserted: 0,
-            refreshed: 0,
-            cleared: 0,
-            orphans_warned: 0,
+            inserted: 0u32,
+            refreshed: 0u32,
+            cleared: 0u32,
+            orphans_warned: 0u32,
         }
     );
 }
@@ -235,10 +246,10 @@ fn reconcile_delete_records_refreshes_rows_when_retention_days_change() {
     assert_eq!(
         stats,
         ReconciliationStats {
-            inserted: 0,
-            refreshed: 1,
-            cleared: 0,
-            orphans_warned: 0,
+            inserted: 0u32,
+            refreshed: 1u32,
+            cleared: 0u32,
+            orphans_warned: 0u32,
         }
     );
     assert_eq!(
@@ -313,10 +324,10 @@ fn reconcile_delete_records_clears_rows_when_items_are_restored() {
     assert_eq!(
         stats,
         ReconciliationStats {
-            inserted: 0,
-            refreshed: 0,
-            cleared: 2,
-            orphans_warned: 0,
+            inserted: 0u32,
+            refreshed: 0u32,
+            cleared: 2u32,
+            orphans_warned: 0u32,
         }
     );
     assert!(
@@ -374,10 +385,10 @@ fn reconcile_delete_records_warns_about_orphans_without_deleting_them() {
     assert_eq!(
         stats,
         ReconciliationStats {
-            inserted: 0,
-            refreshed: 0,
-            cleared: 0,
-            orphans_warned: 1,
+            inserted: 0u32,
+            refreshed: 0u32,
+            cleared: 0u32,
+            orphans_warned: 1u32,
         }
     );
     let warnings = warnings
@@ -441,10 +452,10 @@ fn rebuild_preserves_explicit_trash_original_path() {
     )
     .expect("rebuild should succeed");
 
-    assert_eq!(reconciliation(&outcome).inserted, 0);
-    assert_eq!(reconciliation(&outcome).refreshed, 0);
-    assert_eq!(reconciliation(&outcome).cleared, 0);
-    assert_eq!(reconciliation(&outcome).orphans_warned, 0);
+    assert_eq!(reconciliation(&outcome).inserted, 0u32);
+    assert_eq!(reconciliation(&outcome).refreshed, 0u32);
+    assert_eq!(reconciliation(&outcome).cleared, 0u32);
+    assert_eq!(reconciliation(&outcome).orphans_warned, 0u32);
 
     let refreshed_record =
         DeleteRecordRepo::get_delete_record(&connection, note_id.as_str(), ItemType::Note)
@@ -478,10 +489,10 @@ fn rebuild_uses_scanned_trash_path_for_manual_move_without_existing_delete_recor
     )
     .expect("rebuild should succeed");
 
-    assert_eq!(reconciliation(&outcome).inserted, 1);
-    assert_eq!(reconciliation(&outcome).refreshed, 0);
-    assert_eq!(reconciliation(&outcome).cleared, 0);
-    assert_eq!(reconciliation(&outcome).orphans_warned, 0);
+    assert_eq!(reconciliation(&outcome).inserted, 1u32);
+    assert_eq!(reconciliation(&outcome).refreshed, 0u32);
+    assert_eq!(reconciliation(&outcome).cleared, 0u32);
+    assert_eq!(reconciliation(&outcome).orphans_warned, 0u32);
 
     let delete_record =
         DeleteRecordRepo::get_delete_record(&connection, note_id.as_str(), ItemType::Note)
