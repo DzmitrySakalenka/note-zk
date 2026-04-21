@@ -104,6 +104,7 @@ fn preserves_app_owned_payloads() {
 
 #[test]
 fn preserves_trash_lifecycle_error_payloads() {
+    let invalid_purge_scope = AppError::InvalidPurgeScope { expected: "item" };
     let item_not_trashed = AppError::ItemNotTrashed {
         target: "notes/live.md".to_string(),
     };
@@ -121,6 +122,10 @@ fn preserves_trash_lifecycle_error_payloads() {
         path: RelativePath::new("99_trash/lost.md"),
     };
 
+    assert!(matches!(
+        invalid_purge_scope,
+        AppError::InvalidPurgeScope { expected } if expected == "item"
+    ));
     assert!(matches!(
         item_not_trashed,
         AppError::ItemNotTrashed { target } if target == "notes/live.md"

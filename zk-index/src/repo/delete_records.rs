@@ -64,6 +64,8 @@ SELECT
 FROM delete_records
 ORDER BY retention_until ASC, item_type ASC, item_id ASC
 ";
+const SELECT_NEXT_DELETE_REVISION: &str =
+    "SELECT COALESCE(MAX(delete_revision), 0) + 1 FROM delete_records";
 const SAVEPOINT_INSERT_DELETE_RECORD: &str = "delete_record_repo_insert";
 
 pub struct DeleteRecordRepo;
@@ -244,6 +246,20 @@ impl DeleteRecordRepo {
             .map_err(|source| IndexError::Sqlite {
                 source,
                 context: "decode all delete records".to_string(),
+            })
+    }
+
+    /// Returns the next local delete revision for a newly purged item.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if the scalar query fails.
+    pub fn next_delete_revision(conn: &Connection) -> Result<ServerRevision, IndexError> {
+        conn.query_row(SELECT_NEXT_DELETE_REVISION, [], |row| row.get(0))
+            .map(ServerRevision::new)
+            .map_err(|source| IndexError::Sqlite {
+                source,
+                context: "get next delete revision".to_string(),
             })
     }
 }

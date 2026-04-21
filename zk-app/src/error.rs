@@ -85,6 +85,12 @@ pub enum AppError {
         #[source]
         source: serde_yaml::Error,
     },
+    /// Purge API was called with the wrong request scope for that entry point.
+    #[error("while attempting to purge items: expected {expected} scope")]
+    InvalidPurgeScope {
+        /// Stable scope shape that the called API requires.
+        expected: &'static str,
+    },
     /// Restore was requested for an item that is not currently trashed.
     #[error("while attempting to restore item {target}: item is not trashed")]
     ItemNotTrashed {

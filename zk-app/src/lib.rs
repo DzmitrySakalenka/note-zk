@@ -36,7 +36,10 @@ pub use retention::{
 };
 pub use scan::{ScanOutcome, scan_vault};
 pub use status::{StatusSummary, status_summary};
-pub use trash::{RestoredItem, TrashedItem, restore_asset, restore_note, trash_asset, trash_note};
+pub use trash::{
+    PurgeOutcome, PurgedItem, RestoredItem, SkippedPurge, TrashedItem, purge_expired, purge_item,
+    restore_asset, restore_note, trash_asset, trash_note,
+};
 pub use write::{
     BatchWriteFailure, BatchWriteKind, BatchWriteOutcome, batch_write, create_note, update_note,
 };

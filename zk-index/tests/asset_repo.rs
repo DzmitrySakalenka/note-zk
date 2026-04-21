@@ -288,6 +288,31 @@ fn upsert_asset_persists_and_clears_trash_fields_without_touching_delete_columns
 }
 
 #[test]
+fn mark_deleted_sets_tombstone_fields_without_changing_path() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    let trashed = AssetRecord {
+        current_path: RelativePath::new("99_trash/diagram.png"),
+        trashed_at: Some("2026-04-20T08:00:00Z".to_string()),
+        is_trashed: true,
+        ..sample_asset_record()
+    };
+    AssetRepo::upsert_asset(&connection, &trashed).expect("trashed asset upsert should succeed");
+
+    AssetRepo::mark_deleted(&connection, &trashed.asset_id, "2026-05-01T00:00:00Z")
+        .expect("mark deleted should succeed");
+
+    let actual = AssetRepo::get_asset(&connection, &trashed.asset_id)
+        .expect("asset query should succeed")
+        .expect("asset should exist");
+    assert_eq!(actual.current_path.as_str(), "99_trash/diagram.png");
+    assert!(!actual.is_trashed);
+    assert_eq!(actual.trashed_at, None);
+    assert!(actual.is_deleted);
+    assert_eq!(actual.deleted_at.as_deref(), Some("2026-05-01T00:00:00Z"));
+}
+
+#[test]
 fn replace_asset_references_clears_old_rows_and_inserts_new_ones() {
     let connection = open_memory().expect("in-memory database should open");
     ensure_schema(&connection).expect("schema should be ready");

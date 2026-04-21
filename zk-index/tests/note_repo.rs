@@ -245,6 +245,38 @@ fn upsert_note_preserves_delete_columns_while_toggling_trash_fields() {
 }
 
 #[test]
+fn mark_deleted_sets_tombstone_fields_without_changing_path() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    insert_sample_note(&connection);
+
+    let note_id = sample_note_id();
+    connection
+        .execute(
+            "UPDATE notes_index SET trashed_at = ?1, is_trashed = ?2, current_path = ?3 WHERE note_id = ?4",
+            rusqlite::params![
+                "2026-04-20T08:00:00Z",
+                1_i64,
+                "99_trash/knowledge-graph.md",
+                note_id.as_str()
+            ],
+        )
+        .expect("trashed state seed should succeed");
+
+    NoteRepo::mark_deleted(&connection, &note_id, "2026-05-01T00:00:00Z")
+        .expect("mark deleted should succeed");
+
+    let actual = NoteRepo::get_note(&connection, &note_id)
+        .expect("query should succeed")
+        .expect("note should exist");
+    assert_eq!(actual.current_path.as_str(), "99_trash/knowledge-graph.md");
+    assert!(!actual.is_trashed);
+    assert_eq!(actual.trashed_at, None);
+    assert!(actual.is_deleted);
+    assert_eq!(actual.deleted_at.as_deref(), Some("2026-05-01T00:00:00Z"));
+}
+
+#[test]
 fn replace_tags_replaces_full_tag_set() {
     let connection = open_memory().expect("in-memory database should open");
     ensure_schema(&connection).expect("schema should be ready");

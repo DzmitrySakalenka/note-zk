@@ -7,6 +7,15 @@ use zk_domain::{
 use crate::error::IndexError;
 
 const DEFAULT_SERVER_REVISION: i64 = 0;
+const MARK_NOTE_DELETED: &str = r"
+UPDATE notes_index
+SET
+    trashed_at = NULL,
+    deleted_at = ?2,
+    is_trashed = 0,
+    is_deleted = 1
+WHERE note_id = ?1
+";
 const INSERT_OR_UPDATE_NOTE: &str = r"
 INSERT INTO notes_index (
     note_id,
@@ -163,6 +172,27 @@ impl NoteRepo {
                 source,
                 context: "delete note".to_string(),
             })
+    }
+
+    /// Marks one note row as a persisted hard-delete tombstone.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if the update fails.
+    pub fn mark_deleted(
+        conn: &Connection,
+        note_id: &NoteId,
+        deleted_at: &str,
+    ) -> Result<(), IndexError> {
+        conn.execute(
+            MARK_NOTE_DELETED,
+            rusqlite::params![note_id.as_str(), deleted_at],
+        )
+        .map(|_| ())
+        .map_err(|source| IndexError::Sqlite {
+            source,
+            context: "mark note deleted".to_string(),
+        })
     }
 
     /// Fetches one note row by `note_id`.

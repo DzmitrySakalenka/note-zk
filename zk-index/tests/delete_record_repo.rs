@@ -167,6 +167,44 @@ fn mark_deleted_with_none_revision_clears_existing_revision() {
 }
 
 #[test]
+fn next_delete_revision_returns_max_plus_one() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    assert_eq!(
+        DeleteRecordRepo::next_delete_revision(&connection)
+            .expect("next revision query should succeed")
+            .value(),
+        1
+    );
+
+    DeleteRecordRepo::insert_delete_record(&connection, &sample_delete_record())
+        .expect("delete-record insert should succeed");
+    assert_eq!(
+        DeleteRecordRepo::next_delete_revision(&connection)
+            .expect("next revision query should succeed")
+            .value(),
+        1
+    );
+
+    let revision = ServerRevision::new(7);
+    DeleteRecordRepo::mark_deleted(
+        &connection,
+        "01HZ3NOTE000000000000000A",
+        ItemType::Note,
+        "2026-05-06T00:00:00Z",
+        Some(&revision),
+    )
+    .expect("mark deleted should succeed");
+
+    assert_eq!(
+        DeleteRecordRepo::next_delete_revision(&connection)
+            .expect("next revision query should succeed")
+            .value(),
+        8
+    );
+}
+
+#[test]
 fn list_all_returns_rows_in_deterministic_order() {
     let connection = open_memory().expect("in-memory database should open");
     ensure_schema(&connection).expect("schema should be ready");

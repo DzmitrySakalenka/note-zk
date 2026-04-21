@@ -6,10 +6,11 @@ use chrono::{DateTime, Utc};
 use common::{unique_test_dir, write_text};
 use rusqlite::OpenFlags;
 use zk_app::{
-    AppError, RebuildOptions, rebuild_index, restore_asset, restore_note, trash_asset, trash_note,
+    AppError, Clock, RebuildOptions, purge_expired, purge_item, rebuild_index, restore_asset,
+    restore_note, trash_asset, trash_note,
 };
 use zk_domain::{
-    ItemKind, RestoreRequest, TargetSelector, TrashRequest,
+    ItemKind, PurgeRequest, PurgeScope, RestoreRequest, TargetSelector, TrashRequest,
     config::{EffectiveConfig, FolderPolicy},
     id::{NoteId, RelativePath},
 };
@@ -517,6 +518,386 @@ fn restore_note_rejects_hard_deleted_item() {
 }
 
 #[test]
+fn purge_expired_dry_run_returns_planned_without_mutating_disk_or_db() {
+    let root = unique_test_dir("purge-expired-dry-run");
+    let vault_root = root.join("vault");
+    let note_id = NoteId::new("01PURGEEXPIREDDRyRUN00000001");
+    write_note(
+        &vault_root.join("notes").join("expired.md"),
+        note_id.as_str(),
+        "Expired",
+    );
+
+    let config = base_config(&vault_root);
+    let mut conn = seeded_connection(&vault_root, &config, "purge-expired-dry-run.sqlite");
+    let trashed = trash_note(
+        &vault_root,
+        &config,
+        &mut conn,
+        &TrashRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            reason: None,
+        },
+    )
+    .expect("trash note should succeed");
+    set_retention_until(
+        &conn,
+        note_id.as_str(),
+        zk_domain::sync::ItemType::Note,
+        "2026-04-01T00:00:00Z",
+    );
+
+    let outcome = purge_expired(
+        &vault_root,
+        &config,
+        &mut conn,
+        &PurgeRequest {
+            scope: PurgeScope::Expired,
+            confirm: false,
+        },
+        &FixedClock::new("2026-05-01T00:00:00Z"),
+    )
+    .expect("purge dry run should succeed");
+
+    assert_eq!(outcome.planned.len(), 1);
+    assert!(outcome.executed.is_empty());
+    assert!(outcome.skipped.is_empty());
+    assert_eq!(outcome.planned[0].item_id, note_id.as_str());
+    assert_eq!(outcome.planned[0].kind, ItemKind::Note);
+    assert_eq!(
+        outcome.planned[0].original_path.as_str(),
+        "notes/expired.md"
+    );
+    assert!(vault_root.join(trashed.new_path.as_str()).exists());
+
+    let indexed = NoteRepo::get_note(&conn, &note_id)
+        .expect("note query should succeed")
+        .expect("trashed note row should exist");
+    assert!(indexed.is_trashed);
+    assert!(!indexed.is_deleted);
+    assert!(
+        fetch_delete_record(&conn, note_id.as_str(), zk_domain::sync::ItemType::Note)
+            .deleted_at
+            .is_none()
+    );
+}
+
+#[test]
+fn purge_expired_confirm_deletes_files_and_marks_tombstones() {
+    let root = unique_test_dir("purge-expired-confirm");
+    let vault_root = root.join("vault");
+    let note_id = NoteId::new("01PURGEEXPIREDCONFIRM000001");
+    write_note(
+        &vault_root.join("notes").join("note.md"),
+        note_id.as_str(),
+        "Note",
+    );
+    let asset_relative_path = RelativePath::new("assets/diagram.png");
+    write_text(&vault_root.join(asset_relative_path.as_str()), "png-bytes");
+
+    let config = base_config(&vault_root);
+    let mut conn = seeded_connection(&vault_root, &config, "purge-expired-confirm.sqlite");
+    let trashed_note = trash_note(
+        &vault_root,
+        &config,
+        &mut conn,
+        &TrashRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            reason: None,
+        },
+    )
+    .expect("trash note should succeed");
+    let trashed_asset = trash_asset(
+        &vault_root,
+        &config,
+        &mut conn,
+        &TrashRequest {
+            kind: ItemKind::Asset,
+            target: TargetSelector::ByPath(asset_relative_path.clone()),
+            reason: None,
+        },
+    )
+    .expect("trash asset should succeed");
+    set_retention_until(
+        &conn,
+        note_id.as_str(),
+        zk_domain::sync::ItemType::Note,
+        "2026-04-01T00:00:00Z",
+    );
+    set_retention_until(
+        &conn,
+        &trashed_asset.item_id,
+        zk_domain::sync::ItemType::Asset,
+        "2026-04-01T00:00:00Z",
+    );
+
+    let outcome = purge_expired(
+        &vault_root,
+        &config,
+        &mut conn,
+        &PurgeRequest {
+            scope: PurgeScope::Expired,
+            confirm: true,
+        },
+        &FixedClock::new("2026-05-01T00:00:00Z"),
+    )
+    .expect("purge should succeed");
+
+    assert!(outcome.planned.is_empty());
+    assert_eq!(outcome.executed.len(), 2);
+    assert!(outcome.skipped.is_empty());
+    assert!(!vault_root.join(trashed_note.new_path.as_str()).exists());
+    assert!(!vault_root.join(trashed_asset.new_path.as_str()).exists());
+    assert!(
+        !vault_root
+            .join(expected_trashed_directory(&trashed_note.trashed_at))
+            .exists()
+    );
+    assert_note_tombstone(
+        &conn,
+        &note_id,
+        &trashed_note.new_path,
+        "2026-05-01T00:00:00Z",
+    );
+    assert_asset_tombstone(&conn, &trashed_asset.new_path, "2026-05-01T00:00:00Z");
+    assert_deleted_delete_record(
+        &conn,
+        note_id.as_str(),
+        zk_domain::sync::ItemType::Note,
+        "2026-05-01T00:00:00Z",
+        1,
+    );
+    assert_deleted_delete_record(
+        &conn,
+        &trashed_asset.item_id,
+        zk_domain::sync::ItemType::Asset,
+        "2026-05-01T00:00:00Z",
+        2,
+    );
+}
+
+#[test]
+fn purge_item_rejects_not_yet_expired_item() {
+    let root = unique_test_dir("purge-item-not-expired");
+    let vault_root = root.join("vault");
+    let note_id = NoteId::new("01PURGEITEMNOTEXPIRED000001");
+    write_note(
+        &vault_root.join("notes").join("fresh.md"),
+        note_id.as_str(),
+        "Fresh",
+    );
+
+    let config = base_config(&vault_root);
+    let mut conn = seeded_connection(&vault_root, &config, "purge-item-not-expired.sqlite");
+    trash_note(
+        &vault_root,
+        &config,
+        &mut conn,
+        &TrashRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            reason: None,
+        },
+    )
+    .expect("trash note should succeed");
+
+    let err = purge_item(
+        &vault_root,
+        &config,
+        &mut conn,
+        &PurgeRequest {
+            scope: PurgeScope::Item {
+                kind: ItemKind::Note,
+                target: TargetSelector::ById(note_id.as_str().to_string()),
+            },
+            confirm: true,
+        },
+        &FixedClock::new("2026-04-21T00:00:00Z"),
+    )
+    .expect_err("purge item should reject unexpired retention");
+
+    assert!(matches!(
+        err,
+        AppError::RetentionNotExpired { target, .. } if target == note_id.as_str()
+    ));
+}
+
+#[test]
+fn purge_item_rejects_already_purged_item() {
+    let root = unique_test_dir("purge-item-already-purged");
+    let vault_root = root.join("vault");
+    let note_id = NoteId::new("01PURGEITEMALREADYPURGED001");
+    write_note(
+        &vault_root.join("notes").join("gone.md"),
+        note_id.as_str(),
+        "Gone",
+    );
+
+    let config = base_config(&vault_root);
+    let mut conn = seeded_connection(&vault_root, &config, "purge-item-already-purged.sqlite");
+    trash_note(
+        &vault_root,
+        &config,
+        &mut conn,
+        &TrashRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            reason: None,
+        },
+    )
+    .expect("trash note should succeed");
+    set_retention_until(
+        &conn,
+        note_id.as_str(),
+        zk_domain::sync::ItemType::Note,
+        "2026-04-01T00:00:00Z",
+    );
+    purge_item(
+        &vault_root,
+        &config,
+        &mut conn,
+        &PurgeRequest {
+            scope: PurgeScope::Item {
+                kind: ItemKind::Note,
+                target: TargetSelector::ById(note_id.as_str().to_string()),
+            },
+            confirm: true,
+        },
+        &FixedClock::new("2026-05-01T00:00:00Z"),
+    )
+    .expect("first purge should succeed");
+
+    let err = purge_item(
+        &vault_root,
+        &config,
+        &mut conn,
+        &PurgeRequest {
+            scope: PurgeScope::Item {
+                kind: ItemKind::Note,
+                target: TargetSelector::ById(note_id.as_str().to_string()),
+            },
+            confirm: true,
+        },
+        &FixedClock::new("2026-05-01T00:00:00Z"),
+    )
+    .expect_err("second purge should fail as already purged");
+
+    assert!(matches!(
+        err,
+        AppError::AlreadyPurged { target } if target == note_id.as_str()
+    ));
+}
+
+#[test]
+fn purge_expired_skips_missing_file_without_db_changes() {
+    let root = unique_test_dir("purge-expired-file-missing");
+    let vault_root = root.join("vault");
+    let note_id = NoteId::new("01PURGEEXPIREDFILEMISS0001");
+    write_note(
+        &vault_root.join("notes").join("missing.md"),
+        note_id.as_str(),
+        "Missing",
+    );
+
+    let config = base_config(&vault_root);
+    let mut conn = seeded_connection(&vault_root, &config, "purge-expired-file-missing.sqlite");
+    let trashed = trash_note(
+        &vault_root,
+        &config,
+        &mut conn,
+        &TrashRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            reason: None,
+        },
+    )
+    .expect("trash note should succeed");
+    set_retention_until(
+        &conn,
+        note_id.as_str(),
+        zk_domain::sync::ItemType::Note,
+        "2026-04-01T00:00:00Z",
+    );
+    fs::remove_file(vault_root.join(trashed.new_path.as_str()))
+        .expect("trashed file should be removable");
+
+    let outcome = purge_expired(
+        &vault_root,
+        &config,
+        &mut conn,
+        &PurgeRequest {
+            scope: PurgeScope::Expired,
+            confirm: true,
+        },
+        &FixedClock::new("2026-05-01T00:00:00Z"),
+    )
+    .expect("purge should skip missing file without error");
+
+    assert!(outcome.planned.is_empty());
+    assert!(outcome.executed.is_empty());
+    assert_eq!(outcome.skipped.len(), 1);
+    assert_eq!(outcome.skipped[0].item_id, note_id.as_str());
+    assert_eq!(outcome.skipped[0].reason, "file-missing");
+
+    let note_row = NoteRepo::get_note(&conn, &note_id)
+        .expect("note query should succeed")
+        .expect("trashed note should still exist");
+    assert!(note_row.is_trashed);
+    assert!(!note_row.is_deleted);
+    assert!(
+        fetch_delete_record(&conn, note_id.as_str(), zk_domain::sync::ItemType::Note)
+            .deleted_at
+            .is_none()
+    );
+}
+
+#[test]
+fn purge_apis_reject_scope_mismatch() {
+    let root = unique_test_dir("purge-scope-mismatch");
+    let vault_root = root.join("vault");
+    fs::create_dir_all(&vault_root).expect("vault root should be creatable");
+    let config = base_config(&vault_root);
+    let mut conn = seeded_connection(&vault_root, &config, "purge-scope-mismatch.sqlite");
+
+    let expired_err = purge_expired(
+        &vault_root,
+        &config,
+        &mut conn,
+        &PurgeRequest {
+            scope: PurgeScope::Item {
+                kind: ItemKind::Note,
+                target: TargetSelector::ById("01MISMATCH".to_string()),
+            },
+            confirm: false,
+        },
+        &FixedClock::new("2026-05-01T00:00:00Z"),
+    )
+    .expect_err("expired purge should reject item scope");
+    assert!(matches!(
+        expired_err,
+        AppError::InvalidPurgeScope { expected } if expected == "expired"
+    ));
+
+    let item_err = purge_item(
+        &vault_root,
+        &config,
+        &mut conn,
+        &PurgeRequest {
+            scope: PurgeScope::Expired,
+            confirm: false,
+        },
+        &FixedClock::new("2026-05-01T00:00:00Z"),
+    )
+    .expect_err("item purge should reject expired scope");
+    assert!(matches!(
+        item_err,
+        AppError::InvalidPurgeScope { expected } if expected == "item"
+    ));
+}
+
+#[test]
 fn trash_note_rejects_immutable_folder_without_touching_file_or_db() {
     let root = unique_test_dir("trash-note-immutable");
     let vault_root = root.join("vault");
@@ -825,6 +1206,97 @@ fn expected_trashed_directory(trashed_at: &str) -> String {
         .expect("trashed_at should parse")
         .with_timezone(&Utc);
     format!("99_trash/{}", timestamp.format("%Y-%m-%d"))
+}
+
+fn assert_note_tombstone(
+    conn: &rusqlite::Connection,
+    note_id: &NoteId,
+    current_path: &RelativePath,
+    deleted_at: &str,
+) {
+    let note_row = NoteRepo::get_note(conn, note_id)
+        .expect("note query should succeed")
+        .expect("note tombstone should exist");
+    assert!(!note_row.is_trashed);
+    assert_eq!(note_row.trashed_at, None);
+    assert!(note_row.is_deleted);
+    assert_eq!(note_row.deleted_at.as_deref(), Some(deleted_at));
+    assert_eq!(&note_row.current_path, current_path);
+}
+
+fn assert_asset_tombstone(
+    conn: &rusqlite::Connection,
+    current_path: &RelativePath,
+    deleted_at: &str,
+) {
+    let asset_row = AssetRepo::get_asset_by_path(conn, current_path)
+        .expect("asset query should succeed")
+        .expect("asset tombstone should exist");
+    assert!(!asset_row.is_trashed);
+    assert_eq!(asset_row.trashed_at, None);
+    assert!(asset_row.is_deleted);
+    assert_eq!(asset_row.deleted_at.as_deref(), Some(deleted_at));
+}
+
+fn assert_deleted_delete_record(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+    item_type: zk_domain::sync::ItemType,
+    deleted_at: &str,
+    delete_revision: i64,
+) {
+    let delete_record = fetch_delete_record(conn, item_id, item_type);
+    assert_eq!(delete_record.deleted_at.as_deref(), Some(deleted_at));
+    assert_eq!(
+        delete_record
+            .delete_revision
+            .as_ref()
+            .expect("revision should be assigned")
+            .value(),
+        delete_revision
+    );
+}
+
+struct FixedClock {
+    now: DateTime<Utc>,
+}
+
+impl FixedClock {
+    fn new(now: &str) -> Self {
+        Self {
+            now: DateTime::parse_from_rfc3339(now)
+                .expect("fixed clock timestamp should parse")
+                .with_timezone(&Utc),
+        }
+    }
+}
+
+impl Clock for FixedClock {
+    fn now(&self) -> DateTime<Utc> {
+        self.now
+    }
+}
+
+fn set_retention_until(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+    item_type: zk_domain::sync::ItemType,
+    retention_until: &str,
+) {
+    let mut record = fetch_delete_record(conn, item_id, item_type);
+    record.retention_until = retention_until.to_string();
+    DeleteRecordRepo::insert_delete_record(conn, &record)
+        .expect("delete-record update should succeed");
+}
+
+fn fetch_delete_record(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+    item_type: zk_domain::sync::ItemType,
+) -> zk_domain::sync_state::DeleteRecord {
+    DeleteRecordRepo::get_delete_record(conn, item_id, item_type)
+        .expect("delete-record query should succeed")
+        .expect("delete record should exist")
 }
 
 fn tree_contains_files(path: &Path) -> bool {
