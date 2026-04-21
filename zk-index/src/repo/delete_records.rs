@@ -64,8 +64,11 @@ SELECT
 FROM delete_records
 ORDER BY retention_until ASC, item_type ASC, item_id ASC
 ";
+const SELECT_NEXT_DELETE_REVISION: &str =
+    "SELECT COALESCE(MAX(delete_revision), 0) + 1 FROM delete_records";
 const SAVEPOINT_INSERT_DELETE_RECORD: &str = "delete_record_repo_insert";
 
+/// Repository for logical delete records that track trash retention state.
 pub struct DeleteRecordRepo;
 
 impl DeleteRecordRepo {
@@ -136,6 +139,29 @@ impl DeleteRecordRepo {
         .map_err(|source| IndexError::Sqlite {
             source,
             context: "get delete record".to_string(),
+        })
+    }
+
+    /// Deletes one delete record by logical key `(item_id, item_type)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if enum conversion or delete execution fails.
+    pub fn delete_delete_record(
+        conn: &Connection,
+        item_id: &str,
+        item_type: ItemType,
+    ) -> Result<(), IndexError> {
+        let item_type = encode_item_type(item_type)?;
+
+        conn.execute(
+            DELETE_LOGICAL_DELETE_RECORD,
+            rusqlite::params![item_id, item_type],
+        )
+        .map(|_| ())
+        .map_err(|source| IndexError::Sqlite {
+            source,
+            context: "delete delete record".to_string(),
         })
     }
 
@@ -221,6 +247,20 @@ impl DeleteRecordRepo {
             .map_err(|source| IndexError::Sqlite {
                 source,
                 context: "decode all delete records".to_string(),
+            })
+    }
+
+    /// Returns the next local delete revision for a newly purged item.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if the scalar query fails.
+    pub fn next_delete_revision(conn: &Connection) -> Result<ServerRevision, IndexError> {
+        conn.query_row(SELECT_NEXT_DELETE_REVISION, [], |row| row.get(0))
+            .map(ServerRevision::new)
+            .map_err(|source| IndexError::Sqlite {
+                source,
+                context: "get next delete revision".to_string(),
             })
     }
 }

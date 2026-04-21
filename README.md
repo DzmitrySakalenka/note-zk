@@ -25,10 +25,10 @@ Everything else is derived or coordinated around it:
 Use the workspace-level cargo commands from the repository root:
 
 ```bash
-cargo build
-cargo test
+cargo build --workspace
+cargo test --workspace
 cargo fmt --check
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 Phase 1 CLI examples:
@@ -38,6 +38,9 @@ zk-cli scan --vault <path> --check
 zk-cli scan --vault <path> --write
 zk-cli status --vault <path>
 zk-cli doctor --vault <path>
+zk-cli trash --vault <path> <id-or-path>
+zk-cli restore --vault <path> <id-or-path>
+zk-cli purge --vault <path> --expired --yes
 ```
 
 Add `--json` to any subcommand for machine-readable output on stdout.

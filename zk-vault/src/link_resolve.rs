@@ -18,22 +18,30 @@ use crate::{
 pub enum ClassifiedLink {
     /// Wiki link or extensionless markdown link targeting another note by title/alias.
     NoteLink {
+        /// Unresolved note target text.
         raw_target: String,
+        /// Optional rendered link text to preserve in derived output.
         link_text: Option<String>,
     },
     /// Markdown link with an `http://` or `https://` scheme.
     ExternalUrl {
+        /// Raw URL destination.
         url: String,
+        /// Optional rendered link text to preserve in derived output.
         link_text: Option<String>,
     },
     /// Markdown link whose extension does not match a known note extension.
     AssetPath {
+        /// Raw vault-relative or relative asset path.
         raw_path: String,
+        /// Optional rendered link text to preserve in derived output.
         link_text: Option<String>,
     },
     /// Markdown link whose extension matches a known note extension (e.g. `.md`).
     LocalNotePathLink {
+        /// Raw note path before lookup resolution.
         raw_path: String,
+        /// Optional rendered link text to preserve in derived output.
         link_text: Option<String>,
     },
 }
@@ -43,9 +51,13 @@ pub enum ClassifiedLink {
 /// filename basename, then relative path (with or without extension).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct NoteLookupIndex {
+    /// Case-insensitive title lookup buckets.
     pub titles: HashMap<String, Vec<NoteId>>,
+    /// Case-insensitive alias lookup buckets.
     pub aliases: HashMap<String, Vec<NoteId>>,
+    /// Case-insensitive filename-stem lookup buckets.
     pub basenames: HashMap<String, Vec<NoteId>>,
+    /// Case-insensitive relative-path lookup buckets.
     pub paths: HashMap<String, Vec<NoteId>>,
 }
 
@@ -60,6 +72,7 @@ pub enum ResolveResult {
     NotFound,
 }
 
+/// Builds a note lookup index from normalized scan results.
 #[must_use]
 pub fn build_from_scan(scan_result: &VaultScanResult) -> NoteLookupIndex {
     let duplicate_ids: HashSet<NoteId> = scan_result
@@ -107,6 +120,7 @@ pub fn build_from_scan(scan_result: &VaultScanResult) -> NoteLookupIndex {
 }
 
 impl NoteLookupIndex {
+    /// Resolves one raw note-link target using title, alias, basename, and path precedence.
     #[must_use]
     pub fn resolve_target(&self, raw_target: &str) -> ResolveResult {
         let normalized_key = normalize_lookup_key(raw_target);
@@ -130,6 +144,7 @@ impl NoteLookupIndex {
     }
 }
 
+/// Resolves note, external, and asset links for every uniquely identified parsed note.
 #[must_use]
 pub fn resolve_vault_links(
     scan_result: &VaultScanResult,
@@ -175,6 +190,7 @@ pub fn resolve_vault_links(
     parsed_indexes
 }
 
+/// Classifies extracted raw links before vault-aware resolution.
 #[must_use]
 pub fn classify_links(
     extracted: &ExtractedLinks,

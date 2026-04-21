@@ -3,7 +3,7 @@ use zk_app::{DoctorIssue, DoctorReport, StatusSummary};
 use zk_cli::output::{
     ScanCommandPayload, ScanSummary, write_doctor_human, write_scan_human, write_status_human,
 };
-use zk_domain::{id::RelativePath, note::DiagnosticLevel};
+use zk_domain::{id::RelativePath, note::DiagnosticLevel, sync::ItemType};
 use zk_vault::NormalizationSummary;
 
 fn render_scan(payload: &ScanCommandPayload) -> String {
@@ -68,7 +68,11 @@ fn status_fixture() -> StatusSummary {
         notes_with_warnings: 99,
         unresolved_link_count: 4,
         duplicate_id_count: 7,
-        trash_count: 2,
+        trashed_notes: 2,
+        trashed_assets: 5,
+        pending_purge: 6,
+        purged_notes: 8,
+        purged_assets: 9,
     }
 }
 
@@ -77,20 +81,28 @@ fn doctor_fixture() -> DoctorReport {
         errors: vec![DoctorIssue {
             rule_id: "duplicate-id".to_string(),
             path: Some(RelativePath::new("notes/dup-a.md")),
+            item_id: Some("01SNAPSHOTDUPLICATE000000001".to_string()),
+            item_type: Some(ItemType::Note),
             level: DiagnosticLevel::Error,
             message: "duplicate note id detected".to_string(),
         }],
         warnings: vec![DoctorIssue {
-            rule_id: "unresolved-link".to_string(),
-            path: Some(RelativePath::new("notes/issues.md")),
+            rule_id: "trash-file-without-record".to_string(),
+            path: Some(RelativePath::new("99_trash/issues.md")),
+            item_id: Some("01SNAPSHOTTRASHRULE000000001".to_string()),
+            item_type: Some(ItemType::Note),
             level: DiagnosticLevel::Warning,
-            message: "wiki link points to a missing note".to_string(),
+            message: "trashed note file has no matching delete record".to_string(),
         }],
         infos: vec![DoctorIssue {
-            rule_id: "title-derived-from-h1".to_string(),
-            path: None,
+            rule_id: "retention-expired-not-purged".to_string(),
+            path: Some(RelativePath::new("99_trash/expired.md")),
+            item_id: Some("01SNAPSHOTRETENTION00000001".to_string()),
+            item_type: Some(ItemType::Note),
             level: DiagnosticLevel::Info,
-            message: "title derived from the first heading".to_string(),
+            message:
+                "retention expired on 2026-04-01T00:00:00Z; run `zk-cli purge --expired --yes`"
+                    .to_string(),
         }],
     }
 }
@@ -101,6 +113,8 @@ fn doctor_warnings_only_fixture() -> DoctorReport {
         warnings: vec![DoctorIssue {
             rule_id: "unresolved-link".to_string(),
             path: Some(RelativePath::new("notes/issues.md")),
+            item_id: None,
+            item_type: None,
             level: DiagnosticLevel::Warning,
             message: "wiki link points to a missing note".to_string(),
         }],
@@ -113,6 +127,8 @@ fn doctor_errors_and_infos_fixture() -> DoctorReport {
         errors: vec![DoctorIssue {
             rule_id: "duplicate-id".to_string(),
             path: Some(RelativePath::new("notes/dup-a.md")),
+            item_id: None,
+            item_type: None,
             level: DiagnosticLevel::Error,
             message: "duplicate note id detected".to_string(),
         }],
@@ -120,6 +136,8 @@ fn doctor_errors_and_infos_fixture() -> DoctorReport {
         infos: vec![DoctorIssue {
             rule_id: "title-derived-from-h1".to_string(),
             path: None,
+            item_id: None,
+            item_type: None,
             level: DiagnosticLevel::Info,
             message: "title derived from the first heading".to_string(),
         }],

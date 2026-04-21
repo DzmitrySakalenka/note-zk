@@ -29,6 +29,7 @@ pub(crate) trait ValidationRule {
 }
 
 #[must_use]
+/// Validates one vault scan using derived link and asset indexes built on demand.
 pub fn validate_vault(scan_result: &VaultScanResult, config: &EffectiveConfig) -> ValidationReport {
     let parsed_indexes = resolve_vault_links(scan_result, config);
     validate_vault_with_parsed_indexes(scan_result, &parsed_indexes, config)
@@ -172,6 +173,7 @@ fn parse_rule_id(name: &str) -> Option<RuleId> {
         "DefaultUntaggedTag" => Some(RuleId::DefaultUntaggedTag),
         "FrontmatterInserted" => Some(RuleId::FrontmatterInserted),
         "IdFormatSuspicious" => Some(RuleId::IdFormatSuspicious),
+        "TrashedUnknownIdentity" => Some(RuleId::TrashedUnknownIdentity),
         "UnresolvedLink" => Some(RuleId::UnresolvedLink),
         "AmbiguousLink" => Some(RuleId::AmbiguousLink),
         "BrokenAssetRef" => Some(RuleId::BrokenAssetRef),
@@ -887,9 +889,10 @@ fn rule_sort_key(rule: RuleId) -> u8 {
         RuleId::DefaultUntaggedTag => 11,
         RuleId::FrontmatterInserted => 12,
         RuleId::IdFormatSuspicious => 13,
-        RuleId::UnresolvedLink => 14,
-        RuleId::AmbiguousLink => 15,
-        RuleId::BrokenAssetRef => 16,
+        RuleId::TrashedUnknownIdentity => 14,
+        RuleId::UnresolvedLink => 15,
+        RuleId::AmbiguousLink => 16,
+        RuleId::BrokenAssetRef => 17,
         _ => u8::MAX,
     }
 }

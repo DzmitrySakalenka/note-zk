@@ -65,6 +65,9 @@ fn preserves_app_owned_payloads() {
     let not_found = AppError::NoteNotFound {
         note_id: NoteId::new("01TESTNOTEID00000000000000"),
     };
+    let item_not_found = AppError::ItemNotFound {
+        target: "assets/missing.png".to_string(),
+    };
     let path_exists = AppError::NotePathExists {
         path: RelativePath::new("notes/existing.md"),
     };
@@ -82,6 +85,10 @@ fn preserves_app_owned_payloads() {
         AppError::NoteNotFound { note_id } if note_id.as_str() == "01TESTNOTEID00000000000000"
     ));
     assert!(matches!(
+        item_not_found,
+        AppError::ItemNotFound { target } if target == "assets/missing.png"
+    ));
+    assert!(matches!(
         path_exists,
         AppError::NotePathExists { path } if path.as_str() == "notes/existing.md"
     ));
@@ -93,4 +100,81 @@ fn preserves_app_owned_payloads() {
         } if request_note_id.as_str() == "01REQUESTNOTEID000000000000"
             && frontmatter_note_id.as_str() == "01FRONTMATTERID00000000000"
     ));
+}
+
+#[test]
+fn preserves_trash_lifecycle_error_payloads() {
+    let invalid_purge_scope = AppError::InvalidPurgeScope { expected: "item" };
+    let item_not_trashed = AppError::ItemNotTrashed {
+        target: "notes/live.md".to_string(),
+    };
+    let already_purged = AppError::AlreadyPurged {
+        target: "notes/purged.md".to_string(),
+    };
+    let restore_target_exists = AppError::RestoreTargetExists {
+        path: RelativePath::new("notes/existing.md"),
+    };
+    let retention_not_expired = AppError::RetentionNotExpired {
+        target: "notes/fresh.md".to_string(),
+        retention_until: "2026-05-01T00:00:00Z".to_string(),
+    };
+    let trashed_item_missing_id = AppError::TrashedItemMissingId {
+        path: RelativePath::new("99_trash/lost.md"),
+    };
+
+    assert!(matches!(
+        invalid_purge_scope,
+        AppError::InvalidPurgeScope { expected } if expected == "item"
+    ));
+    assert!(matches!(
+        item_not_trashed,
+        AppError::ItemNotTrashed { target } if target == "notes/live.md"
+    ));
+    assert!(matches!(
+        already_purged,
+        AppError::AlreadyPurged { target } if target == "notes/purged.md"
+    ));
+    assert!(matches!(
+        restore_target_exists,
+        AppError::RestoreTargetExists { path } if path.as_str() == "notes/existing.md"
+    ));
+    assert!(matches!(
+        retention_not_expired,
+        AppError::RetentionNotExpired {
+            target,
+            retention_until
+        } if target == "notes/fresh.md" && retention_until == "2026-05-01T00:00:00Z"
+    ));
+    assert!(matches!(
+        trashed_item_missing_id,
+        AppError::TrashedItemMissingId { path } if path.as_str() == "99_trash/lost.md"
+    ));
+}
+
+#[test]
+fn preserves_index_context_payload_and_display() {
+    let source = IndexError::Sqlite {
+        source: rusqlite::Error::QueryReturnedNoRows,
+        context: "get delete record".to_string(),
+    };
+    let err = AppError::IndexContext {
+        context: "while fetching delete record for note 01TESTNOTEID00000000000000 during restore"
+            .to_string(),
+        source,
+    };
+
+    assert!(matches!(
+        &err,
+        AppError::IndexContext { context, source: IndexError::Sqlite { context: source_context, .. } }
+            if context == "while fetching delete record for note 01TESTNOTEID00000000000000 during restore"
+                && source_context == "get delete record"
+    ));
+    assert!(
+        err.to_string()
+            .contains("while attempting to access local index data")
+    );
+    assert!(err.to_string().contains(
+        "while fetching delete record for note 01TESTNOTEID00000000000000 during restore"
+    ));
+    assert!(err.to_string().contains("get delete record"));
 }

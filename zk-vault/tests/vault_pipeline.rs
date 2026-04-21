@@ -10,8 +10,10 @@ use zk_domain::{
     id::{ContentHash, RelativePath},
     note::DiagnosticLevel,
 };
+use zk_vault::error::VaultError;
 use zk_vault::{
-    NormalizationResult, apply_normalization, atomic_write_file, parse_note_file, scan_vault,
+    NormalizationResult, apply_normalization, atomic_move_file, atomic_write_file, parse_note_file,
+    scan_vault,
 };
 
 fn write_text_file(path: &Path, content: &str) {
@@ -343,6 +345,40 @@ fn apply_normalization_skips_notes_with_duplicate_ids() {
 }
 
 #[test]
+fn apply_normalization_does_not_rewrite_trashed_notes_even_when_live_mode_would_normalize_them() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let vault_root = tempdir.path();
+    let mut config = base_config(vault_root);
+    config.trash_dir = "99_trash".to_string();
+
+    let trashed_path = vault_root.join("99_trash/derived-title.md");
+    let original_content =
+        "---\nid: 01TRASHEDDERIVEDTITLE00000001\ntags:\n  - rust\n---\n# Derived Title\nBody\n";
+    write_text_file(&trashed_path, original_content);
+
+    let scan_result = scan_vault(vault_root, &config).expect("scan should succeed");
+    let note_result = find_note_result(&scan_result.notes, "99_trash/derived-title.md");
+    let summary = apply_normalization(vault_root, &scan_result).expect("apply should succeed");
+
+    assert_eq!(note_result.trash_state, zk_vault::TrashState::Trashed);
+    assert_eq!(
+        note_result.note_id.as_ref().map(ToString::to_string),
+        Some("01TRASHEDDERIVEDTITLE00000001".to_string())
+    );
+    assert_eq!(
+        note_result
+            .document
+            .as_ref()
+            .map(|document| document.frontmatter.title.clone()),
+        Some("Derived Title".to_string())
+    );
+    assert!(!note_result.plan.needs_title_derivation);
+    assert_eq!(summary.files_written, 0);
+    assert_eq!(summary.files_skipped_no_change, 1);
+    assert_eq!(read_file_text(&trashed_path), original_content);
+}
+
+#[test]
 fn atomic_write_file_replaces_target_content_without_leftover_temp_files() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let target_path = tempdir.path().join("atomic.md");
@@ -373,15 +409,26 @@ fn atomic_write_file_creates_new_file_with_expected_content() {
 }
 
 #[test]
-fn atomic_write_file_cleans_temp_file_on_rename_failure() {
+fn atomic_write_file_returns_io_error_and_cleans_temp_file_on_persist_failure() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let target_dir_path = tempdir.path().join("target-is-directory");
     fs::create_dir_all(&target_dir_path).expect("directory should be created");
 
     let err = atomic_write_file(&target_dir_path, b"content")
-        .expect_err("rename to directory path should fail");
-    let rendered = err.to_string();
-    assert!(!rendered.is_empty());
+        .expect_err("persist to directory path should fail");
+    match err {
+        VaultError::Io { path, source } => {
+            assert_eq!(path, target_dir_path);
+            assert!(
+                source.raw_os_error().is_some(),
+                "persist failure should preserve the underlying os error"
+            );
+        }
+        _ => panic!("expected io error from persist failure"),
+    }
+
+    assert!(!target_dir_path.is_file());
+    assert!(target_dir_path.is_dir());
 
     let entries: Vec<PathBuf> = fs::read_dir(tempdir.path())
         .expect("directory should be readable")
@@ -389,6 +436,50 @@ fn atomic_write_file_cleans_temp_file_on_rename_failure() {
         .collect();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0], target_dir_path);
+
+    let stray_temp_files: Vec<PathBuf> = fs::read_dir(tempdir.path())
+        .expect("directory should be readable")
+        .map(|entry| entry.expect("entry should be readable").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(".tmp"))
+        })
+        .collect();
+    assert!(
+        stray_temp_files.is_empty(),
+        "persist failure should not leave .tmp siblings behind"
+    );
+}
+
+#[test]
+fn atomic_move_file_moves_existing_file_and_creates_destination_parent() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let source_path = tempdir.path().join("notes/source.md");
+    let destination_path = tempdir.path().join("99_trash/2026-04-21/source.md");
+    write_text_file(&source_path, "move me");
+
+    atomic_move_file(&source_path, &destination_path).expect("atomic move should succeed");
+
+    assert!(!source_path.exists());
+    assert_eq!(read_file_text(&destination_path), "move me");
+}
+
+#[test]
+fn atomic_move_file_leaves_source_untouched_when_rename_fails() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let source_path = tempdir.path().join("notes/source.md");
+    let destination_dir = tempdir.path().join("target-is-directory");
+    write_text_file(&source_path, "move me");
+    fs::create_dir_all(&destination_dir).expect("directory should be created");
+
+    let err = atomic_move_file(&source_path, &destination_dir)
+        .expect_err("rename to directory path should fail");
+    let rendered = err.to_string();
+
+    assert!(!rendered.is_empty());
+    assert_eq!(read_file_text(&source_path), "move me");
+    assert!(destination_dir.is_dir());
 }
 
 #[test]

@@ -7,7 +7,8 @@ use zk_domain::{
     note::{NoteDocument, NoteFrontmatter},
 };
 use zk_vault::{
-    NormalizationPlan, NormalizationResult, TitleSource, VaultScanResult, resolve_vault_links,
+    NormalizationPlan, NormalizationResult, TitleSource, TrashState, VaultScanResult,
+    resolve_vault_links,
 };
 
 fn base_config() -> EffectiveConfig {
@@ -60,6 +61,9 @@ fn make_note(
 
     NormalizationResult {
         relative_path: RelativePath::new(path),
+        note_id: Some(frontmatter.id.clone()),
+        trash_state: TrashState::Live,
+        trashed_at: None,
         plan: empty_plan(),
         frontmatter: Some(frontmatter),
         document: Some(document),
@@ -70,6 +74,9 @@ fn make_note(
 fn make_note_without_frontmatter(path: &str) -> NormalizationResult {
     NormalizationResult {
         relative_path: RelativePath::new(path),
+        note_id: None,
+        trash_state: TrashState::Live,
+        trashed_at: None,
         plan: empty_plan(),
         frontmatter: None,
         document: None,

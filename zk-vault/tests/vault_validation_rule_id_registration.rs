@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 pub use zk_vault::resolve_vault_links;
 pub use zk_vault::{
-    NormalizationPlan, NormalizationResult, TitleSource, VaultScanResult, analyze_body,
+    NormalizationPlan, NormalizationResult, TitleSource, TrashState, VaultScanResult, analyze_body,
 };
 
 #[allow(dead_code)]
@@ -57,6 +57,9 @@ fn base_config() -> EffectiveConfig {
 fn sample_note(path: &str) -> NormalizationResult {
     NormalizationResult {
         relative_path: RelativePath::new(path),
+        note_id: None,
+        trash_state: TrashState::Live,
+        trashed_at: None,
         plan: NormalizationPlan {
             needs_id_injection: false,
             needs_title_derivation: false,
@@ -88,6 +91,7 @@ fn disabled_rules_parse_new_rule_ids() {
     let mut config = base_config();
     config.validation.disabled_rules = vec![
         "InvalidFrontmatter".to_string(),
+        "TrashedUnknownIdentity".to_string(),
         "UnresolvedLink".to_string(),
         "AmbiguousLink".to_string(),
         "BrokenAssetRef".to_string(),
@@ -98,6 +102,11 @@ fn disabled_rules_parse_new_rule_ids() {
             id: RuleId::InvalidFrontmatter,
             default_level: DiagnosticLevel::Error,
             note_message: "invalid frontmatter",
+        }),
+        Box::new(StubNoteRule {
+            id: RuleId::TrashedUnknownIdentity,
+            default_level: DiagnosticLevel::Warning,
+            note_message: "trashed note identity cannot be recovered",
         }),
         Box::new(StubNoteRule {
             id: RuleId::UnresolvedLink,
@@ -127,6 +136,7 @@ fn severity_overrides_parse_new_rule_ids() {
     let mut config = base_config();
     config.validation.severity_overrides = BTreeMap::from([
         ("InvalidFrontmatter".to_string(), "info".to_string()),
+        ("TrashedUnknownIdentity".to_string(), "warning".to_string()),
         ("UnresolvedLink".to_string(), "error".to_string()),
         ("AmbiguousLink".to_string(), "error".to_string()),
         ("BrokenAssetRef".to_string(), "error".to_string()),
@@ -137,6 +147,11 @@ fn severity_overrides_parse_new_rule_ids() {
             id: RuleId::InvalidFrontmatter,
             default_level: DiagnosticLevel::Error,
             note_message: "invalid frontmatter",
+        }),
+        Box::new(StubNoteRule {
+            id: RuleId::TrashedUnknownIdentity,
+            default_level: DiagnosticLevel::Error,
+            note_message: "trashed note identity cannot be recovered",
         }),
         Box::new(StubNoteRule {
             id: RuleId::UnresolvedLink,
@@ -157,12 +172,15 @@ fn severity_overrides_parse_new_rule_ids() {
 
     let report = validate_impl::validate_vault_with_rules(&sample_scan_result(), &config, rules);
 
-    assert_eq!(report.findings.len(), 4);
+    assert_eq!(report.findings.len(), 5);
     assert!(report.findings.iter().any(|finding| {
         finding.rule == RuleId::InvalidFrontmatter && finding.level == DiagnosticLevel::Info
     }));
+    assert!(report.findings.iter().any(|finding| {
+        finding.rule == RuleId::TrashedUnknownIdentity && finding.level == DiagnosticLevel::Warning
+    }));
     assert_eq!(report.summary.error_count, 3);
-    assert_eq!(report.summary.warning_count, 0);
+    assert_eq!(report.summary.warning_count, 1);
     assert_eq!(report.summary.info_count, 1);
 }
 
@@ -186,6 +204,11 @@ fn summary_sort_order_places_new_rule_ids_after_id_format_suspicious() {
             note_message: "suspicious id format",
         }),
         Box::new(StubNoteRule {
+            id: RuleId::TrashedUnknownIdentity,
+            default_level: DiagnosticLevel::Warning,
+            note_message: "trashed note identity cannot be recovered",
+        }),
+        Box::new(StubNoteRule {
             id: RuleId::AmbiguousLink,
             default_level: DiagnosticLevel::Warning,
             note_message: "ambiguous note link",
@@ -204,6 +227,7 @@ fn summary_sort_order_places_new_rule_ids_after_id_format_suspicious() {
         vec![
             (RuleId::InvalidFrontmatter, 1),
             (RuleId::IdFormatSuspicious, 1),
+            (RuleId::TrashedUnknownIdentity, 1),
             (RuleId::UnresolvedLink, 1),
             (RuleId::AmbiguousLink, 1),
             (RuleId::BrokenAssetRef, 1),

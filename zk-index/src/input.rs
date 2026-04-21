@@ -35,6 +35,10 @@ pub struct NoteInput {
     pub external_links: Vec<ExternalLink>,
     /// Outbound asset path references.
     pub asset_references: Vec<AssetReference>,
+    /// `true` when the note lives under the configured `trash_dir` at scan time.
+    pub is_trashed: bool,
+    /// Scan-time trash timestamp for a trashed note, if known.
+    pub trashed_at: Option<String>,
 }
 
 // ==========================================================================
@@ -52,4 +56,8 @@ pub struct AssetInput {
     pub mime_type: Option<String>,
     /// Current asset size in bytes.
     pub size_bytes: u64,
+    /// `true` when the asset lives under the configured `trash_dir` at scan time.
+    pub is_trashed: bool,
+    /// Scan-time trash timestamp for a trashed asset, if known.
+    pub trashed_at: Option<String>,
 }

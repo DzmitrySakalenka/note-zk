@@ -3,12 +3,13 @@ use std::fs;
 mod common;
 
 use common::{unique_test_dir, write_text};
-use zk_app::{RebuildOptions, RebuildOutcome, rebuild_index};
+use zk_app::{RebuildOptions, RebuildOutcome, ReconciliationStats, rebuild_index};
 use zk_domain::{
     config::EffectiveConfig,
     id::{NoteId, RelativePath},
+    sync::ItemType,
 };
-use zk_index::{NoteRepo, open_memory};
+use zk_index::{DeleteRecordRepo, NoteRepo, open_memory};
 
 #[test]
 fn rebuild_index_orchestrates_scan_bridge_and_rebuild_idempotently() {
@@ -57,12 +58,7 @@ Body content
     let first_outcome = rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
         .expect("first rebuild should succeed");
 
-    let first_index_stats = match &first_outcome {
-        RebuildOutcome::ScanOnly { index_stats, .. } => index_stats,
-        RebuildOutcome::Normalized { .. } => {
-            panic!("default rebuild should not return normalization payload")
-        }
-    };
+    let first_index_stats = expect_scan_only(&first_outcome);
 
     assert!(first_index_stats.notes_upserted >= 2);
     assert!(first_index_stats.assets_upserted >= 1);
@@ -79,12 +75,7 @@ Body content
     let second_outcome = rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
         .expect("second rebuild should succeed");
 
-    let second_index_stats = match &second_outcome {
-        RebuildOutcome::ScanOnly { index_stats, .. } => index_stats,
-        RebuildOutcome::Normalized { .. } => {
-            panic!("default rebuild should not return normalization payload")
-        }
-    };
+    let second_index_stats = expect_scan_only(&second_outcome);
 
     assert_eq!(second_index_stats, first_index_stats);
     assert_eq!(read_table_counts(&conn), first_counts);
@@ -157,16 +148,7 @@ Body content
     )
     .expect("rebuild with normalization write should succeed");
 
-    let (index_stats, normalization) = match &outcome {
-        RebuildOutcome::Normalized {
-            index_stats,
-            normalization,
-            ..
-        } => (index_stats, normalization),
-        RebuildOutcome::ScanOnly { .. } => {
-            panic!("write-normalized rebuild should return normalization payload")
-        }
-    };
+    let (index_stats, normalization) = expect_normalized(&outcome);
 
     assert!(normalization.files_written >= 1);
     assert!(index_stats.notes_upserted >= 1);
@@ -184,6 +166,60 @@ Body content
     assert_eq!(
         indexed_note.current_path,
         RelativePath::new("notes/missing-id.md")
+    );
+}
+
+#[test]
+fn rebuild_index_reconciles_delete_records_for_trashed_scan_results() {
+    let root = unique_test_dir("rebuild-index-trash-reconciliation");
+    let vault_root = root.join("vault");
+    let trashed_note_id = NoteId::new("01TRASHREBUILDRCNOTE0000001");
+
+    write_text(
+        &vault_root.join("99_trash").join("archived.md"),
+        r"---
+id: 01TRASHREBUILDRCNOTE0000001
+title: Archived Note
+---
+# Archived Note
+",
+    );
+    write_text(
+        &vault_root.join("99_trash").join("diagram.png"),
+        "png-bytes",
+    );
+
+    let config = EffectiveConfig {
+        vault_path: vault_root.clone(),
+        allowed_note_extensions: vec!["md".to_string()],
+        ..EffectiveConfig::default()
+    };
+
+    let mut conn = open_memory().expect("open in-memory SQLite");
+    let outcome = rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
+        .expect("rebuild should succeed");
+
+    let reconciliation = match &outcome {
+        RebuildOutcome::ScanOnly { reconciliation, .. } => reconciliation,
+        RebuildOutcome::Normalized { .. } => {
+            panic!("default rebuild should not return normalization payload")
+        }
+    };
+
+    assert_eq!(reconciliation.inserted, 2u32);
+    assert_eq!(reconciliation.refreshed, 0u32);
+    assert_eq!(reconciliation.cleared, 0u32);
+    assert_eq!(reconciliation.orphans_warned, 0u32);
+    assert!(
+        DeleteRecordRepo::get_delete_record(&conn, trashed_note_id.as_str(), ItemType::Note)
+            .expect("trashed note delete-record query should succeed")
+            .is_some()
+    );
+    assert_eq!(
+        DeleteRecordRepo::list_all(&conn)
+            .expect("list delete records should succeed")
+            .len(),
+        2
     );
 }
 
@@ -230,4 +266,46 @@ fn extract_frontmatter_id(contents: &str) -> Option<String> {
     }
 
     None
+}
+
+fn expect_scan_only(outcome: &RebuildOutcome) -> &zk_index::RebuildStats {
+    match outcome {
+        RebuildOutcome::ScanOnly {
+            index_stats,
+            reconciliation,
+            ..
+        } => {
+            assert_zero_reconciliation(reconciliation);
+            index_stats
+        }
+        RebuildOutcome::Normalized { .. } => {
+            panic!("default rebuild should not return normalization payload")
+        }
+    }
+}
+
+fn expect_normalized(
+    outcome: &RebuildOutcome,
+) -> (&zk_index::RebuildStats, &zk_vault::NormalizationSummary) {
+    match outcome {
+        RebuildOutcome::Normalized {
+            index_stats,
+            normalization,
+            reconciliation,
+            ..
+        } => {
+            assert_zero_reconciliation(reconciliation);
+            (index_stats, normalization)
+        }
+        RebuildOutcome::ScanOnly { .. } => {
+            panic!("write-normalized rebuild should return normalization payload")
+        }
+    }
+}
+
+fn assert_zero_reconciliation(reconciliation: &ReconciliationStats) {
+    assert_eq!(reconciliation.inserted, 0u32);
+    assert_eq!(reconciliation.refreshed, 0u32);
+    assert_eq!(reconciliation.cleared, 0u32);
+    assert_eq!(reconciliation.orphans_warned, 0u32);
 }

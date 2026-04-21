@@ -6,7 +6,7 @@ use zk_domain::{
 };
 use zk_vault::{
     NormalizationPlan, NormalizationResult, NoteLookupIndex, ResolveResult, TitleSource,
-    VaultScanResult, build_from_scan,
+    TrashState, VaultScanResult, build_from_scan,
 };
 
 fn empty_plan() -> NormalizationPlan {
@@ -46,6 +46,9 @@ fn make_note(path: &str, id: &str, title: &str, aliases: &[&str]) -> Normalizati
 
     NormalizationResult {
         relative_path: RelativePath::new(path),
+        note_id: Some(frontmatter.id.clone()),
+        trash_state: TrashState::Live,
+        trashed_at: None,
         plan: empty_plan(),
         frontmatter: Some(frontmatter),
         document: Some(document),
@@ -61,6 +64,9 @@ fn make_note_without_document(
 ) -> NormalizationResult {
     NormalizationResult {
         relative_path: RelativePath::new(path),
+        note_id: Some(NoteId::new(id)),
+        trash_state: TrashState::Live,
+        trashed_at: None,
         plan: empty_plan(),
         frontmatter: Some(frontmatter_with(id, title, aliases)),
         document: None,

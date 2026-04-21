@@ -150,6 +150,8 @@ pub enum RuleId {
     FrontmatterInserted,
     /// ID format is suspicious for ULID/Crockford expectations.
     IdFormatSuspicious,
+    /// Trashed note cannot be linked back to a stable note identity.
+    TrashedUnknownIdentity,
     /// Outbound note link could not be resolved to any note.
     UnresolvedLink,
     /// Outbound note link matches more than one possible target.
@@ -177,6 +179,7 @@ impl RuleId {
             RuleId::DefaultUntaggedTag => "default untagged tag",
             RuleId::FrontmatterInserted => "frontmatter inserted",
             RuleId::IdFormatSuspicious => "suspicious id format",
+            RuleId::TrashedUnknownIdentity => "trashed note identity cannot be recovered",
             RuleId::UnresolvedLink => "unresolved note link",
             RuleId::AmbiguousLink => "ambiguous note link",
             RuleId::BrokenAssetRef => "broken asset reference",
@@ -201,6 +204,7 @@ impl RuleId {
             RuleId::DefaultUntaggedTag => "default-untagged-tag",
             RuleId::FrontmatterInserted => "frontmatter-inserted",
             RuleId::IdFormatSuspicious => "id-format-suspicious",
+            RuleId::TrashedUnknownIdentity => "trashed-unknown-identity",
             RuleId::UnresolvedLink => "unresolved-link",
             RuleId::AmbiguousLink => "ambiguous-link",
             RuleId::BrokenAssetRef => "broken-asset-ref",

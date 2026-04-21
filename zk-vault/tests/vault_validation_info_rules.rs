@@ -8,7 +8,8 @@ use zk_domain::{
     },
 };
 use zk_vault::{
-    NormalizationPlan, NormalizationResult, TitleSource, VaultScanResult, validate_vault,
+    NormalizationPlan, NormalizationResult, TitleSource, TrashState, VaultScanResult,
+    validate_vault,
 };
 
 fn base_config() -> EffectiveConfig {
@@ -69,6 +70,9 @@ fn make_note(
 
     NormalizationResult {
         relative_path: RelativePath::new(path),
+        note_id: Some(frontmatter.id.clone()),
+        trash_state: TrashState::Live,
+        trashed_at: None,
         plan,
         frontmatter: Some(frontmatter),
         document: Some(document),

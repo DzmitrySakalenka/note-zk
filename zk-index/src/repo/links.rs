@@ -56,6 +56,7 @@ ORDER BY rowid ASC
 const SAVEPOINT_REPLACE_NOTE_LINKS: &str = "link_repo_replace_note_links";
 const SAVEPOINT_REPLACE_EXTERNAL_LINKS: &str = "link_repo_replace_external_links";
 
+/// Repository for derived note-link and external-link rows.
 pub struct LinkRepo;
 
 impl LinkRepo {

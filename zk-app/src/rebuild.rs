@@ -2,10 +2,13 @@ use std::path::Path;
 
 use rusqlite::Connection;
 use zk_domain::config::EffectiveConfig;
-use zk_index::RebuildStats;
+use zk_index::{IndexError, RebuildStats};
 use zk_vault::NormalizationSummary;
 
-use crate::{AppError, ScanOutcome, build_asset_inputs, build_note_inputs, scan_vault};
+use crate::{
+    AppError, ReconciliationStats, ScanOutcome, SystemClock, build_asset_inputs, build_note_inputs,
+    reconcile_delete_records, scan_vault,
+};
 
 /// Options controlling rebuild orchestration behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -23,6 +26,8 @@ pub enum RebuildOutcome {
         scan_outcome: ScanOutcome,
         /// Index-layer rebuild statistics.
         index_stats: RebuildStats,
+        /// Delete-record reconciliation statistics for the rebuilt index state.
+        reconciliation: ReconciliationStats,
     },
     /// Rebuild output after normalization writes were applied.
     Normalized {
@@ -32,6 +37,8 @@ pub enum RebuildOutcome {
         index_stats: RebuildStats,
         /// Summary of normalization writes performed before rebuilding.
         normalization: NormalizationSummary,
+        /// Delete-record reconciliation statistics for the rebuilt index state.
+        reconciliation: ReconciliationStats,
     },
 }
 
@@ -48,31 +55,50 @@ pub fn rebuild_index(
     options: RebuildOptions,
 ) -> Result<RebuildOutcome, AppError> {
     let mut scan_outcome = scan_vault(vault_root, config)?;
-
-    if options.write_normalized {
+    let normalization = if options.write_normalized {
         let normalization = zk_vault::apply_normalization(vault_root, &scan_outcome.scan_result)?;
         scan_outcome = scan_vault(vault_root, config)?;
-
-        zk_index::ensure_schema(conn)?;
-        let note_inputs =
-            build_note_inputs(&scan_outcome.scan_result, &scan_outcome.parsed_indexes)?;
-        let asset_inputs = build_asset_inputs(&scan_outcome.scan_result, vault_root)?;
-        let index_stats = zk_index::rebuild_index(conn, &note_inputs, &asset_inputs)?;
-
-        return Ok(RebuildOutcome::Normalized {
-            scan_outcome,
-            index_stats,
-            normalization,
-        });
-    }
+        Some(normalization)
+    } else {
+        None
+    };
 
     zk_index::ensure_schema(conn)?;
     let note_inputs = build_note_inputs(&scan_outcome.scan_result, &scan_outcome.parsed_indexes)?;
     let asset_inputs = build_asset_inputs(&scan_outcome.scan_result, vault_root)?;
-    let index_stats = zk_index::rebuild_index(conn, &note_inputs, &asset_inputs)?;
+    let transaction = conn.transaction().map_err(|source| {
+        AppError::Index(IndexError::Sqlite {
+            source,
+            context: "begin rebuild transaction".to_string(),
+        })
+    })?;
+    let index_stats =
+        zk_index::rebuild_index_in_transaction(&transaction, &note_inputs, &asset_inputs)?;
+    let reconciliation = reconcile_delete_records(
+        &transaction,
+        &note_inputs,
+        &asset_inputs,
+        config.retention_days,
+        &SystemClock,
+    )?;
+    transaction.commit().map_err(|source| {
+        AppError::Index(IndexError::Sqlite {
+            source,
+            context: "commit rebuild transaction".to_string(),
+        })
+    })?;
 
-    Ok(RebuildOutcome::ScanOnly {
-        scan_outcome,
-        index_stats,
-    })
+    match normalization {
+        Some(normalization) => Ok(RebuildOutcome::Normalized {
+            scan_outcome,
+            index_stats,
+            normalization,
+            reconciliation,
+        }),
+        None => Ok(RebuildOutcome::ScanOnly {
+            scan_outcome,
+            index_stats,
+            reconciliation,
+        }),
+    }
 }

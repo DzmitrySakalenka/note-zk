@@ -67,6 +67,7 @@ const LIST_NOTE_IDS_BY_SYNC_STATUS: &str =
 const LIST_ASSET_IDS_BY_SYNC_STATUS: &str =
     "SELECT asset_id FROM asset_sync_state WHERE sync_status = ?1 ORDER BY asset_id ASC";
 
+/// Repository for per-item local sync state rows.
 pub struct SyncStateRepo;
 
 impl SyncStateRepo {

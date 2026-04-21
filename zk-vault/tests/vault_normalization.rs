@@ -6,7 +6,7 @@ use zk_domain::{
     note::{DiagnosticLevel, RawNoteFrontmatter, ScanDiagnostic},
 };
 use zk_vault::{
-    BodyAnalysis, NormalizationContext, NoteCandidate, RawNoteDocument, TitleSource,
+    BodyAnalysis, NormalizationContext, NoteCandidate, RawNoteDocument, TitleSource, TrashState,
     normalize_frontmatter_with_id_generator, plan_normalization,
 };
 
@@ -35,6 +35,8 @@ fn note_candidate(relative_path: &str, is_immutable: bool) -> NoteCandidate {
         relative_path: RelativePath::new(relative_path),
         absolute_path: PathBuf::from(relative_path),
         is_immutable,
+        trash_state: TrashState::Live,
+        trashed_at: None,
     }
 }
 

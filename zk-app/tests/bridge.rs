@@ -21,7 +21,8 @@ use zk_domain::{
     note::{DiagnosticLevel, NoteDocument, NoteFrontmatter, ScanDiagnostic},
 };
 use zk_vault::{
-    AssetCandidate, NormalizationPlan, NormalizationResult, TitleSource, VaultScanResult,
+    AssetCandidate, NormalizationPlan, NormalizationResult, TitleSource, TrashState,
+    VaultScanResult,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,6 +183,9 @@ fn build_note_inputs_omits_notes_without_document() {
     let scan_result = VaultScanResult {
         notes: vec![NormalizationResult {
             relative_path: RelativePath::new("notes/no-document.md"),
+            note_id: None,
+            trash_state: TrashState::Live,
+            trashed_at: None,
             plan: empty_plan(),
             frontmatter: None,
             document: None,
@@ -432,6 +436,9 @@ fn normalization_result(
 ) -> NormalizationResult {
     NormalizationResult {
         relative_path: RelativePath::new(relative_path),
+        note_id: Some(frontmatter.id.clone()),
+        trash_state: TrashState::Live,
+        trashed_at: None,
         plan: empty_plan(),
         frontmatter: Some(frontmatter.clone()),
         document: Some(NoteDocument {
@@ -446,6 +453,8 @@ fn asset_candidate(relative_path: &str, absolute_path: &Path) -> AssetCandidate 
     AssetCandidate {
         relative_path: RelativePath::new(relative_path),
         absolute_path: absolute_path.to_path_buf(),
+        trash_state: TrashState::Live,
+        trashed_at: None,
     }
 }
 

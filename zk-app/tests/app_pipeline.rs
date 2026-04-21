@@ -147,20 +147,20 @@ Trashed content
             panic!("default rebuild should not return normalization payload")
         }
     };
-    assert_eq!(rebuild_index_stats.notes_upserted, 2);
+    assert_eq!(rebuild_index_stats.notes_upserted, 3);
     assert_eq!(rebuild_index_stats.assets_upserted, 1);
     assert!(rebuild_index_stats.note_links_inserted >= 1);
     assert!(rebuild_index_stats.asset_references_inserted >= 1);
 
     let summary =
         status_summary(&vault_root, &config, &conn).expect("status summary should succeed");
-    assert_eq!(summary.total_notes, 2);
+    assert_eq!(summary.total_notes, 3);
     assert_eq!(summary.total_assets, 1);
     assert!(summary.notes_with_errors >= 1);
     assert_eq!(summary.duplicate_id_count, 1);
-    assert_eq!(summary.trash_count, 1);
+    assert_eq!(summary.trashed_notes, 1);
 
-    let doctor = doctor_report(&vault_root, &config).expect("doctor report should succeed");
+    let doctor = doctor_report(&vault_root, &config, &conn).expect("doctor report should succeed");
     assert!(
         doctor
             .errors

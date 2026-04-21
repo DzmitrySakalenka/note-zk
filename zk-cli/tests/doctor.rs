@@ -44,7 +44,7 @@ fn doctor_reports_clean_vault_as_healthy() {
 }
 
 #[test]
-fn doctor_does_not_create_index_database() {
+fn doctor_opens_index_database_for_lifecycle_checks() {
     let (_tempdir, vault_root, home_root) = test_roots();
     let database_path = vault_root.join(".zk").join("index.sqlite");
 
@@ -54,8 +54,8 @@ fn doctor_does_not_create_index_database() {
         .stdout(predicate::str::contains("No issues detected."));
 
     assert!(
-        !database_path.exists(),
-        "doctor should not create index database at {}",
+        database_path.exists(),
+        "doctor should open the index database at {}",
         database_path.display()
     );
 }
@@ -169,5 +169,81 @@ Unresolved wiki: [[Missing Note]]
     assert!(
         !String::from_utf8_lossy(stdout).contains("Errors ("),
         "json mode should suppress human-readable headers"
+    );
+}
+
+#[test]
+fn doctor_reports_trash_file_without_delete_record() {
+    let (_tempdir, vault_root, home_root) = test_roots();
+
+    fs::create_dir_all(vault_root.join("99_trash")).expect("trash dir should be created");
+    fs::write(
+        vault_root.join("99_trash").join("orphan.md"),
+        r"---
+id: 01CLIDOCTORTRASHREPORT00001
+title: Trashed Orphan
+tags:
+  - cli
+---
+# Trashed Orphan
+
+Body
+",
+    )
+    .expect("trashed note should be written");
+
+    doctor_command(&vault_root, &home_root)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Warnings (")
+                .and(predicate::str::contains("trash-file-without-record"))
+                .and(predicate::str::contains("01CLIDOCTORTRASHREPORT00001")),
+        );
+}
+
+#[test]
+fn doctor_json_includes_item_identity_for_trash_lifecycle_rules() {
+    let (_tempdir, vault_root, home_root) = test_roots();
+
+    fs::create_dir_all(vault_root.join("99_trash")).expect("trash dir should be created");
+    fs::write(
+        vault_root.join("99_trash").join("orphan.md"),
+        r"---
+id: 01CLIDOCTORJSONTRASH000001
+title: Trashed Orphan
+tags:
+  - cli
+---
+# Trashed Orphan
+
+Body
+",
+    )
+    .expect("trashed note should be written");
+
+    let assert = doctor_command(&vault_root, &home_root)
+        .arg("--json")
+        .assert()
+        .success();
+    let json = parse_stdout_json(&assert.get_output().stdout);
+    let warnings = json
+        .get("warnings")
+        .and_then(Value::as_array)
+        .expect("doctor JSON should contain warnings array");
+    let issue = warnings
+        .iter()
+        .find(|issue| {
+            issue.get("rule_id") == Some(&Value::String("trash-file-without-record".to_string()))
+        })
+        .expect("trash lifecycle warning should be present");
+
+    assert_eq!(
+        issue.get("item_id"),
+        Some(&Value::String("01CLIDOCTORJSONTRASH000001".to_string()))
+    );
+    assert_eq!(
+        issue.get("item_type"),
+        Some(&Value::String("note".to_string()))
     );
 }

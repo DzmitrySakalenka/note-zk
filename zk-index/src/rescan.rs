@@ -45,22 +45,11 @@ pub fn rebuild_index(
     notes: &[NoteInput],
     assets: &[AssetInput],
 ) -> Result<RebuildStats, IndexError> {
-    let stats = RebuildStats {
-        notes_upserted: notes.len(),
-        assets_upserted: assets.len(),
-        note_links_inserted: notes.iter().map(|note| note.note_links.len()).sum(),
-        external_links_inserted: notes.iter().map(|note| note.external_links.len()).sum(),
-        asset_references_inserted: notes.iter().map(|note| note.asset_references.len()).sum(),
-    };
-
     let transaction = conn.transaction().map_err(|source| IndexError::Sqlite {
         source,
         context: "begin rebuild transaction".to_string(),
     })?;
-
-    clear_derived_tables(&transaction)?;
-    rebuild_notes(&transaction, notes)?;
-    rebuild_assets(&transaction, assets)?;
+    let stats = rebuild_index_in_transaction(&transaction, notes, assets)?;
 
     transaction.commit().map_err(|source| IndexError::Sqlite {
         source,
@@ -68,6 +57,35 @@ pub fn rebuild_index(
     })?;
 
     Ok(stats)
+}
+
+/// Rebuilds the local index inside an already-open transaction.
+///
+/// # Errors
+///
+/// Returns [`IndexError`] if derived-table clearing, timestamp generation, or
+/// repository writes fail.
+pub fn rebuild_index_in_transaction(
+    transaction: &Transaction<'_>,
+    notes: &[NoteInput],
+    assets: &[AssetInput],
+) -> Result<RebuildStats, IndexError> {
+    let stats = build_rebuild_stats(notes, assets);
+    clear_derived_tables(transaction)?;
+    rebuild_notes(transaction, notes)?;
+    rebuild_assets(transaction, assets)?;
+
+    Ok(stats)
+}
+
+fn build_rebuild_stats(notes: &[NoteInput], assets: &[AssetInput]) -> RebuildStats {
+    RebuildStats {
+        notes_upserted: notes.len(),
+        assets_upserted: assets.len(),
+        note_links_inserted: notes.iter().map(|note| note.note_links.len()).sum(),
+        external_links_inserted: notes.iter().map(|note| note.external_links.len()).sum(),
+        asset_references_inserted: notes.iter().map(|note| note.asset_references.len()).sum(),
+    }
 }
 
 fn clear_derived_tables(transaction: &Transaction<'_>) -> Result<(), IndexError> {
@@ -90,6 +108,8 @@ fn rebuild_notes(transaction: &Transaction<'_>, notes: &[NoteInput]) -> Result<(
             &note.frontmatter_json,
             &note.created_at,
             &note.updated_at,
+            note.trashed_at.as_deref(),
+            note.is_trashed,
         )?;
         NoteRepo::replace_tags(transaction, &note.note_id, &note.tags)?;
         NoteRepo::replace_aliases(transaction, &note.note_id, &note.aliases)?;
@@ -132,9 +152,9 @@ fn build_asset_record(
         size_bytes: asset.size_bytes,
         created_at: timestamp.clone(),
         updated_at: timestamp,
-        trashed_at: None,
+        trashed_at: asset.trashed_at.clone(),
         deleted_at: None,
-        is_trashed: false,
+        is_trashed: asset.is_trashed,
         is_deleted: false,
         server_revision: ServerRevision::new(0),
     })
@@ -162,9 +182,9 @@ fn merge_existing_asset(
         size_bytes: asset.size_bytes,
         created_at: existing.created_at,
         updated_at,
-        trashed_at: existing.trashed_at,
+        trashed_at: asset.trashed_at.clone(),
         deleted_at: existing.deleted_at,
-        is_trashed: existing.is_trashed,
+        is_trashed: asset.is_trashed,
         is_deleted: existing.is_deleted,
         server_revision: existing.server_revision,
     })

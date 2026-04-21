@@ -24,6 +24,15 @@ INSERT OR REPLACE INTO assets_index (
     server_revision
 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
 ";
+const MARK_ASSET_DELETED: &str = r"
+UPDATE assets_index
+SET
+    trashed_at = NULL,
+    deleted_at = ?2,
+    is_trashed = 0,
+    is_deleted = 1
+WHERE asset_id = ?1
+";
 const DELETE_ASSET_BY_ID: &str = "DELETE FROM assets_index WHERE asset_id = ?1";
 const SELECT_ASSET_BY_ID: &str = r"
 SELECT
@@ -116,6 +125,7 @@ ORDER BY rowid ASC
 const COUNT_ASSETS_SQL: &str = "SELECT COUNT(*) FROM assets_index";
 const SAVEPOINT_REPLACE_ASSET_REFERENCES: &str = "asset_repo_replace_asset_references";
 
+/// Repository for persisted asset rows and note-to-asset references.
 pub struct AssetRepo;
 
 impl AssetRepo {
@@ -176,6 +186,27 @@ impl AssetRepo {
                 source,
                 context: "delete asset".to_string(),
             })
+    }
+
+    /// Marks one asset row as a persisted hard-delete tombstone.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if the update fails.
+    pub fn mark_deleted(
+        conn: &Connection,
+        asset_id: &AssetId,
+        deleted_at: &str,
+    ) -> Result<(), IndexError> {
+        conn.execute(
+            MARK_ASSET_DELETED,
+            rusqlite::params![asset_id.as_str(), deleted_at],
+        )
+        .map(|_| ())
+        .map_err(|source| IndexError::Sqlite {
+            source,
+            context: "mark asset deleted".to_string(),
+        })
     }
 
     /// Fetches one asset row by `asset_id`.

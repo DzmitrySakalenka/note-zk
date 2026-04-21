@@ -16,9 +16,10 @@ serde = "1.0.228"
 serde_json = "1.0.149"
 zk-vault = { path = "../zk-vault" }
 zk-index = { path = "../zk-index" }
-rusqlite = { version = "0.39.0", features = ["bundled"] }
+rusqlite = { version = "0.39.0", features = ["bundled", "hooks"] }
 serde_yaml = "0.9.34"
 tracing = "0.1.44"
+chrono = { version = "0.4.44", default-features = false, features = ["alloc", "serde"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

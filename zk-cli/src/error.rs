@@ -18,6 +18,8 @@ pub enum CliError {
     Bootstrap(anyhow::Error),
     /// The command completed but reported actionable issues.
     Issues,
+    /// The command failed for an expected user-facing lifecycle reason.
+    Issue(String),
     /// The command failed unexpectedly.
     Internal(anyhow::Error),
 }
@@ -25,8 +27,17 @@ pub enum CliError {
 impl fmt::Display for CliError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Argument(message) => formatter.write_str(message),
-            Self::Bootstrap(source) => write!(formatter, "bootstrap error: {source}"),
+            Self::Argument(message) | Self::Issue(message) => formatter.write_str(message),
+            Self::Bootstrap(source) => {
+                formatter.write_str("bootstrap error: ")?;
+                for (index, cause) in source.chain().enumerate() {
+                    if index > 0 {
+                        formatter.write_str(": ")?;
+                    }
+                    write!(formatter, "{cause}")?;
+                }
+                Ok(())
+            }
             Self::Issues => formatter.write_str("issues detected"),
             Self::Internal(source) => write!(formatter, "internal error: {source}"),
         }
@@ -38,6 +49,6 @@ impl fmt::Display for CliError {
 pub fn exit_code(error: &CliError) -> i32 {
     match error {
         CliError::Argument(_) | CliError::Bootstrap(_) => EXIT_USAGE,
-        CliError::Issues | CliError::Internal(_) => EXIT_ISSUES,
+        CliError::Issues | CliError::Issue(_) | CliError::Internal(_) => EXIT_ISSUES,
     }
 }

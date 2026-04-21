@@ -16,6 +16,15 @@ pub enum AppError {
     /// SQLite/indexing failure propagated from `zk-index`.
     #[error("while attempting to access local index data: {0}")]
     Index(#[from] IndexError),
+    /// SQLite/indexing failure with extra app-layer operation context.
+    #[error("while attempting to access local index data: {context}: {source}")]
+    IndexContext {
+        /// Operation-specific context added by the app layer.
+        context: String,
+        /// Original index-layer failure.
+        #[source]
+        source: IndexError,
+    },
     /// Global config load/parse failure.
     #[error("while attempting to load global config: {0}")]
     GlobalConfig(#[from] GlobalConfigError),
@@ -38,10 +47,16 @@ pub enum AppError {
         source: io::Error,
     },
     /// Write blocked by immutable folder policy.
-    #[error("while attempting to write note at {path}: folder is immutable")]
+    #[error("while attempting to write item at {path}: folder is immutable")]
     ImmutableFolder {
         /// Relative path that falls under an immutable folder policy.
         path: RelativePath,
+    },
+    /// Requested note or asset target was not found in the local index.
+    #[error("while attempting to access item {target}: item not found")]
+    ItemNotFound {
+        /// User-supplied target string that could not be resolved.
+        target: String,
     },
     /// Requested note ID was not found in the vault.
     #[error("while attempting to update note {note_id}: note not found")]
@@ -78,6 +93,46 @@ pub enum AppError {
         /// Source YAML serialization error.
         #[source]
         source: serde_yaml::Error,
+    },
+    /// Purge API was called with the wrong request scope for that entry point.
+    #[error("while attempting to purge items: expected {expected} scope")]
+    InvalidPurgeScope {
+        /// Stable scope shape that the called API requires.
+        expected: &'static str,
+    },
+    /// Restore was requested for an item that is not currently trashed.
+    #[error("while attempting to restore item {target}: item is not trashed")]
+    ItemNotTrashed {
+        /// User-supplied target string for the failed restore request.
+        target: String,
+    },
+    /// Requested trash lifecycle item has already been purged.
+    #[error("while attempting to access trashed item {target}: item is already purged")]
+    AlreadyPurged {
+        /// User-supplied target string for the purged item.
+        target: String,
+    },
+    /// Restore destination already exists on disk.
+    #[error("while attempting to restore item to {path}: path already exists")]
+    RestoreTargetExists {
+        /// Vault-relative restore destination that is already occupied.
+        path: RelativePath,
+    },
+    /// Hard purge was requested before the retention window expired.
+    #[error(
+        "while attempting to purge item {target}: retention has not expired until {retention_until}"
+    )]
+    RetentionNotExpired {
+        /// User-supplied target string for the blocked purge request.
+        target: String,
+        /// Timestamp when the item becomes eligible for purge.
+        retention_until: String,
+    },
+    /// Trashed note parse could not recover a stable ID for bridge/index use.
+    #[error("while attempting to bridge trashed item at {path}: missing stable id")]
+    TrashedItemMissingId {
+        /// Vault-relative trashed path missing a recoverable ID.
+        path: RelativePath,
     },
 }
 

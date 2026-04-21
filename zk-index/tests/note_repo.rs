@@ -35,6 +35,8 @@ fn insert_sample_note(conn: &rusqlite::Connection) {
         r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
         &record.created_at,
         &record.updated_at,
+        None,
+        false,
     )
     .expect("sample note should be inserted");
 }
@@ -67,6 +69,8 @@ fn count_returns_inserted_row_total() {
         r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YPN","title":"SQLite Indexing"}"#,
         "2026-04-05T09:00:00Z",
         "2026-04-05T09:00:00Z",
+        None,
+        false,
     )
     .expect("second note should insert");
 
@@ -107,6 +111,8 @@ fn upsert_note_with_changed_path_updates_existing_row() {
         r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics Renamed"}"#,
         "2026-04-02T00:00:00Z",
         "2026-04-03T12:00:00Z",
+        None,
+        false,
     )
     .expect("upsert should succeed");
 
@@ -123,6 +129,38 @@ fn upsert_note_with_changed_path_updates_existing_row() {
     assert_eq!(actual.created_at, "2026-04-02T10:00:00Z");
     assert_eq!(actual.updated_at, "2026-04-03T12:00:00Z");
     assert_eq!(actual.server_revision, ServerRevision::new(0));
+}
+
+#[test]
+fn mark_deleted_sets_tombstone_fields_without_changing_path() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    insert_sample_note(&connection);
+
+    let note_id = sample_note_id();
+    connection
+        .execute(
+            "UPDATE notes_index SET trashed_at = ?1, is_trashed = ?2, current_path = ?3 WHERE note_id = ?4",
+            rusqlite::params![
+                "2026-04-20T08:00:00Z",
+                1_i64,
+                "99_trash/knowledge-graph.md",
+                note_id.as_str()
+            ],
+        )
+        .expect("trashed state seed should succeed");
+
+    NoteRepo::mark_deleted(&connection, &note_id, "2026-05-01T00:00:00Z")
+        .expect("mark deleted should succeed");
+
+    let actual = NoteRepo::get_note(&connection, &note_id)
+        .expect("query should succeed")
+        .expect("note should exist");
+    assert_eq!(actual.current_path.as_str(), "99_trash/knowledge-graph.md");
+    assert!(!actual.is_trashed);
+    assert_eq!(actual.trashed_at, None);
+    assert!(actual.is_deleted);
+    assert_eq!(actual.deleted_at.as_deref(), Some("2026-05-01T00:00:00Z"));
 }
 
 #[test]
@@ -218,6 +256,8 @@ fn get_notes_by_tag_filters_matching_notes() {
         r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YPN","title":"SQLite Indexing"}"#,
         "2026-04-05T09:00:00Z",
         "2026-04-05T09:00:00Z",
+        None,
+        false,
     )
     .expect("second note should insert");
 
@@ -281,6 +321,8 @@ fn list_notes_returns_all_rows_in_deterministic_order() {
         r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YPN","title":"SQLite Indexing"}"#,
         "2026-04-05T09:00:00Z",
         "2026-04-05T09:00:00Z",
+        None,
+        false,
     )
     .expect("second note should insert");
 

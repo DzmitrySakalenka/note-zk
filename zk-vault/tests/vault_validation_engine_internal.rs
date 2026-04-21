@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 pub use zk_vault::resolve_vault_links;
 pub use zk_vault::{
     AssetCandidate, FrontmatterParseFailure, NormalizationPlan, NormalizationResult, TitleSource,
-    VaultScanResult, analyze_body,
+    TrashState, VaultScanResult, analyze_body,
 };
 
 #[allow(dead_code)]
@@ -96,6 +96,9 @@ fn base_config() -> EffectiveConfig {
 fn sample_note(path: &str) -> NormalizationResult {
     NormalizationResult {
         relative_path: RelativePath::new(path),
+        note_id: None,
+        trash_state: TrashState::Live,
+        trashed_at: None,
         plan: NormalizationPlan {
             needs_id_injection: false,
             needs_title_derivation: false,
@@ -132,6 +135,9 @@ fn sample_note_with_document(path: &str, id: &str, title: &str, body: &str) -> N
 
     NormalizationResult {
         relative_path: RelativePath::new(path),
+        note_id: Some(frontmatter.id.clone()),
+        trash_state: TrashState::Live,
+        trashed_at: None,
         plan: NormalizationPlan {
             needs_id_injection: false,
             needs_title_derivation: false,
@@ -275,6 +281,8 @@ fn tg8_016_rules_emit_expected_findings_for_each_new_rule() {
         assets: vec![AssetCandidate {
             relative_path: RelativePath::new("notes/assets/existing.png"),
             absolute_path: std::path::PathBuf::from("/tmp/notes/assets/existing.png"),
+            trash_state: TrashState::Live,
+            trashed_at: None,
         }],
         diagnostics: Vec::new(),
         frontmatter_parse_failures: vec![FrontmatterParseFailure {

@@ -4,18 +4,39 @@ use zk_domain::note::RawNoteFrontmatter;
 
 use crate::error::VaultError;
 
+/// Raw note file sections extracted before normalization or validation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawNoteDocument {
+    /// Parsed raw frontmatter payload when a frontmatter block exists and parses.
     pub frontmatter: Option<RawNoteFrontmatter>,
+    /// Original YAML frontmatter text without delimiter lines.
     pub raw_frontmatter_yaml: Option<String>,
+    /// Markdown body text after any frontmatter block.
     pub body_markdown: String,
+    /// Whether the file contained frontmatter delimiters.
     pub has_frontmatter_delimiters: bool,
 }
 
+/// Lightweight body facts reused by normalization and validation passes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BodyAnalysis {
+    /// First top-level Markdown heading outside fenced code blocks.
     pub first_h1: Option<String>,
+    /// Whether the body contains a fenced mermaid block.
     pub has_mermaid: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TrashedUnknownIdentityReason {
+    MissingFrontmatter,
+    InvalidFrontmatter,
+    MissingId,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct LenientNoteParse {
+    pub document: RawNoteDocument,
+    pub unknown_identity_reason: Option<TrashedUnknownIdentityReason>,
 }
 
 /// Parses a markdown file into raw frontmatter and body sections.
@@ -29,22 +50,51 @@ pub fn parse_note_file(path: &Path) -> Result<RawNoteDocument, VaultError> {
     let file_content = read_note_text(path)?;
 
     let Some((raw_yaml, body_markdown)) = split_frontmatter_sections(&file_content) else {
-        return Ok(RawNoteDocument {
-            frontmatter: None,
-            raw_frontmatter_yaml: None,
-            body_markdown: file_content,
-            has_frontmatter_delimiters: false,
-        });
+        return Ok(document_without_frontmatter(file_content));
     };
 
     let parsed_frontmatter = parse_raw_frontmatter_yaml(path, raw_yaml)?;
 
-    Ok(RawNoteDocument {
-        frontmatter: Some(parsed_frontmatter),
-        raw_frontmatter_yaml: Some(raw_yaml.to_string()),
-        body_markdown: body_markdown.to_string(),
-        has_frontmatter_delimiters: true,
-    })
+    Ok(document_with_frontmatter(
+        Some(parsed_frontmatter),
+        raw_yaml,
+        body_markdown,
+    ))
+}
+
+pub(crate) fn parse_note_file_lenient(path: &Path) -> Result<LenientNoteParse, VaultError> {
+    let file_content = read_note_text(path)?;
+
+    let Some((raw_yaml, body_markdown)) = split_frontmatter_sections(&file_content) else {
+        return Ok(LenientNoteParse {
+            document: document_without_frontmatter(file_content),
+            unknown_identity_reason: Some(TrashedUnknownIdentityReason::MissingFrontmatter),
+        });
+    };
+
+    match parse_raw_frontmatter_yaml(path, raw_yaml) {
+        Ok(parsed_frontmatter) => {
+            let unknown_identity_reason = if parsed_frontmatter.id.is_some() {
+                None
+            } else {
+                Some(TrashedUnknownIdentityReason::MissingId)
+            };
+
+            Ok(LenientNoteParse {
+                document: document_with_frontmatter(
+                    Some(parsed_frontmatter),
+                    raw_yaml,
+                    body_markdown,
+                ),
+                unknown_identity_reason,
+            })
+        }
+        Err(VaultError::FrontmatterParse { .. }) => Ok(LenientNoteParse {
+            document: document_with_frontmatter(None, raw_yaml, body_markdown),
+            unknown_identity_reason: Some(TrashedUnknownIdentityReason::InvalidFrontmatter),
+        }),
+        Err(other) => Err(other),
+    }
 }
 
 pub(crate) fn parse_note_frontmatter(
@@ -60,16 +110,19 @@ pub(crate) fn parse_note_frontmatter(
 }
 
 #[must_use]
+/// Extracts the first Markdown H1 from body text outside fenced code blocks.
 pub fn extract_first_h1(body: &str) -> Option<String> {
     analyze_body(body).first_h1
 }
 
 #[must_use]
+/// Detects whether body text contains a fenced mermaid block.
 pub fn detect_mermaid(body: &str) -> bool {
     analyze_body(body).has_mermaid
 }
 
 #[must_use]
+/// Analyzes body text for normalization and validation-relevant structure.
 pub fn analyze_body(body: &str) -> BodyAnalysis {
     analyze_body_internal(body)
 }
@@ -83,6 +136,28 @@ fn read_note_text(path: &Path) -> Result<String, VaultError> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+fn document_without_frontmatter(body_markdown: String) -> RawNoteDocument {
+    RawNoteDocument {
+        frontmatter: None,
+        raw_frontmatter_yaml: None,
+        body_markdown,
+        has_frontmatter_delimiters: false,
+    }
+}
+
+fn document_with_frontmatter(
+    frontmatter: Option<RawNoteFrontmatter>,
+    raw_yaml: &str,
+    body_markdown: &str,
+) -> RawNoteDocument {
+    RawNoteDocument {
+        frontmatter,
+        raw_frontmatter_yaml: Some(raw_yaml.to_string()),
+        body_markdown: body_markdown.to_string(),
+        has_frontmatter_delimiters: true,
+    }
 }
 
 fn parse_raw_frontmatter_yaml(

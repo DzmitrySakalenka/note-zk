@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::{
@@ -34,8 +36,15 @@ pub fn ensure_schema(conn: &Connection) -> Result<(), IndexError> {
         })?
         .unwrap_or(0);
 
-    if current_version >= V1_SCHEMA_VERSION {
-        return Ok(());
+    match current_version.cmp(&V1_SCHEMA_VERSION) {
+        Ordering::Equal => return Ok(()),
+        Ordering::Greater => {
+            return Err(IndexError::UnsupportedSchemaVersion {
+                found: current_version,
+                max_supported: V1_SCHEMA_VERSION,
+            });
+        }
+        Ordering::Less => {}
     }
 
     let transaction = conn

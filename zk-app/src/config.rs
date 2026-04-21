@@ -113,6 +113,14 @@ pub enum ConfigValidationError {
         /// Reason describing why the trash directory was rejected.
         reason: String,
     },
+    /// A persisted `trashed_at` timestamp could not be parsed.
+    #[error("while attempting to parse trashed_at timestamp '{trashed_at}': {reason}")]
+    InvalidTrashedAtTimestamp {
+        /// Raw trashed-at timestamp that failed to parse.
+        trashed_at: String,
+        /// Parse failure details.
+        reason: String,
+    },
 }
 
 /// Resolves the global config file path for a given platform.

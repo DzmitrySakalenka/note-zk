@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use zk_index::{ensure_schema, open_memory};
+use zk_index::{IndexError, ensure_schema, open_memory};
 
 fn sqlite_master_names(conn: &rusqlite::Connection, object_type: &str) -> BTreeSet<String> {
     let mut statement = conn
@@ -100,6 +100,31 @@ fn ensure_schema_is_idempotent() {
     ensure_schema(&connection).expect("second schema migration should succeed");
 
     assert_eq!(schema_version(&connection), 1);
+    assert_eq!(sqlite_master_names(&connection, "table"), initial_tables);
+    assert_eq!(sqlite_master_names(&connection, "index"), initial_indexes);
+}
+
+#[test]
+fn ensure_schema_rejects_future_schema_versions() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("initial schema migration should succeed");
+
+    let initial_tables = sqlite_master_names(&connection, "table");
+    let initial_indexes = sqlite_master_names(&connection, "index");
+    connection
+        .execute("UPDATE schema_version SET version = 2", [])
+        .expect("schema version should be writable for fixture setup");
+
+    let err = ensure_schema(&connection).expect_err("future schema version should be rejected");
+
+    assert!(matches!(
+        err,
+        IndexError::UnsupportedSchemaVersion {
+            found: 2,
+            max_supported: 1,
+        }
+    ));
+    assert_eq!(schema_version(&connection), 2);
     assert_eq!(sqlite_master_names(&connection, "table"), initial_tables);
     assert_eq!(sqlite_master_names(&connection, "index"), initial_indexes);
 }

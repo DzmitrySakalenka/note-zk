@@ -60,7 +60,12 @@ fn status_reports_zero_counts_for_fresh_vault() {
                 .and(predicate::str::contains("Notes with warnings: 0").count(1))
                 .and(predicate::str::contains("Unresolved links: 0").count(1))
                 .and(predicate::str::contains("Duplicate IDs: 0").count(1))
-                .and(predicate::str::contains("Trash: 0").count(1)),
+                .and(predicate::str::contains("Trashed notes: 0").count(1))
+                .and(predicate::str::contains("Trashed assets: 0").count(1))
+                .and(predicate::str::contains("Pending purge: 0").count(1))
+                .and(predicate::str::contains("Purged notes: 0").count(1))
+                .and(predicate::str::contains("Purged assets: 0").count(1))
+                .and(predicate::str::contains("Trash:").not()),
         );
 }
 
@@ -137,7 +142,11 @@ fn status_json_emits_summary_fields() {
         "notes_with_warnings",
         "unresolved_link_count",
         "duplicate_id_count",
-        "trash_count",
+        "trashed_notes",
+        "trashed_assets",
+        "pending_purge",
+        "purged_notes",
+        "purged_assets",
     ] {
         assert!(
             json.get(field).is_some(),

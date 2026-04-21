@@ -7,6 +7,15 @@ use zk_domain::{
 use crate::error::IndexError;
 
 const DEFAULT_SERVER_REVISION: i64 = 0;
+const MARK_NOTE_DELETED: &str = r"
+UPDATE notes_index
+SET
+    trashed_at = NULL,
+    deleted_at = ?2,
+    is_trashed = 0,
+    is_deleted = 1
+WHERE note_id = ?1
+";
 const INSERT_OR_UPDATE_NOTE: &str = r"
 INSERT INTO notes_index (
     note_id,
@@ -23,14 +32,16 @@ INSERT INTO notes_index (
     last_editor_device_id,
     server_revision
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL, 0, 0, NULL, 0
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, 0, NULL, 0
 )
 ON CONFLICT(note_id) DO UPDATE SET
     current_path = excluded.current_path,
     title = excluded.title,
     content_hash = excluded.content_hash,
     frontmatter_json = excluded.frontmatter_json,
-    updated_at = excluded.updated_at
+    updated_at = excluded.updated_at,
+    trashed_at = excluded.trashed_at,
+    is_trashed = excluded.is_trashed
 ";
 const DELETE_NOTE_BY_ID: &str = "DELETE FROM notes_index WHERE note_id = ?1";
 const SELECT_NOTE_BY_ID: &str = r"
@@ -94,6 +105,7 @@ const COUNT_NOTES_SQL: &str = "SELECT COUNT(*) FROM notes_index";
 const SAVEPOINT_REPLACE_TAGS: &str = "note_repo_replace_tags";
 const SAVEPOINT_REPLACE_ALIASES: &str = "note_repo_replace_aliases";
 
+/// Repository for persisted note rows and note-owned derived tables.
 pub struct NoteRepo;
 
 impl NoteRepo {
@@ -125,6 +137,8 @@ impl NoteRepo {
         frontmatter_json: &str,
         created_at: &str,
         updated_at: &str,
+        trashed_at: Option<&str>,
+        is_trashed: bool,
     ) -> Result<(), IndexError> {
         conn.execute(
             INSERT_OR_UPDATE_NOTE,
@@ -136,6 +150,8 @@ impl NoteRepo {
                 frontmatter_json,
                 created_at,
                 updated_at,
+                trashed_at,
+                i64::from(is_trashed),
             ],
         )
         .map(|_| ())
@@ -157,6 +173,27 @@ impl NoteRepo {
                 source,
                 context: "delete note".to_string(),
             })
+    }
+
+    /// Marks one note row as a persisted hard-delete tombstone.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if the update fails.
+    pub fn mark_deleted(
+        conn: &Connection,
+        note_id: &NoteId,
+        deleted_at: &str,
+    ) -> Result<(), IndexError> {
+        conn.execute(
+            MARK_NOTE_DELETED,
+            rusqlite::params![note_id.as_str(), deleted_at],
+        )
+        .map(|_| ())
+        .map_err(|source| IndexError::Sqlite {
+            source,
+            context: "mark note deleted".to_string(),
+        })
     }
 
     /// Fetches one note row by `note_id`.

@@ -3,8 +3,10 @@
 use std::io::{self, Write};
 
 use serde::Serialize;
-use zk_app::{DoctorIssue, DoctorReport, ScanOutcome, StatusSummary};
-use zk_domain::note::DiagnosticLevel;
+use zk_app::{
+    DoctorIssue, DoctorReport, PurgeOutcome, RestoredItem, ScanOutcome, StatusSummary, TrashedItem,
+};
+use zk_domain::{note::DiagnosticLevel, sync::ItemType};
 use zk_vault::NormalizationSummary;
 
 /// Aggregate counters rendered by the `scan` command.
@@ -47,6 +49,16 @@ pub struct ScanJsonOutput {
     /// Mode-specific payload fields.
     #[serde(flatten)]
     pub payload: ScanCommandPayload,
+}
+
+/// Top-level JSON object emitted by lifecycle commands.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LifecycleJsonOutput<T> {
+    /// Whether the command only previewed the requested action.
+    pub dry_run: bool,
+    /// Flattened command payload.
+    #[serde(flatten)]
+    pub payload: T,
 }
 
 /// Derives the user-facing `scan` counters from a full `ScanOutcome`.
@@ -123,7 +135,11 @@ pub fn write_status_human(out: &mut dyn io::Write, summary: &StatusSummary) -> i
         summary.notes_with_warnings,
         summary.unresolved_link_count,
         summary.duplicate_id_count,
-        summary.trash_count,
+        summary.trashed_notes,
+        summary.trashed_assets,
+        summary.pending_purge,
+        summary.purged_notes,
+        summary.purged_assets,
     ]);
 
     write_aligned_value(out, "Total notes", summary.total_notes, width)?;
@@ -142,7 +158,11 @@ pub fn write_status_human(out: &mut dyn io::Write, summary: &StatusSummary) -> i
         width,
     )?;
     write_aligned_value(out, "Duplicate IDs", summary.duplicate_id_count, width)?;
-    write_aligned_value(out, "Trash", summary.trash_count, width)
+    write_aligned_value(out, "Trashed notes", summary.trashed_notes, width)?;
+    write_aligned_value(out, "Trashed assets", summary.trashed_assets, width)?;
+    write_aligned_value(out, "Pending purge", summary.pending_purge, width)?;
+    write_aligned_value(out, "Purged notes", summary.purged_notes, width)?;
+    write_aligned_value(out, "Purged assets", summary.purged_assets, width)
 }
 
 /// Writes human-readable `doctor` output to the provided writer.
@@ -179,6 +199,110 @@ pub fn write_doctor_human(out: &mut dyn io::Write, report: &DoctorReport) -> io:
 
         write_doctor_section(out, label, issues, width)?;
         wrote_section = true;
+    }
+
+    Ok(())
+}
+
+/// Writes human-readable `trash` output to the provided writer.
+///
+/// # Errors
+///
+/// Returns an `io::Error` when writing to the provided output fails.
+pub fn write_trash_human(
+    out: &mut dyn io::Write,
+    trashed_item: &TrashedItem,
+    dry_run: bool,
+) -> io::Result<()> {
+    if dry_run {
+        writeln!(
+            out,
+            "Would trash {} -> {} (retain until {})",
+            trashed_item.item_id,
+            trashed_item.new_path.as_str(),
+            trashed_item.retention_until
+        )
+    } else {
+        writeln!(
+            out,
+            "Trashed {} -> {} (retain until {})",
+            trashed_item.item_id,
+            trashed_item.new_path.as_str(),
+            trashed_item.retention_until
+        )
+    }
+}
+
+/// Writes human-readable `restore` output to the provided writer.
+///
+/// # Errors
+///
+/// Returns an `io::Error` when writing to the provided output fails.
+pub fn write_restore_human(
+    out: &mut dyn io::Write,
+    restored_item: &RestoredItem,
+    dry_run: bool,
+) -> io::Result<()> {
+    if dry_run {
+        writeln!(
+            out,
+            "Would restore {} -> {}",
+            restored_item.item_id,
+            restored_item.restored_to.as_str()
+        )
+    } else {
+        writeln!(
+            out,
+            "Restored {} -> {}",
+            restored_item.item_id,
+            restored_item.restored_to.as_str()
+        )
+    }
+}
+
+/// Writes human-readable `purge` output to the provided writer.
+///
+/// # Errors
+///
+/// Returns an `io::Error` when writing to the provided output fails.
+pub fn write_purge_human(
+    out: &mut dyn io::Write,
+    outcome: &PurgeOutcome,
+    dry_run: bool,
+) -> io::Result<()> {
+    let affected_items = if dry_run {
+        &outcome.planned
+    } else {
+        &outcome.executed
+    };
+    if dry_run {
+        writeln!(
+            out,
+            "Would purge {} items, skipped {}",
+            affected_items.len(),
+            outcome.skipped.len()
+        )?;
+    } else {
+        writeln!(
+            out,
+            "Purged {} items, skipped {}",
+            affected_items.len(),
+            outcome.skipped.len()
+        )?;
+    }
+
+    for item in affected_items {
+        writeln!(
+            out,
+            "  {} {} ({})",
+            item_kind_label(&item.kind),
+            item.item_id,
+            item.original_path.as_str()
+        )?;
+    }
+
+    for skipped in &outcome.skipped {
+        writeln!(out, "  skipped {} ({})", skipped.item_id, skipped.reason)?;
     }
 
     Ok(())
@@ -285,17 +409,45 @@ fn write_doctor_section(
     writeln!(out, "{name} ({:>width$}):", issues.len(), width = width)?;
 
     for issue in issues {
+        let identity = format_doctor_identity(issue);
+
         match &issue.path {
             Some(path) => writeln!(
                 out,
-                "  {} {}: {}",
+                "  {} {}{}: {}",
                 issue.rule_id,
                 path.as_str(),
+                identity,
                 issue.message
             )?,
-            None => writeln!(out, "  {}: {}", issue.rule_id, issue.message)?,
+            None => writeln!(out, "  {}{}: {}", issue.rule_id, identity, issue.message)?,
         }
     }
 
     Ok(())
+}
+
+fn format_doctor_identity(issue: &DoctorIssue) -> String {
+    match (issue.item_type, issue.item_id.as_deref()) {
+        (Some(item_type), Some(item_id)) => {
+            format!(" [{} {}]", item_type_label(item_type), item_id)
+        }
+        (Some(item_type), None) => format!(" [{}]", item_type_label(item_type)),
+        (None, Some(item_id)) => format!(" [{item_id}]"),
+        (None, None) => String::new(),
+    }
+}
+
+fn item_type_label(item_type: ItemType) -> &'static str {
+    match item_type {
+        ItemType::Note => "note",
+        ItemType::Asset => "asset",
+    }
+}
+
+fn item_kind_label(kind: &zk_domain::ItemKind) -> &'static str {
+    match kind {
+        zk_domain::ItemKind::Note => "note",
+        zk_domain::ItemKind::Asset => "asset",
+    }
 }

@@ -72,6 +72,8 @@ fn sample_note_inputs() -> Vec<NoteInput> {
                 raw_path: "assets/diagram.png".to_string(),
                 target_asset_id: None,
             }],
+            is_trashed: false,
+            trashed_at: None,
         },
         NoteInput {
             note_id: beta_note_id(),
@@ -88,6 +90,8 @@ fn sample_note_inputs() -> Vec<NoteInput> {
             note_links: vec![],
             external_links: vec![],
             asset_references: vec![],
+            is_trashed: false,
+            trashed_at: None,
         },
         NoteInput {
             note_id: gamma_note_id(),
@@ -104,6 +108,8 @@ fn sample_note_inputs() -> Vec<NoteInput> {
             note_links: vec![],
             external_links: vec![],
             asset_references: vec![],
+            is_trashed: false,
+            trashed_at: None,
         },
     ]
 }
@@ -117,6 +123,8 @@ fn sample_asset_inputs() -> Vec<AssetInput> {
             ),
             mime_type: Some("image/png".to_string()),
             size_bytes: 4096,
+            is_trashed: false,
+            trashed_at: None,
         },
         AssetInput {
             path: RelativePath::new("assets/report.pdf"),
@@ -125,6 +133,8 @@ fn sample_asset_inputs() -> Vec<AssetInput> {
             ),
             mime_type: Some("application/pdf".to_string()),
             size_bytes: 8192,
+            is_trashed: false,
+            trashed_at: None,
         },
     ]
 }
@@ -212,6 +222,30 @@ fn table_count(conn: &Connection, table_name: &str) -> i64 {
     .expect("count query should succeed")
 }
 
+fn note_lifecycle_columns(
+    conn: &Connection,
+    note_id: &NoteId,
+) -> (Option<String>, i64, Option<String>, i64) {
+    conn.query_row(
+        "SELECT deleted_at, is_deleted, trashed_at, is_trashed FROM notes_index WHERE note_id = ?1",
+        [note_id.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    )
+    .expect("note lifecycle columns should query successfully")
+}
+
+fn asset_lifecycle_columns(
+    conn: &Connection,
+    asset_id: &AssetId,
+) -> (Option<String>, i64, Option<String>, i64) {
+    conn.query_row(
+        "SELECT deleted_at, is_deleted, trashed_at, is_trashed FROM assets_index WHERE asset_id = ?1",
+        [asset_id.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    )
+    .expect("asset lifecycle columns should query successfully")
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "named scalar expectations keep rebuild stat assertions readable in tests"
@@ -289,6 +323,240 @@ fn rebuild_populates_notes_links_assets_and_references() {
 }
 
 #[test]
+fn rebuild_persists_trash_fields_for_notes_and_assets() {
+    let mut connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    let notes = vec![NoteInput {
+        note_id: alpha_note_id(),
+        path: RelativePath::new("99_trash/alpha.md"),
+        title: "Alpha".to_string(),
+        content_hash: ContentHash::new(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ),
+        frontmatter_json: r#"{"id":"01HZ3NOTE000000000000000A","title":"Alpha"}"#.to_string(),
+        created_at: "2026-04-02T10:00:00Z".to_string(),
+        updated_at: "2026-04-02T12:00:00Z".to_string(),
+        tags: vec!["zettel".to_string()],
+        aliases: Vec::new(),
+        note_links: Vec::new(),
+        external_links: Vec::new(),
+        asset_references: Vec::new(),
+        is_trashed: true,
+        trashed_at: Some("2026-04-20T08:00:00Z".to_string()),
+    }];
+    let assets = vec![AssetInput {
+        path: RelativePath::new("99_trash/diagram.png"),
+        content_hash: ContentHash::new(
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        ),
+        mime_type: Some("image/png".to_string()),
+        size_bytes: 4096,
+        is_trashed: true,
+        trashed_at: Some("2026-04-20T09:00:00Z".to_string()),
+    }];
+
+    rebuild_index(&mut connection, &notes, &assets).expect("rebuild should succeed");
+
+    let note_columns: (i64, Option<String>) = connection
+        .query_row(
+            "SELECT is_trashed, trashed_at FROM notes_index WHERE note_id = ?1",
+            [alpha_note_id().as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("note lifecycle columns should query successfully");
+    let asset_columns: (i64, Option<String>) = connection
+        .query_row(
+            "SELECT is_trashed, trashed_at FROM assets_index WHERE current_path = ?1",
+            [RelativePath::new("99_trash/diagram.png").as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("asset lifecycle columns should query successfully");
+
+    assert_eq!(note_columns, (1, Some("2026-04-20T08:00:00Z".to_string())));
+    assert_eq!(asset_columns, (1, Some("2026-04-20T09:00:00Z".to_string())));
+}
+
+#[test]
+fn rebuild_clears_previously_trashed_rows_when_inputs_return_live() {
+    let mut connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    let trashed_notes = vec![NoteInput {
+        note_id: alpha_note_id(),
+        path: RelativePath::new("99_trash/alpha.md"),
+        title: "Alpha".to_string(),
+        content_hash: ContentHash::new(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ),
+        frontmatter_json: r#"{"id":"01HZ3NOTE000000000000000A","title":"Alpha"}"#.to_string(),
+        created_at: "2026-04-02T10:00:00Z".to_string(),
+        updated_at: "2026-04-02T12:00:00Z".to_string(),
+        tags: vec!["zettel".to_string()],
+        aliases: Vec::new(),
+        note_links: Vec::new(),
+        external_links: Vec::new(),
+        asset_references: Vec::new(),
+        is_trashed: true,
+        trashed_at: Some("2026-04-20T08:00:00Z".to_string()),
+    }];
+    let live_notes = vec![NoteInput {
+        note_id: alpha_note_id(),
+        path: RelativePath::new("notes/alpha.md"),
+        title: "Alpha".to_string(),
+        content_hash: ContentHash::new(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ),
+        frontmatter_json: r#"{"id":"01HZ3NOTE000000000000000A","title":"Alpha"}"#.to_string(),
+        created_at: "2026-04-02T10:00:00Z".to_string(),
+        updated_at: "2026-04-02T12:00:00Z".to_string(),
+        tags: vec!["zettel".to_string()],
+        aliases: Vec::new(),
+        note_links: Vec::new(),
+        external_links: Vec::new(),
+        asset_references: Vec::new(),
+        is_trashed: false,
+        trashed_at: None,
+    }];
+    let trashed_assets = vec![AssetInput {
+        path: RelativePath::new("99_trash/diagram.png"),
+        content_hash: ContentHash::new(
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        ),
+        mime_type: Some("image/png".to_string()),
+        size_bytes: 4096,
+        is_trashed: true,
+        trashed_at: Some("2026-04-20T09:00:00Z".to_string()),
+    }];
+    let live_assets = vec![AssetInput {
+        path: RelativePath::new("assets/diagram.png"),
+        content_hash: ContentHash::new(
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        ),
+        mime_type: Some("image/png".to_string()),
+        size_bytes: 4096,
+        is_trashed: false,
+        trashed_at: None,
+    }];
+
+    rebuild_index(&mut connection, &trashed_notes, &trashed_assets)
+        .expect("initial rebuild should succeed");
+    rebuild_index(&mut connection, &live_notes, &live_assets).expect("live rebuild should succeed");
+
+    let note = NoteRepo::get_note(&connection, &alpha_note_id())
+        .expect("note query should succeed")
+        .expect("note should exist");
+    let asset = AssetRepo::get_asset_by_path(&connection, &RelativePath::new("assets/diagram.png"))
+        .expect("asset query should succeed")
+        .expect("asset should exist");
+
+    assert!(!note.is_trashed);
+    assert_eq!(note.trashed_at, None);
+    assert!(!asset.is_trashed);
+    assert_eq!(asset.trashed_at, None);
+}
+
+#[test]
+fn rebuild_preserves_delete_columns_while_updating_trash_columns() {
+    let mut connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    let deleted_note_at = "2026-04-18T11:00:00Z";
+    let deleted_asset_at = "2026-04-19T12:00:00Z";
+
+    NoteRepo::upsert_note(
+        &connection,
+        &alpha_note_id(),
+        &RelativePath::new("notes/alpha.md"),
+        "Alpha",
+        &ContentHash::new("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        r#"{"id":"01HZ3NOTE000000000000000A","title":"Alpha"}"#,
+        "2026-04-02T10:00:00Z",
+        "2026-04-02T12:00:00Z",
+        None,
+        false,
+    )
+    .expect("seed note should upsert successfully");
+    connection
+        .execute(
+            "UPDATE notes_index SET deleted_at = ?1, is_deleted = ?2 WHERE note_id = ?3",
+            rusqlite::params![deleted_note_at, 1_i64, alpha_note_id().as_str()],
+        )
+        .expect("seed note delete columns should update successfully");
+
+    AssetRepo::upsert_asset(
+        &connection,
+        &AssetRecord {
+            asset_id: existing_asset_id(),
+            current_path: RelativePath::new("assets/diagram.png"),
+            content_hash: ContentHash::new(
+                "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            ),
+            mime_type: Some("image/png".to_string()),
+            size_bytes: 4096,
+            created_at: "2026-04-02T10:00:00Z".to_string(),
+            updated_at: "2026-04-02T12:00:00Z".to_string(),
+            trashed_at: None,
+            deleted_at: Some(deleted_asset_at.to_string()),
+            is_trashed: false,
+            is_deleted: true,
+            server_revision: ServerRevision::new(0),
+        },
+    )
+    .expect("seed asset should upsert successfully");
+
+    let notes = vec![NoteInput {
+        note_id: alpha_note_id(),
+        path: RelativePath::new("99_trash/alpha.md"),
+        title: "Alpha".to_string(),
+        content_hash: ContentHash::new(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ),
+        frontmatter_json: r#"{"id":"01HZ3NOTE000000000000000A","title":"Alpha"}"#.to_string(),
+        created_at: "2026-04-02T10:00:00Z".to_string(),
+        updated_at: "2026-04-20T08:00:00Z".to_string(),
+        tags: Vec::new(),
+        aliases: Vec::new(),
+        note_links: Vec::new(),
+        external_links: Vec::new(),
+        asset_references: Vec::new(),
+        is_trashed: true,
+        trashed_at: Some("2026-04-20T08:00:00Z".to_string()),
+    }];
+    let assets = vec![AssetInput {
+        path: RelativePath::new("99_trash/diagram.png"),
+        content_hash: ContentHash::new(
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        ),
+        mime_type: Some("image/png".to_string()),
+        size_bytes: 4096,
+        is_trashed: true,
+        trashed_at: Some("2026-04-20T09:00:00Z".to_string()),
+    }];
+
+    rebuild_index(&mut connection, &notes, &assets).expect("rebuild should succeed");
+
+    let note_columns = note_lifecycle_columns(&connection, &alpha_note_id());
+    let asset_columns = asset_lifecycle_columns(&connection, &existing_asset_id());
+
+    assert_eq!(
+        note_columns,
+        (
+            Some(deleted_note_at.to_string()),
+            1,
+            Some("2026-04-20T08:00:00Z".to_string()),
+            1,
+        )
+    );
+    assert_eq!(
+        asset_columns,
+        (
+            Some(deleted_asset_at.to_string()),
+            1,
+            Some("2026-04-20T09:00:00Z".to_string()),
+            1,
+        )
+    );
+}
+
+#[test]
 fn rebuild_is_idempotent_for_identical_input() {
     let mut connection = open_memory().expect("in-memory database should open");
     ensure_schema(&connection).expect("schema should be ready");
@@ -357,6 +625,8 @@ fn asset_path_match_retains_existing_asset_id() {
             ),
             mime_type: Some("image/png".to_string()),
             size_bytes: 7777,
+            is_trashed: false,
+            trashed_at: None,
         }],
     )
     .expect("rebuild should succeed");
@@ -397,6 +667,8 @@ fn asset_hash_match_retains_existing_asset_id_after_path_change() {
             ),
             mime_type: Some("image/png".to_string()),
             size_bytes: 3333,
+            is_trashed: false,
+            trashed_at: None,
         }],
     )
     .expect("rebuild should succeed");
@@ -436,6 +708,8 @@ fn new_asset_gets_fresh_asset_id() {
             ),
             mime_type: Some("image/png".to_string()),
             size_bytes: 1111,
+            is_trashed: false,
+            trashed_at: None,
         }],
     )
     .expect("rebuild should succeed");
@@ -530,6 +804,8 @@ fn rebuild_preserves_stale_base_rows_but_rebuilds_only_current_derived_rows() {
         r#"{"id":"01HZ3NOTE00000000000000ZZ","title":"Stale"}"#,
         "2026-04-01T00:00:00Z",
         "2026-04-01T00:00:00Z",
+        None,
+        false,
     )
     .expect("stale note upsert should succeed");
     NoteRepo::replace_tags(
@@ -631,6 +907,8 @@ fn new_asset_timestamps_are_initialized_and_known_asset_timestamps_are_preserved
                 ),
                 mime_type: Some("image/png".to_string()),
                 size_bytes: 2048,
+                is_trashed: false,
+                trashed_at: None,
             },
             AssetInput {
                 path: RelativePath::new("assets/new.png"),
@@ -639,6 +917,8 @@ fn new_asset_timestamps_are_initialized_and_known_asset_timestamps_are_preserved
                 ),
                 mime_type: Some("image/png".to_string()),
                 size_bytes: 1024,
+                is_trashed: false,
+                trashed_at: None,
             },
         ],
     )
@@ -683,6 +963,8 @@ fn existing_asset_updated_at_bumps_only_on_hash_path_or_size_change() {
             ),
             mime_type: Some("application/octet-stream".to_string()),
             size_bytes: seeded.size_bytes,
+            is_trashed: false,
+            trashed_at: None,
         }],
     )
     .expect("first rebuild should succeed");
@@ -703,6 +985,8 @@ fn existing_asset_updated_at_bumps_only_on_hash_path_or_size_change() {
             ),
             mime_type: Some("application/octet-stream".to_string()),
             size_bytes: seeded.size_bytes,
+            is_trashed: false,
+            trashed_at: None,
         }],
     )
     .expect("second rebuild should succeed");
@@ -727,6 +1011,8 @@ fn existing_asset_updated_at_bumps_only_on_hash_path_or_size_change() {
             ),
             mime_type: Some("application/octet-stream".to_string()),
             size_bytes: seeded.size_bytes,
+            is_trashed: false,
+            trashed_at: None,
         }],
     )
     .expect("third rebuild should succeed");

@@ -48,24 +48,7 @@ pub fn atomic_write_file(path: &Path, content: &[u8]) -> Result<(), VaultError> 
 
     match temp_file.persist(path) {
         Ok(_persisted_file) => {
-            #[cfg(unix)]
-            {
-                let parent_dir_handle =
-                    fs::File::open(parent_dir).map_err(|source| VaultError::Io {
-                        path: parent_dir.to_path_buf(),
-                        source,
-                    })?;
-                parent_dir_handle
-                    .sync_all()
-                    .map_err(|source| VaultError::Io {
-                        path: parent_dir.to_path_buf(),
-                        source,
-                    })?;
-            }
-            #[cfg(not(unix))]
-            {
-                // Directory fsync is only attempted on platforms that support it directly.
-            }
+            sync_directory(parent_dir)?;
 
             Ok(())
         }
@@ -79,6 +62,71 @@ pub fn atomic_write_file(path: &Path, content: &[u8]) -> Result<(), VaultError> 
     }
 }
 
+/// Atomically renames an existing file and fsyncs the affected parent directories.
+///
+/// After return, the destination parent directory entry is durably persisted on
+/// platforms that support directory fsync. When the move crosses directories,
+/// the source parent is also fsynced so the disappearance is durable too.
+///
+/// # Errors
+///
+/// Returns [`VaultError::Io`] when parent-directory resolution, destination
+/// directory creation, rename, or directory fsync fails.
+pub fn atomic_move_file(source: &Path, destination: &Path) -> Result<(), VaultError> {
+    let source_parent = source.parent().ok_or_else(|| VaultError::Io {
+        path: source.to_path_buf(),
+        source: io::Error::new(
+            ErrorKind::InvalidInput,
+            "while attempting to resolve parent directory for atomic move",
+        ),
+    })?;
+    let destination_parent = destination.parent().ok_or_else(|| VaultError::Io {
+        path: destination.to_path_buf(),
+        source: io::Error::new(
+            ErrorKind::InvalidInput,
+            "while attempting to resolve parent directory for atomic move",
+        ),
+    })?;
+
+    fs::create_dir_all(destination_parent).map_err(|source| VaultError::Io {
+        path: destination_parent.to_path_buf(),
+        source,
+    })?;
+    fs::rename(source, destination).map_err(|source| VaultError::Io {
+        path: destination.to_path_buf(),
+        source,
+    })?;
+
+    sync_directory(destination_parent)?;
+    if source_parent != destination_parent {
+        sync_directory(source_parent)?;
+    }
+
+    Ok(())
+}
+
 fn cleanup_temp_after_failed_persist(temp_path: &Path) {
     let _ = fs::remove_file(temp_path);
+}
+
+fn sync_directory(path: &Path) -> Result<(), VaultError> {
+    #[cfg(unix)]
+    {
+        let directory_handle = fs::File::open(path).map_err(|source| VaultError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        directory_handle
+            .sync_all()
+            .map_err(|source| VaultError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+
+    Ok(())
 }
