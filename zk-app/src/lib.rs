@@ -13,7 +13,10 @@ mod bootstrap;
 mod bridge;
 mod doctor;
 mod error;
+mod item_lifecycle;
+mod purge;
 mod rebuild;
+mod restore;
 mod retention;
 mod scan;
 mod status;
@@ -45,9 +48,15 @@ pub use write::{
 };
 #[rustfmt::skip]
 pub use trash::{
-    PurgeOutcome, PurgedItem, RestoredItem, SkippedPurge, TrashedItem, preview_restore_asset,
-    preview_restore_note, preview_trash_asset, preview_trash_note, purge_expired, purge_item,
-    restore_asset, restore_note, trash_asset, trash_note,
+    TrashedItem, preview_trash_asset, preview_trash_note, trash_asset, trash_note,
+};
+#[rustfmt::skip]
+pub use restore::{
+    RestoredItem, preview_restore_asset, preview_restore_note, restore_asset, restore_note,
+};
+#[rustfmt::skip]
+pub use purge::{
+    PurgeOutcome, PurgedItem, SkippedPurge, purge_expired, purge_item,
 };
 #[rustfmt::skip]
 pub use retention::{
