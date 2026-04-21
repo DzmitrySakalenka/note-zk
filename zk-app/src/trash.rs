@@ -8,7 +8,7 @@ use chrono::{SecondsFormat, Utc};
 use rusqlite::Connection;
 use serde::Serialize;
 use zk_domain::{
-    ItemKind, TargetSelector, TrashRequest,
+    ItemKind, RestoreRequest, TargetSelector, TrashRequest,
     config::EffectiveConfig,
     id::{NoteId, RelativePath},
 };
@@ -28,6 +28,13 @@ pub struct TrashedItem {
     pub retention_until: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RestoredItem {
+    pub item_id: String,
+    pub kind: ItemKind,
+    pub restored_to: RelativePath,
+}
+
 /// Moves a note into the configured trash directory and updates local index state.
 ///
 /// # Errors
@@ -45,103 +52,11 @@ pub fn trash_note(
     ensure_not_purged(resolved.note.is_deleted, &target)?;
     ensure_writable(&resolved.note.current_path, &config.folders)?;
 
-    let transaction = begin_trash_transaction(conn)?;
-    let now = SystemClock.now();
-    let current_trashed_at = resolved
-        .note
-        .trashed_at
-        .clone()
-        .unwrap_or_else(|| format_timestamp(now));
-
     if resolved.note.is_trashed {
-        let note_input = build_note_input(
-            &resolved,
-            resolved.note.current_path.clone(),
-            &current_trashed_at,
-        );
-        NoteRepo::upsert_note(
-            &transaction,
-            &resolved.note.note_id,
-            &note_input.path,
-            &note_input.title,
-            &note_input.content_hash,
-            &note_input.frontmatter_json,
-            &note_input.created_at,
-            &note_input.updated_at,
-            note_input.trashed_at.as_deref(),
-            note_input.is_trashed,
-        )?;
-        reconcile_delete_records(
-            &transaction,
-            std::slice::from_ref(&note_input),
-            &[],
-            config.retention_days,
-            &SystemClock,
-        )?;
-
-        let outcome = build_trashed_item(
-            &transaction,
-            resolved.note.note_id.as_str(),
-            ItemKind::Note,
-            resolved.note.current_path.clone(),
-            &current_trashed_at,
-        )?;
-        commit_trash_transaction(transaction)?;
-        return Ok(outcome);
+        return retrash_note(conn, config, &resolved);
     }
 
-    let new_path = next_trash_path(
-        vault_root,
-        &config.trash_dir,
-        &resolved.note.current_path,
-        &now,
-    )?;
-    let original_absolute_path = vault_root.join(resolved.note.current_path.as_str());
-    let new_absolute_path = vault_root.join(new_path.as_str());
-    zk_vault::atomic_move_file(&original_absolute_path, &new_absolute_path)?;
-
-    let moved_result = (|| -> Result<TrashedItem> {
-        let note_input = build_note_input(&resolved, new_path.clone(), &current_trashed_at);
-        NoteRepo::upsert_note(
-            &transaction,
-            &resolved.note.note_id,
-            &note_input.path,
-            &note_input.title,
-            &note_input.content_hash,
-            &note_input.frontmatter_json,
-            &note_input.created_at,
-            &note_input.updated_at,
-            note_input.trashed_at.as_deref(),
-            note_input.is_trashed,
-        )?;
-        reconcile_delete_records(
-            &transaction,
-            std::slice::from_ref(&note_input),
-            &[],
-            config.retention_days,
-            &SystemClock,
-        )?;
-
-        build_trashed_item(
-            &transaction,
-            resolved.note.note_id.as_str(),
-            ItemKind::Note,
-            new_path,
-            &current_trashed_at,
-        )
-    })();
-
-    match moved_result {
-        Ok(outcome) => {
-            commit_trash_transaction(transaction)?;
-            Ok(outcome)
-        }
-        Err(primary_error) => Err(rollback_file_move(
-            &new_absolute_path,
-            original_absolute_path,
-            primary_error,
-        )),
-    }
+    trash_live_note(vault_root, config, conn, &resolved)
 }
 
 /// Moves an asset into the configured trash directory and updates local index state.
@@ -161,75 +76,152 @@ pub fn trash_asset(
     ensure_not_purged(resolved.is_deleted, &target)?;
     ensure_writable(&resolved.current_path, &config.folders)?;
 
-    let transaction = begin_trash_transaction(conn)?;
-    let now = SystemClock.now();
-    let current_trashed_at = resolved
-        .trashed_at
-        .clone()
-        .unwrap_or_else(|| format_timestamp(now));
-
     if resolved.is_trashed {
-        let updated_record = build_trashed_asset_record(
-            &resolved,
-            resolved.current_path.clone(),
-            &current_trashed_at,
-        );
-        AssetRepo::upsert_asset(&transaction, &updated_record)?;
-        let asset_input = build_asset_input(&updated_record);
-        reconcile_delete_records(
-            &transaction,
-            &[],
-            std::slice::from_ref(&asset_input),
-            config.retention_days,
-            &SystemClock,
-        )?;
-
-        let outcome = build_trashed_item(
-            &transaction,
-            resolved.asset_id.as_str(),
-            ItemKind::Asset,
-            resolved.current_path.clone(),
-            &current_trashed_at,
-        )?;
-        commit_trash_transaction(transaction)?;
-        return Ok(outcome);
+        return retrash_asset(conn, config, &resolved);
     }
 
-    let new_path = next_trash_path(vault_root, &config.trash_dir, &resolved.current_path, &now)?;
-    let original_absolute_path = vault_root.join(resolved.current_path.as_str());
-    let new_absolute_path = vault_root.join(new_path.as_str());
-    zk_vault::atomic_move_file(&original_absolute_path, &new_absolute_path)?;
+    trash_live_asset(vault_root, config, conn, &resolved)
+}
 
-    let moved_result = (|| -> Result<TrashedItem> {
-        let updated_record =
-            build_trashed_asset_record(&resolved, new_path.clone(), &current_trashed_at);
-        AssetRepo::upsert_asset(&transaction, &updated_record)?;
-        let asset_input = build_asset_input(&updated_record);
-        reconcile_delete_records(
+/// Moves a trashed note back into the vault and clears its trash bookkeeping.
+///
+/// # Errors
+///
+/// Returns an error when the target is missing or not trashed, violates write
+/// policy, cannot be moved on disk, or the local index update fails.
+pub fn restore_note(
+    vault_root: &Path,
+    config: &EffectiveConfig,
+    conn: &mut Connection,
+    request: &RestoreRequest,
+) -> Result<RestoredItem> {
+    let target = render_target(&request.target);
+    let resolved =
+        find_note_target(conn, &request.target)?.ok_or_else(|| AppError::ItemNotTrashed {
+            target: target.clone(),
+        })?;
+    ensure_not_purged(resolved.note.is_deleted, &target)?;
+    ensure_item_is_trashed(resolved.note.is_trashed, &target)?;
+
+    let delete_record = DeleteRecordRepo::get_delete_record(
+        conn,
+        resolved.note.note_id.as_str(),
+        zk_domain::sync::ItemType::Note,
+    )?;
+    let destination_path = resolve_restore_destination(
+        request.alternate_path.as_ref(),
+        delete_record.as_ref().map(|record| &record.original_path),
+        &resolved.note.current_path,
+    )?;
+    ensure_restore_destination_available(vault_root, &destination_path)?;
+    ensure_writable(&destination_path, &config.folders)?;
+
+    let transaction = begin_item_lifecycle_transaction(conn)?;
+    let trashed_absolute_path = vault_root.join(resolved.note.current_path.as_str());
+    let restored_absolute_path = vault_root.join(destination_path.as_str());
+    zk_vault::atomic_move_file(&trashed_absolute_path, &restored_absolute_path)?;
+
+    let moved_result = (|| -> Result<RestoredItem> {
+        NoteRepo::upsert_note(
             &transaction,
-            &[],
-            std::slice::from_ref(&asset_input),
-            config.retention_days,
-            &SystemClock,
+            &resolved.note.note_id,
+            &destination_path,
+            &resolved.title,
+            &resolved.note.content_hash,
+            &resolved.frontmatter_json,
+            &resolved.note.created_at,
+            &resolved.note.updated_at,
+            None,
+            false,
+        )?;
+        DeleteRecordRepo::delete_delete_record(
+            &transaction,
+            resolved.note.note_id.as_str(),
+            zk_domain::sync::ItemType::Note,
         )?;
 
-        build_trashed_item(
-            &transaction,
-            resolved.asset_id.as_str(),
-            ItemKind::Asset,
-            new_path,
-            &current_trashed_at,
-        )
+        Ok(RestoredItem {
+            item_id: resolved.note.note_id.as_str().to_string(),
+            kind: ItemKind::Note,
+            restored_to: destination_path.clone(),
+        })
     })();
 
     match moved_result {
         Ok(outcome) => {
-            commit_trash_transaction(transaction)?;
+            commit_item_lifecycle_transaction(transaction)?;
             Ok(outcome)
         }
         Err(primary_error) => Err(rollback_file_move(
-            &new_absolute_path,
-            original_absolute_path,
+            &restored_absolute_path,
+            trashed_absolute_path,
+            primary_error,
+        )),
+    }
+}
+
+/// Moves a trashed asset back into the vault and clears its trash bookkeeping.
+///
+/// # Errors
+///
+/// Returns an error when the target is missing or not trashed, violates write
+/// policy, cannot be moved on disk, or the local index update fails.
+pub fn restore_asset(
+    vault_root: &Path,
+    config: &EffectiveConfig,
+    conn: &mut Connection,
+    request: &RestoreRequest,
+) -> Result<RestoredItem> {
+    let target = render_target(&request.target);
+    let resolved =
+        find_asset_target(conn, &request.target)?.ok_or_else(|| AppError::ItemNotTrashed {
+            target: target.clone(),
+        })?;
+    ensure_not_purged(resolved.is_deleted, &target)?;
+    ensure_item_is_trashed(resolved.is_trashed, &target)?;
+
+    let delete_record = DeleteRecordRepo::get_delete_record(
+        conn,
+        resolved.asset_id.as_str(),
+        zk_domain::sync::ItemType::Asset,
+    )?;
+    let destination_path = resolve_restore_destination(
+        request.alternate_path.as_ref(),
+        delete_record.as_ref().map(|record| &record.original_path),
+        &resolved.current_path,
+    )?;
+    ensure_restore_destination_available(vault_root, &destination_path)?;
+    ensure_writable(&destination_path, &config.folders)?;
+
+    let transaction = begin_item_lifecycle_transaction(conn)?;
+    let trashed_absolute_path = vault_root.join(resolved.current_path.as_str());
+    let restored_absolute_path = vault_root.join(destination_path.as_str());
+    zk_vault::atomic_move_file(&trashed_absolute_path, &restored_absolute_path)?;
+
+    let moved_result = (|| -> Result<RestoredItem> {
+        let restored_record = build_restored_asset_record(&resolved, destination_path.clone());
+        AssetRepo::upsert_asset(&transaction, &restored_record)?;
+        DeleteRecordRepo::delete_delete_record(
+            &transaction,
+            resolved.asset_id.as_str(),
+            zk_domain::sync::ItemType::Asset,
+        )?;
+
+        Ok(RestoredItem {
+            item_id: resolved.asset_id.as_str().to_string(),
+            kind: ItemKind::Asset,
+            restored_to: destination_path.clone(),
+        })
+    })();
+
+    match moved_result {
+        Ok(outcome) => {
+            commit_item_lifecycle_transaction(transaction)?;
+            Ok(outcome)
+        }
+        Err(primary_error) => Err(rollback_file_move(
+            &restored_absolute_path,
+            trashed_absolute_path,
             primary_error,
         )),
     }
@@ -263,13 +255,21 @@ fn resolve_note_target(
     selector: &TargetSelector,
     target: &str,
 ) -> Result<ResolvedNoteTarget> {
-    let note = match selector {
+    find_note_target(conn, selector)?.ok_or_else(|| AppError::ItemNotFound {
+        target: target.to_string(),
+    })
+}
+
+fn find_note_target(
+    conn: &Connection,
+    selector: &TargetSelector,
+) -> Result<Option<ResolvedNoteTarget>> {
+    let Some(note) = (match selector {
         TargetSelector::ById(note_id) => NoteRepo::get_note(conn, &NoteId::new(note_id))?,
         TargetSelector::ByPath(path) => NoteRepo::get_note_by_path(conn, path)?,
-    }
-    .ok_or_else(|| AppError::ItemNotFound {
-        target: target.to_string(),
-    })?;
+    }) else {
+        return Ok(None);
+    };
 
     let (title, frontmatter_json) = conn
         .query_row(SELECT_NOTE_METADATA_BY_ID, [note.note_id.as_str()], |row| {
@@ -278,15 +278,15 @@ fn resolve_note_target(
         .map_err(|source| {
             AppError::Index(IndexError::Sqlite {
                 source,
-                context: "get note trash metadata".to_string(),
+                context: "get note indexed metadata".to_string(),
             })
         })?;
 
-    Ok(ResolvedNoteTarget {
+    Ok(Some(ResolvedNoteTarget {
         note,
         title,
         frontmatter_json,
-    })
+    }))
 }
 
 fn resolve_asset_target(
@@ -294,17 +294,25 @@ fn resolve_asset_target(
     selector: &TargetSelector,
     target: &str,
 ) -> Result<ResolvedAssetTarget> {
-    let asset = match selector {
+    find_asset_target(conn, selector)?.ok_or_else(|| AppError::ItemNotFound {
+        target: target.to_string(),
+    })
+}
+
+fn find_asset_target(
+    conn: &Connection,
+    selector: &TargetSelector,
+) -> Result<Option<ResolvedAssetTarget>> {
+    let Some(asset) = (match selector {
         TargetSelector::ById(asset_id) => {
             AssetRepo::get_asset(conn, &zk_domain::id::AssetId::new(asset_id))?
         }
         TargetSelector::ByPath(path) => AssetRepo::get_asset_by_path(conn, path)?,
-    }
-    .ok_or_else(|| AppError::ItemNotFound {
-        target: target.to_string(),
-    })?;
+    }) else {
+        return Ok(None);
+    };
 
-    Ok(ResolvedAssetTarget {
+    Ok(Some(ResolvedAssetTarget {
         asset_id: asset.asset_id,
         current_path: asset.current_path,
         content_hash: asset.content_hash,
@@ -317,7 +325,7 @@ fn resolve_asset_target(
         is_trashed: asset.is_trashed,
         is_deleted: asset.is_deleted,
         server_revision: asset.server_revision,
-    })
+    }))
 }
 
 fn build_note_input(
@@ -364,6 +372,26 @@ fn build_trashed_asset_record(
     }
 }
 
+fn build_restored_asset_record(
+    resolved: &ResolvedAssetTarget,
+    path: RelativePath,
+) -> zk_domain::asset::AssetRecord {
+    zk_domain::asset::AssetRecord {
+        asset_id: resolved.asset_id.clone(),
+        current_path: path,
+        content_hash: resolved.content_hash.clone(),
+        mime_type: resolved.mime_type.clone(),
+        size_bytes: resolved.size_bytes,
+        created_at: resolved.created_at.clone(),
+        updated_at: resolved.updated_at.clone(),
+        trashed_at: None,
+        deleted_at: resolved.deleted_at.clone(),
+        is_trashed: false,
+        is_deleted: resolved.is_deleted,
+        server_revision: resolved.server_revision.clone(),
+    }
+}
+
 fn build_asset_input(record: &zk_domain::asset::AssetRecord) -> AssetInput {
     AssetInput {
         path: record.current_path.clone(),
@@ -403,20 +431,257 @@ fn build_trashed_item(
     })
 }
 
-fn begin_trash_transaction(conn: &mut Connection) -> Result<rusqlite::Transaction<'_>> {
+fn retrash_note(
+    conn: &mut Connection,
+    config: &EffectiveConfig,
+    resolved: &ResolvedNoteTarget,
+) -> Result<TrashedItem> {
+    let current_trashed_at = resolved
+        .note
+        .trashed_at
+        .clone()
+        .unwrap_or_else(|| format_timestamp(SystemClock.now()));
+    let original_path = preserve_existing_original_path(
+        conn,
+        resolved.note.note_id.as_str(),
+        zk_domain::sync::ItemType::Note,
+        &resolved.note.current_path,
+    )?;
+    let transaction = begin_item_lifecycle_transaction(conn)?;
+    let note_input = build_note_input(
+        resolved,
+        resolved.note.current_path.clone(),
+        &current_trashed_at,
+    );
+    NoteRepo::upsert_note(
+        &transaction,
+        &resolved.note.note_id,
+        &note_input.path,
+        &note_input.title,
+        &note_input.content_hash,
+        &note_input.frontmatter_json,
+        &note_input.created_at,
+        &note_input.updated_at,
+        note_input.trashed_at.as_deref(),
+        note_input.is_trashed,
+    )?;
+    reconcile_delete_records(
+        &transaction,
+        std::slice::from_ref(&note_input),
+        &[],
+        config.retention_days,
+        &SystemClock,
+    )?;
+    persist_delete_record_original_path(
+        &transaction,
+        resolved.note.note_id.as_str(),
+        zk_domain::sync::ItemType::Note,
+        &original_path,
+    )?;
+
+    let outcome = build_trashed_item(
+        &transaction,
+        resolved.note.note_id.as_str(),
+        ItemKind::Note,
+        resolved.note.current_path.clone(),
+        &current_trashed_at,
+    )?;
+    commit_item_lifecycle_transaction(transaction)?;
+    Ok(outcome)
+}
+
+fn trash_live_note(
+    vault_root: &Path,
+    config: &EffectiveConfig,
+    conn: &mut Connection,
+    resolved: &ResolvedNoteTarget,
+) -> Result<TrashedItem> {
+    let now = SystemClock.now();
+    let current_trashed_at = resolved
+        .note
+        .trashed_at
+        .clone()
+        .unwrap_or_else(|| format_timestamp(now));
+    let original_path = resolved.note.current_path.clone();
+    let transaction = begin_item_lifecycle_transaction(conn)?;
+    let new_path = next_trash_path(
+        vault_root,
+        &config.trash_dir,
+        &resolved.note.current_path,
+        &now,
+    )?;
+    let original_absolute_path = vault_root.join(resolved.note.current_path.as_str());
+    let new_absolute_path = vault_root.join(new_path.as_str());
+    zk_vault::atomic_move_file(&original_absolute_path, &new_absolute_path)?;
+
+    let moved_result = (|| -> Result<TrashedItem> {
+        let note_input = build_note_input(resolved, new_path.clone(), &current_trashed_at);
+        NoteRepo::upsert_note(
+            &transaction,
+            &resolved.note.note_id,
+            &note_input.path,
+            &note_input.title,
+            &note_input.content_hash,
+            &note_input.frontmatter_json,
+            &note_input.created_at,
+            &note_input.updated_at,
+            note_input.trashed_at.as_deref(),
+            note_input.is_trashed,
+        )?;
+        reconcile_delete_records(
+            &transaction,
+            std::slice::from_ref(&note_input),
+            &[],
+            config.retention_days,
+            &SystemClock,
+        )?;
+        persist_delete_record_original_path(
+            &transaction,
+            resolved.note.note_id.as_str(),
+            zk_domain::sync::ItemType::Note,
+            &original_path,
+        )?;
+
+        build_trashed_item(
+            &transaction,
+            resolved.note.note_id.as_str(),
+            ItemKind::Note,
+            new_path,
+            &current_trashed_at,
+        )
+    })();
+
+    match moved_result {
+        Ok(outcome) => {
+            commit_item_lifecycle_transaction(transaction)?;
+            Ok(outcome)
+        }
+        Err(primary_error) => Err(rollback_file_move(
+            &new_absolute_path,
+            original_absolute_path,
+            primary_error,
+        )),
+    }
+}
+
+fn retrash_asset(
+    conn: &mut Connection,
+    config: &EffectiveConfig,
+    resolved: &ResolvedAssetTarget,
+) -> Result<TrashedItem> {
+    let current_trashed_at = resolved
+        .trashed_at
+        .clone()
+        .unwrap_or_else(|| format_timestamp(SystemClock.now()));
+    let original_path = preserve_existing_original_path(
+        conn,
+        resolved.asset_id.as_str(),
+        zk_domain::sync::ItemType::Asset,
+        &resolved.current_path,
+    )?;
+    let transaction = begin_item_lifecycle_transaction(conn)?;
+    let updated_record =
+        build_trashed_asset_record(resolved, resolved.current_path.clone(), &current_trashed_at);
+    AssetRepo::upsert_asset(&transaction, &updated_record)?;
+    let asset_input = build_asset_input(&updated_record);
+    reconcile_delete_records(
+        &transaction,
+        &[],
+        std::slice::from_ref(&asset_input),
+        config.retention_days,
+        &SystemClock,
+    )?;
+    persist_delete_record_original_path(
+        &transaction,
+        resolved.asset_id.as_str(),
+        zk_domain::sync::ItemType::Asset,
+        &original_path,
+    )?;
+
+    let outcome = build_trashed_item(
+        &transaction,
+        resolved.asset_id.as_str(),
+        ItemKind::Asset,
+        resolved.current_path.clone(),
+        &current_trashed_at,
+    )?;
+    commit_item_lifecycle_transaction(transaction)?;
+    Ok(outcome)
+}
+
+fn trash_live_asset(
+    vault_root: &Path,
+    config: &EffectiveConfig,
+    conn: &mut Connection,
+    resolved: &ResolvedAssetTarget,
+) -> Result<TrashedItem> {
+    let now = SystemClock.now();
+    let current_trashed_at = resolved
+        .trashed_at
+        .clone()
+        .unwrap_or_else(|| format_timestamp(now));
+    let original_path = resolved.current_path.clone();
+    let transaction = begin_item_lifecycle_transaction(conn)?;
+    let new_path = next_trash_path(vault_root, &config.trash_dir, &resolved.current_path, &now)?;
+    let original_absolute_path = vault_root.join(resolved.current_path.as_str());
+    let new_absolute_path = vault_root.join(new_path.as_str());
+    zk_vault::atomic_move_file(&original_absolute_path, &new_absolute_path)?;
+
+    let moved_result = (|| -> Result<TrashedItem> {
+        let updated_record =
+            build_trashed_asset_record(resolved, new_path.clone(), &current_trashed_at);
+        AssetRepo::upsert_asset(&transaction, &updated_record)?;
+        let asset_input = build_asset_input(&updated_record);
+        reconcile_delete_records(
+            &transaction,
+            &[],
+            std::slice::from_ref(&asset_input),
+            config.retention_days,
+            &SystemClock,
+        )?;
+        persist_delete_record_original_path(
+            &transaction,
+            resolved.asset_id.as_str(),
+            zk_domain::sync::ItemType::Asset,
+            &original_path,
+        )?;
+
+        build_trashed_item(
+            &transaction,
+            resolved.asset_id.as_str(),
+            ItemKind::Asset,
+            new_path,
+            &current_trashed_at,
+        )
+    })();
+
+    match moved_result {
+        Ok(outcome) => {
+            commit_item_lifecycle_transaction(transaction)?;
+            Ok(outcome)
+        }
+        Err(primary_error) => Err(rollback_file_move(
+            &new_absolute_path,
+            original_absolute_path,
+            primary_error,
+        )),
+    }
+}
+
+fn begin_item_lifecycle_transaction(conn: &mut Connection) -> Result<rusqlite::Transaction<'_>> {
     conn.transaction().map_err(|source| {
         AppError::Index(IndexError::Sqlite {
             source,
-            context: "begin trash transaction".to_string(),
+            context: "begin item lifecycle transaction".to_string(),
         })
     })
 }
 
-fn commit_trash_transaction(transaction: rusqlite::Transaction<'_>) -> Result<()> {
+fn commit_item_lifecycle_transaction(transaction: rusqlite::Transaction<'_>) -> Result<()> {
     transaction.commit().map_err(|source| {
         AppError::Index(IndexError::Sqlite {
             source,
-            context: "commit trash transaction".to_string(),
+            context: "commit item lifecycle transaction".to_string(),
         })
     })
 }
@@ -424,6 +689,16 @@ fn commit_trash_transaction(transaction: rusqlite::Transaction<'_>) -> Result<()
 fn ensure_not_purged(is_deleted: bool, target: &str) -> Result<()> {
     if is_deleted {
         return Err(AppError::AlreadyPurged {
+            target: target.to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+fn ensure_item_is_trashed(is_trashed: bool, target: &str) -> Result<()> {
+    if !is_trashed {
+        return Err(AppError::ItemNotTrashed {
             target: target.to_string(),
         });
     }
@@ -484,6 +759,43 @@ fn next_trash_path(
     unreachable!("collision loop always returns or continues")
 }
 
+fn resolve_restore_destination(
+    alternate_path: Option<&RelativePath>,
+    recorded_original_path: Option<&RelativePath>,
+    current_trashed_path: &RelativePath,
+) -> Result<RelativePath> {
+    if let Some(alternate_path) = alternate_path {
+        return Ok(alternate_path.clone());
+    }
+
+    match recorded_original_path {
+        Some(recorded_original_path) if recorded_original_path != current_trashed_path => {
+            Ok(recorded_original_path.clone())
+        }
+        _ => Err(AppError::RestoreTargetExists {
+            path: current_trashed_path.clone(),
+        }),
+    }
+}
+
+fn ensure_restore_destination_available(
+    vault_root: &Path,
+    destination_path: &RelativePath,
+) -> Result<()> {
+    let destination_absolute_path = vault_root.join(destination_path.as_str());
+
+    match fs::symlink_metadata(&destination_absolute_path) {
+        Ok(_) => Err(AppError::RestoreTargetExists {
+            path: destination_path.clone(),
+        }),
+        Err(source) if source.kind() == ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(AppError::Io {
+            path: destination_absolute_path,
+            source,
+        }),
+    }
+}
+
 fn split_file_name(file_name: &str) -> (&str, Option<String>) {
     let path = Path::new(file_name);
     let stem = path
@@ -539,6 +851,48 @@ fn rollback_file_move(
             }
         }
     }
+}
+
+fn preserve_existing_original_path(
+    conn: &Connection,
+    item_id: &str,
+    item_type: zk_domain::sync::ItemType,
+    fallback: &RelativePath,
+) -> Result<RelativePath> {
+    Ok(
+        DeleteRecordRepo::get_delete_record(conn, item_id, item_type)?
+            .map_or_else(|| fallback.clone(), |record| record.original_path),
+    )
+}
+
+fn persist_delete_record_original_path(
+    conn: &Connection,
+    item_id: &str,
+    item_type: zk_domain::sync::ItemType,
+    original_path: &RelativePath,
+) -> Result<()> {
+    let Some(delete_record) = DeleteRecordRepo::get_delete_record(conn, item_id, item_type)? else {
+        return Ok(());
+    };
+
+    if delete_record.original_path == *original_path {
+        return Ok(());
+    }
+
+    DeleteRecordRepo::insert_delete_record(
+        conn,
+        &zk_domain::sync_state::DeleteRecord {
+            item_id: delete_record.item_id,
+            item_type: delete_record.item_type,
+            original_path: original_path.clone(),
+            trashed_at: delete_record.trashed_at,
+            retention_until: delete_record.retention_until,
+            deleted_at: delete_record.deleted_at,
+            delete_revision: delete_record.delete_revision,
+        },
+    )?;
+
+    Ok(())
 }
 
 fn format_timestamp(timestamp: chrono::DateTime<Utc>) -> String {
