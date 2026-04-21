@@ -190,17 +190,22 @@ fn upsert_delete_record_if_needed(
     let effective_trashed_at = resolve_trashed_at(trashed_at, clock)?;
     let retention_until =
         compute_retention_until(Some(&effective_trashed_at), retention_days, clock)?;
+    let existing_record = DeleteRecordRepo::get_delete_record(conn, item_id, item_type)?;
+    let preserved_original_path = existing_record.as_ref().map_or_else(
+        || original_path.clone(),
+        |record| record.original_path.clone(),
+    );
     let replacement = DeleteRecord {
         item_id: item_id.to_string(),
         item_type,
-        original_path: original_path.clone(),
+        original_path: preserved_original_path,
         trashed_at: effective_trashed_at,
         retention_until,
         deleted_at: None,
         delete_revision: None,
     };
 
-    match DeleteRecordRepo::get_delete_record(conn, item_id, item_type)? {
+    match existing_record {
         None => {
             DeleteRecordRepo::insert_delete_record(conn, &replacement)?;
             stats.inserted += 1;

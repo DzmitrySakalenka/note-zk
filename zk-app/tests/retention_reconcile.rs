@@ -1,5 +1,6 @@
 use std::{
-    fmt,
+    fmt, fs,
+    path::Path,
     sync::{Arc, Mutex},
 };
 
@@ -9,15 +10,25 @@ use tracing::{
     field::{Field, Visit},
 };
 use tracing_subscriber::{Layer, layer::Context, prelude::*};
-use zk_app::{Clock, ReconciliationStats, reconcile_delete_records};
+use zk_app::{
+    Clock, RebuildOptions, RebuildOutcome, ReconciliationStats, rebuild_index as app_rebuild_index,
+    reconcile_delete_records, trash_note,
+};
 use zk_domain::{
+    ItemKind, TargetSelector, TrashRequest,
+    config::EffectiveConfig,
     id::{ContentHash, NoteId, RelativePath},
     sync::ItemType,
     sync_state::DeleteRecord,
 };
 use zk_index::{
-    AssetInput, AssetRepo, DeleteRecordRepo, NoteInput, ensure_schema, open_memory, rebuild_index,
+    AssetInput, AssetRepo, DeleteRecordRepo, NoteInput, ensure_schema, open_memory,
+    rebuild_index as index_rebuild,
 };
+
+mod common;
+
+use common::{unique_test_dir, write_text};
 
 struct FixedClock(DateTime<Utc>);
 
@@ -103,7 +114,7 @@ fn reconcile_delete_records_inserts_note_and_asset_rows_for_first_trash() {
         Some("2026-04-20T11:00:00Z"),
     )];
 
-    rebuild_index(&mut connection, &note_inputs, &asset_inputs).expect("rebuild should succeed");
+    index_rebuild(&mut connection, &note_inputs, &asset_inputs).expect("rebuild should succeed");
     let stats = reconcile_delete_records(
         &connection,
         &note_inputs,
@@ -161,7 +172,7 @@ fn reconcile_delete_records_skips_refresh_when_retention_is_unchanged() {
         Some("2026-04-20T11:00:00Z"),
     )];
 
-    rebuild_index(&mut connection, &note_inputs, &asset_inputs).expect("rebuild should succeed");
+    index_rebuild(&mut connection, &note_inputs, &asset_inputs).expect("rebuild should succeed");
     reconcile_delete_records(
         &connection,
         &note_inputs,
@@ -202,7 +213,7 @@ fn reconcile_delete_records_refreshes_rows_when_retention_days_change() {
         Some("2026-04-20T10:00:00Z"),
     )];
 
-    rebuild_index(&mut connection, &note_inputs, &[]).expect("rebuild should succeed");
+    index_rebuild(&mut connection, &note_inputs, &[]).expect("rebuild should succeed");
     reconcile_delete_records(
         &connection,
         &note_inputs,
@@ -260,7 +271,7 @@ fn reconcile_delete_records_clears_rows_when_items_are_restored() {
         Some("2026-04-20T11:00:00Z"),
     )];
 
-    rebuild_index(&mut connection, &trashed_note_inputs, &trashed_asset_inputs)
+    index_rebuild(&mut connection, &trashed_note_inputs, &trashed_asset_inputs)
         .expect("initial rebuild should succeed");
     reconcile_delete_records(
         &connection,
@@ -284,7 +295,7 @@ fn reconcile_delete_records_clears_rows_when_items_are_restored() {
         None,
     )];
 
-    rebuild_index(
+    index_rebuild(
         &mut connection,
         &restored_note_inputs,
         &restored_asset_inputs,
@@ -390,6 +401,95 @@ fn reconcile_delete_records_warns_about_orphans_without_deleting_them() {
     );
 }
 
+#[test]
+fn rebuild_preserves_explicit_trash_original_path() {
+    let root = unique_test_dir("retention-preserve-original-path");
+    let vault_root = root.join("vault");
+    let note_id = NoteId::new("01RETENTIONORIGINALPATH000001");
+    let live_path = RelativePath::new("notes/preserve.md");
+    write_note(
+        &vault_root.join(live_path.as_str()),
+        note_id.as_str(),
+        "Preserve Original Path",
+    );
+
+    let config = base_config(&vault_root);
+    let mut connection = seeded_connection(&vault_root, &config);
+    trash_note(
+        &vault_root,
+        &config,
+        &mut connection,
+        &TrashRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            reason: None,
+        },
+    )
+    .expect("trash note should succeed");
+
+    let initial_record =
+        DeleteRecordRepo::get_delete_record(&connection, note_id.as_str(), ItemType::Note)
+            .expect("delete-record query should succeed")
+            .expect("delete record should exist after trash");
+    assert_eq!(initial_record.original_path, live_path);
+
+    let outcome = app_rebuild_index(
+        &vault_root,
+        &config,
+        &mut connection,
+        RebuildOptions::default(),
+    )
+    .expect("rebuild should succeed");
+
+    assert_eq!(reconciliation(&outcome).inserted, 0);
+    assert_eq!(reconciliation(&outcome).refreshed, 0);
+    assert_eq!(reconciliation(&outcome).cleared, 0);
+    assert_eq!(reconciliation(&outcome).orphans_warned, 0);
+
+    let refreshed_record =
+        DeleteRecordRepo::get_delete_record(&connection, note_id.as_str(), ItemType::Note)
+            .expect("delete-record query should succeed")
+            .expect("delete record should still exist after rebuild");
+    assert_eq!(refreshed_record.original_path, live_path);
+}
+
+#[test]
+fn rebuild_uses_scanned_trash_path_for_manual_move_without_existing_delete_record() {
+    let root = unique_test_dir("retention-manual-trash-path");
+    let vault_root = root.join("vault");
+    let note_id = NoteId::new("01RETENTIONMANUALTRASHPATH01");
+    let live_path = RelativePath::new("notes/manual.md");
+    let trash_path = RelativePath::new("99_trash/manual.md");
+    write_note(
+        &vault_root.join(live_path.as_str()),
+        note_id.as_str(),
+        "Manual Trash Path",
+    );
+
+    let config = base_config(&vault_root);
+    let mut connection = seeded_connection(&vault_root, &config);
+    move_relative(&vault_root, &live_path, &trash_path);
+
+    let outcome = app_rebuild_index(
+        &vault_root,
+        &config,
+        &mut connection,
+        RebuildOptions::default(),
+    )
+    .expect("rebuild should succeed");
+
+    assert_eq!(reconciliation(&outcome).inserted, 1);
+    assert_eq!(reconciliation(&outcome).refreshed, 0);
+    assert_eq!(reconciliation(&outcome).cleared, 0);
+    assert_eq!(reconciliation(&outcome).orphans_warned, 0);
+
+    let delete_record =
+        DeleteRecordRepo::get_delete_record(&connection, note_id.as_str(), ItemType::Note)
+            .expect("delete-record query should succeed")
+            .expect("delete record should be created from scan");
+    assert_eq!(delete_record.original_path, trash_path);
+}
+
 fn fixed_clock(value: &str) -> FixedClock {
     FixedClock(
         DateTime::parse_from_rfc3339(value)
@@ -440,4 +540,47 @@ fn asset_id_for_path(conn: &rusqlite::Connection, path: &str) -> zk_domain::id::
         .expect("asset lookup should succeed")
         .expect("asset row should exist after rebuild")
         .asset_id
+}
+
+fn reconciliation(outcome: &RebuildOutcome) -> &ReconciliationStats {
+    match outcome {
+        RebuildOutcome::ScanOnly { reconciliation, .. }
+        | RebuildOutcome::Normalized { reconciliation, .. } => reconciliation,
+    }
+}
+
+fn base_config(vault_root: &Path) -> EffectiveConfig {
+    EffectiveConfig {
+        vault_path: vault_root.to_path_buf(),
+        allowed_note_extensions: vec!["md".to_string()],
+        ..EffectiveConfig::default()
+    }
+}
+
+fn seeded_connection(vault_root: &Path, config: &EffectiveConfig) -> rusqlite::Connection {
+    let mut connection = open_memory().expect("in-memory database should open");
+    app_rebuild_index(
+        vault_root,
+        config,
+        &mut connection,
+        RebuildOptions::default(),
+    )
+    .expect("seed rebuild should succeed");
+    connection
+}
+
+fn write_note(path: &Path, note_id: &str, title: &str) {
+    write_text(
+        path,
+        &format!("---\nid: {note_id}\ntitle: {title}\n---\n# {title}\n"),
+    );
+}
+
+fn move_relative(vault_root: &Path, from: &RelativePath, to: &RelativePath) {
+    let destination = vault_root.join(to.as_str());
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).expect("destination parent should exist");
+    }
+    fs::rename(vault_root.join(from.as_str()), destination)
+        .expect("fixture move into trash should succeed");
 }
