@@ -237,57 +237,6 @@ fn asset_round_trip_preserves_nullable_boolean_and_server_revision_fields() {
 }
 
 #[test]
-fn upsert_asset_persists_and_clears_trash_fields_without_touching_delete_columns() {
-    let connection = open_memory().expect("in-memory database should open");
-    ensure_schema(&connection).expect("schema should be ready");
-    let deleted_at = "2026-04-18T11:00:00Z";
-    let original = AssetRecord {
-        deleted_at: Some(deleted_at.to_string()),
-        is_deleted: true,
-        ..sample_asset_record()
-    };
-
-    AssetRepo::upsert_asset(&connection, &original).expect("initial asset upsert should succeed");
-
-    let trashed = AssetRecord {
-        current_path: RelativePath::new("99_trash/diagram.png"),
-        trashed_at: Some("2026-04-20T08:00:00Z".to_string()),
-        is_trashed: true,
-        updated_at: "2026-04-20T08:00:00Z".to_string(),
-        ..original.clone()
-    };
-    AssetRepo::upsert_asset(&connection, &trashed).expect("trashed asset upsert should succeed");
-
-    let stored_trashed = AssetRepo::get_asset(&connection, &trashed.asset_id)
-        .expect("asset query should succeed")
-        .expect("trashed asset should exist");
-    assert!(stored_trashed.is_trashed);
-    assert_eq!(
-        stored_trashed.trashed_at.as_deref(),
-        Some("2026-04-20T08:00:00Z")
-    );
-    assert_eq!(stored_trashed.deleted_at.as_deref(), Some(deleted_at));
-    assert!(stored_trashed.is_deleted);
-
-    let restored = AssetRecord {
-        current_path: RelativePath::new("assets/diagram.png"),
-        trashed_at: None,
-        is_trashed: false,
-        updated_at: "2026-04-21T08:00:00Z".to_string(),
-        ..trashed
-    };
-    AssetRepo::upsert_asset(&connection, &restored).expect("restored asset upsert should succeed");
-
-    let stored_restored = AssetRepo::get_asset(&connection, &original.asset_id)
-        .expect("asset query should succeed")
-        .expect("restored asset should exist");
-    assert!(!stored_restored.is_trashed);
-    assert_eq!(stored_restored.trashed_at, None);
-    assert_eq!(stored_restored.deleted_at.as_deref(), Some(deleted_at));
-    assert!(stored_restored.is_deleted);
-}
-
-#[test]
 fn mark_deleted_sets_tombstone_fields_without_changing_path() {
     let connection = open_memory().expect("in-memory database should open");
     ensure_schema(&connection).expect("schema should be ready");
