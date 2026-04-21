@@ -10,6 +10,7 @@ use zk_domain::{
     id::{ContentHash, RelativePath},
     note::DiagnosticLevel,
 };
+use zk_vault::error::VaultError;
 use zk_vault::{
     NormalizationResult, apply_normalization, atomic_move_file, atomic_write_file, parse_note_file,
     scan_vault,
@@ -408,15 +409,26 @@ fn atomic_write_file_creates_new_file_with_expected_content() {
 }
 
 #[test]
-fn atomic_write_file_cleans_temp_file_on_rename_failure() {
+fn atomic_write_file_returns_io_error_and_cleans_temp_file_on_persist_failure() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let target_dir_path = tempdir.path().join("target-is-directory");
     fs::create_dir_all(&target_dir_path).expect("directory should be created");
 
     let err = atomic_write_file(&target_dir_path, b"content")
-        .expect_err("rename to directory path should fail");
-    let rendered = err.to_string();
-    assert!(!rendered.is_empty());
+        .expect_err("persist to directory path should fail");
+    match err {
+        VaultError::Io { path, source } => {
+            assert_eq!(path, target_dir_path);
+            assert!(
+                source.raw_os_error().is_some(),
+                "persist failure should preserve the underlying os error"
+            );
+        }
+        _ => panic!("expected io error from persist failure"),
+    }
+
+    assert!(!target_dir_path.is_file());
+    assert!(target_dir_path.is_dir());
 
     let entries: Vec<PathBuf> = fs::read_dir(tempdir.path())
         .expect("directory should be readable")
@@ -424,6 +436,20 @@ fn atomic_write_file_cleans_temp_file_on_rename_failure() {
         .collect();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0], target_dir_path);
+
+    let stray_temp_files: Vec<PathBuf> = fs::read_dir(tempdir.path())
+        .expect("directory should be readable")
+        .map(|entry| entry.expect("entry should be readable").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(".tmp"))
+        })
+        .collect();
+    assert!(
+        stray_temp_files.is_empty(),
+        "persist failure should not leave .tmp siblings behind"
+    );
 }
 
 #[test]
