@@ -68,6 +68,7 @@ const SELECT_NEXT_DELETE_REVISION: &str =
     "SELECT COALESCE(MAX(delete_revision), 0) + 1 FROM delete_records";
 const SAVEPOINT_INSERT_DELETE_RECORD: &str = "delete_record_repo_insert";
 
+/// Repository for logical delete records that track trash retention state.
 pub struct DeleteRecordRepo;
 
 impl DeleteRecordRepo {

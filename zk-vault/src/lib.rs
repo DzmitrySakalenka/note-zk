@@ -1,3 +1,7 @@
+#![warn(missing_docs)]
+//! Vault scanning, parsing, normalization, and atomic filesystem writes.
+
+/// Error types returned by vault scan, parse, and write operations.
 pub mod error;
 mod link_extract;
 mod link_resolve;

@@ -1,3 +1,6 @@
+#![warn(missing_docs)]
+//! SQLite-backed local index, rebuild pipeline, and repository accessors.
+
 mod db;
 mod error;
 mod input;

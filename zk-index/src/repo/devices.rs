@@ -31,6 +31,7 @@ WHERE device_id = ?1
 const UPDATE_DEVICE_SYNC_CURSOR: &str =
     "UPDATE devices SET last_sync_cursor = ?1 WHERE device_id = ?2";
 
+/// Repository for per-device sync cursors and capability metadata.
 pub struct DeviceRepo;
 
 impl DeviceRepo {

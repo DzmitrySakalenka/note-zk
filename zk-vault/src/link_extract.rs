@@ -7,20 +7,30 @@ use crate::parse::parse_fence_line;
 pub enum RawLink {
     /// `[[target]]` or `[[target|alias]]` wiki-style link.
     WikiLink {
+        /// Unresolved wiki-link target text.
         raw_target: String,
+        /// Optional display alias from `[[target|alias]]`.
         alias: Option<String>,
     },
     /// Standard `[text](destination)` markdown link.
-    MarkdownLink { text: String, destination: String },
+    MarkdownLink {
+        /// Rendered label text between `[` and `]`.
+        text: String,
+        /// Raw markdown destination between `(` and `)`.
+        destination: String,
+    },
 }
 
 /// Accumulator for links extracted from a note body, separated by syntax type.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ExtractedLinks {
+    /// Extracted wiki-style links in encounter order.
     pub wiki_links: Vec<RawLink>,
+    /// Extracted markdown links in encounter order.
     pub markdown_links: Vec<RawLink>,
 }
 
+/// Extracts wiki and markdown links from note body text.
 #[must_use]
 pub fn extract_links(body: &str) -> ExtractedLinks {
     let mut inside_fence = false;

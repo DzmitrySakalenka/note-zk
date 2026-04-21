@@ -27,25 +27,41 @@ use crate::{
     write::atomic_write_file,
 };
 
+/// Parsed note data and normalization plan produced for one scanned note file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalizationResult {
+    /// Vault-relative note path at scan time.
     pub relative_path: RelativePath,
+    /// Stable note ID when the note could be identified.
     pub note_id: Option<NoteId>,
+    /// Whether the note is live or inside the configured trash tree.
     pub trash_state: TrashState,
+    /// Best-effort trash timestamp derived from filesystem metadata.
     pub trashed_at: Option<String>,
+    /// Planned normalization changes for this note.
     pub plan: NormalizationPlan,
+    /// Normalized frontmatter when parsing succeeded well enough to produce one.
     pub frontmatter: Option<NoteFrontmatter>,
+    /// Parsed note document when body and frontmatter were usable.
     pub document: Option<NoteDocument>,
+    /// Content hash of the original note bytes on disk.
     pub content_hash: ContentHash,
 }
 
+/// Full vault scan output used by validation, indexing, and normalization writes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VaultScanResult {
+    /// Parsed note scan results in deterministic path order.
     pub notes: Vec<NormalizationResult>,
+    /// Non-note files discovered during the vault walk.
     pub assets: Vec<AssetCandidate>,
+    /// Scan diagnostics emitted during file discovery and parsing.
     pub diagnostics: Vec<ScanDiagnostic>,
+    /// Strict frontmatter parse failures kept separate for validation rules.
     pub frontmatter_parse_failures: Vec<FrontmatterParseFailure>,
+    /// Duplicate note IDs grouped with the paths that share each ID.
     pub duplicate_ids: Vec<(NoteId, Vec<RelativePath>)>,
+    /// Number of scanned notes currently living under the configured trash tree.
     pub trashed_note_count: u32,
 }
 
@@ -107,13 +123,20 @@ pub struct NotePathIndexBuild {
     pub diagnostics: Vec<ScanDiagnostic>,
 }
 
+/// Summary counts returned after applying normalization writes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NormalizationSummary {
+    /// Number of files rewritten with normalized content.
     pub files_written: u32,
+    /// Number of files skipped because immutable-folder policy blocked writes.
     pub files_skipped_immutable: u32,
+    /// Number of files skipped because rendered output matched existing bytes.
     pub files_skipped_no_change: u32,
+    /// Number of files skipped because duplicate note IDs made writes unsafe.
     pub files_skipped_duplicate_id: u32,
+    /// Number of files that failed before a normalized write completed.
     pub files_errored: u32,
+    /// Diagnostics emitted while attempting writeback.
     pub diagnostics: Vec<ScanDiagnostic>,
 }
 

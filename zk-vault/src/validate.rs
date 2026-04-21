@@ -29,6 +29,7 @@ pub(crate) trait ValidationRule {
 }
 
 #[must_use]
+/// Validates one vault scan using derived link and asset indexes built on demand.
 pub fn validate_vault(scan_result: &VaultScanResult, config: &EffectiveConfig) -> ValidationReport {
     let parsed_indexes = resolve_vault_links(scan_result, config);
     validate_vault_with_parsed_indexes(scan_result, &parsed_indexes, config)

@@ -125,6 +125,7 @@ ORDER BY rowid ASC
 const COUNT_ASSETS_SQL: &str = "SELECT COUNT(*) FROM assets_index";
 const SAVEPOINT_REPLACE_ASSET_REFERENCES: &str = "asset_repo_replace_asset_references";
 
+/// Repository for persisted asset rows and note-to-asset references.
 pub struct AssetRepo;
 
 impl AssetRepo {

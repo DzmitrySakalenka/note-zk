@@ -15,35 +15,55 @@ use zk_domain::{
 
 use crate::error::{NON_UTF8_PATH_COMPONENT_SCAN_DIAGNOSTIC_PREFIX, VaultError};
 
+/// Whether a scanned file is live or lives inside the configured trash tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrashState {
+    /// The file is outside the configured trash directory.
     Live,
+    /// The file is inside the configured trash directory.
     Trashed,
 }
 
+/// Minimal scan-time metadata for one note file on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoteCandidate {
+    /// Vault-relative path of the note file.
     pub relative_path: RelativePath,
+    /// Absolute filesystem path used for later reads and writes.
     pub absolute_path: PathBuf,
+    /// Whether immutable-folder policy blocks normalization writes for this path.
     pub is_immutable: bool,
+    /// Whether the note is live or trashed.
     pub trash_state: TrashState,
+    /// Best-effort trash timestamp derived from filesystem metadata.
     pub trashed_at: Option<String>,
 }
 
+/// Minimal scan-time metadata for one non-note file on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetCandidate {
+    /// Vault-relative path of the asset file.
     pub relative_path: RelativePath,
+    /// Absolute filesystem path used for later reads and purge operations.
     pub absolute_path: PathBuf,
+    /// Whether the asset is live or trashed.
     pub trash_state: TrashState,
+    /// Best-effort trash timestamp derived from filesystem metadata.
     pub trashed_at: Option<String>,
 }
 
+/// Raw vault walk output before note parsing and normalization planning.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultFileSet {
+    /// Note-file candidates in deterministic path order.
     pub notes: Vec<NoteCandidate>,
+    /// Asset-file candidates in deterministic path order.
     pub assets: Vec<AssetCandidate>,
+    /// Diagnostics emitted while walking the filesystem.
     pub diagnostics: Vec<ScanDiagnostic>,
+    /// Number of scanned notes currently under the configured trash tree.
     pub trashed_note_count: u32,
+    /// Number of scanned assets currently under the configured trash tree.
     pub trashed_asset_count: u32,
 }
 

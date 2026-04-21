@@ -4,17 +4,25 @@ use zk_domain::note::RawNoteFrontmatter;
 
 use crate::error::VaultError;
 
+/// Raw note file sections extracted before normalization or validation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawNoteDocument {
+    /// Parsed raw frontmatter payload when a frontmatter block exists and parses.
     pub frontmatter: Option<RawNoteFrontmatter>,
+    /// Original YAML frontmatter text without delimiter lines.
     pub raw_frontmatter_yaml: Option<String>,
+    /// Markdown body text after any frontmatter block.
     pub body_markdown: String,
+    /// Whether the file contained frontmatter delimiters.
     pub has_frontmatter_delimiters: bool,
 }
 
+/// Lightweight body facts reused by normalization and validation passes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BodyAnalysis {
+    /// First top-level Markdown heading outside fenced code blocks.
     pub first_h1: Option<String>,
+    /// Whether the body contains a fenced mermaid block.
     pub has_mermaid: bool,
 }
 
@@ -102,16 +110,19 @@ pub(crate) fn parse_note_frontmatter(
 }
 
 #[must_use]
+/// Extracts the first Markdown H1 from body text outside fenced code blocks.
 pub fn extract_first_h1(body: &str) -> Option<String> {
     analyze_body(body).first_h1
 }
 
 #[must_use]
+/// Detects whether body text contains a fenced mermaid block.
 pub fn detect_mermaid(body: &str) -> bool {
     analyze_body(body).has_mermaid
 }
 
 #[must_use]
+/// Analyzes body text for normalization and validation-relevant structure.
 pub fn analyze_body(body: &str) -> BodyAnalysis {
     analyze_body_internal(body)
 }

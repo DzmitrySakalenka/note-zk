@@ -10,33 +10,51 @@ use crate::{
     scan::NoteCandidate,
 };
 
+/// Source used when deriving a missing effective note title.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitleSource {
+    /// The title already existed in frontmatter.
     Frontmatter,
+    /// The title was derived from the first Markdown H1.
     H1,
+    /// The title was derived from the file name stem.
     FilenameStem,
 }
 
+/// Inputs required to normalize one raw note frontmatter payload.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalizationContext<'a> {
+    /// Vault-relative path of the note being normalized.
     pub relative_path: &'a RelativePath,
+    /// Precomputed body analysis for the note body.
     pub body_analysis: &'a BodyAnalysis,
+    /// Effective configuration controlling normalization behavior.
     pub config: &'a EffectiveConfig,
+    /// Whether the note path is protected by immutable-folder policy.
     pub is_immutable: bool,
 }
 
+/// Planned normalization changes and informational diagnostics for one note.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct NormalizationPlan {
+    /// Whether a missing stable note ID should be inserted.
     pub needs_id_injection: bool,
+    /// Whether the effective title must be derived.
     pub needs_title_derivation: bool,
+    /// Chosen source for any derived title.
     pub title_source: TitleSource,
+    /// Whether an entire frontmatter block must be inserted.
     pub needs_frontmatter_insertion: bool,
+    /// Whether canonical field ordering should be restored.
     pub needs_field_reorder: bool,
+    /// Whether immutable-folder policy prevents writeback.
     pub is_immutable: bool,
+    /// Informational scan diagnostics emitted while planning normalization.
     pub diagnostics: Vec<ScanDiagnostic>,
 }
 
+/// Normalizes one raw frontmatter payload using the default note ID generator.
 #[must_use]
 pub fn normalize_frontmatter(
     raw: RawNoteFrontmatter,
@@ -45,6 +63,7 @@ pub fn normalize_frontmatter(
     normalize_frontmatter_with_id_generator(raw, ctx, NoteId::generate)
 }
 
+/// Normalizes one raw frontmatter payload using a caller-provided note ID generator.
 pub fn normalize_frontmatter_with_id_generator<F>(
     raw: RawNoteFrontmatter,
     ctx: &NormalizationContext<'_>,
@@ -104,6 +123,7 @@ where
     )
 }
 
+/// Plans the normalization changes required for one parsed note candidate.
 #[must_use]
 pub fn plan_normalization(
     raw_doc: &RawNoteDocument,

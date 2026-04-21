@@ -105,6 +105,7 @@ const COUNT_NOTES_SQL: &str = "SELECT COUNT(*) FROM notes_index";
 const SAVEPOINT_REPLACE_TAGS: &str = "note_repo_replace_tags";
 const SAVEPOINT_REPLACE_ALIASES: &str = "note_repo_replace_aliases";
 
+/// Repository for persisted note rows and note-owned derived tables.
 pub struct NoteRepo;
 
 impl NoteRepo {
