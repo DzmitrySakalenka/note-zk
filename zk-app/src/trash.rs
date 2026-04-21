@@ -263,10 +263,11 @@ pub fn restore_note(
     ensure_not_purged(resolved.note.is_deleted, &target)?;
     ensure_item_is_trashed(resolved.note.is_trashed, &target)?;
 
-    let delete_record = DeleteRecordRepo::get_delete_record(
+    let delete_record = get_delete_record_with_context(
         conn,
         resolved.note.note_id.as_str(),
         zk_domain::sync::ItemType::Note,
+        "during restore",
     )?;
     let destination_path = resolve_restore_destination(
         request.alternate_path.as_ref(),
@@ -340,10 +341,11 @@ pub fn restore_asset(
     ensure_not_purged(resolved.is_deleted, &target)?;
     ensure_item_is_trashed(resolved.is_trashed, &target)?;
 
-    let delete_record = DeleteRecordRepo::get_delete_record(
+    let delete_record = get_delete_record_with_context(
         conn,
         resolved.asset_id.as_str(),
         zk_domain::sync::ItemType::Asset,
+        "during restore",
     )?;
     let destination_path = resolve_restore_destination(
         request.alternate_path.as_ref(),
@@ -406,8 +408,12 @@ pub fn preview_restore_note(
     ensure_not_purged(resolved.note.is_deleted, &target)?;
     ensure_item_is_trashed(resolved.note.is_trashed, &target)?;
 
-    let delete_record =
-        DeleteRecordRepo::get_delete_record(conn, resolved.note.note_id.as_str(), ItemType::Note)?;
+    let delete_record = get_delete_record_with_context(
+        conn,
+        resolved.note.note_id.as_str(),
+        ItemType::Note,
+        "during preview restore",
+    )?;
     let destination_path = resolve_restore_destination(
         request.alternate_path.as_ref(),
         delete_record.as_ref().map(|record| &record.original_path),
@@ -442,8 +448,12 @@ pub fn preview_restore_asset(
     ensure_not_purged(resolved.is_deleted, &target)?;
     ensure_item_is_trashed(resolved.is_trashed, &target)?;
 
-    let delete_record =
-        DeleteRecordRepo::get_delete_record(conn, resolved.asset_id.as_str(), ItemType::Asset)?;
+    let delete_record = get_delete_record_with_context(
+        conn,
+        resolved.asset_id.as_str(),
+        ItemType::Asset,
+        "during preview restore",
+    )?;
     let destination_path = resolve_restore_destination(
         request.alternate_path.as_ref(),
         delete_record.as_ref().map(|record| &record.original_path),
@@ -534,10 +544,11 @@ pub fn purge_item(
             ensure_not_purged(resolved.note.is_deleted, &target)?;
             ensure_item_is_trashed(resolved.note.is_trashed, &target)?;
 
-            let delete_record = DeleteRecordRepo::get_delete_record(
+            let delete_record = get_delete_record_with_context(
                 conn,
                 resolved.note.note_id.as_str(),
                 ItemType::Note,
+                "during purge",
             )?
             .ok_or_else(|| AppError::ItemNotTrashed {
                 target: target.clone(),
@@ -561,10 +572,11 @@ pub fn purge_item(
             ensure_not_purged(resolved.is_deleted, &target)?;
             ensure_item_is_trashed(resolved.is_trashed, &target)?;
 
-            let delete_record = DeleteRecordRepo::get_delete_record(
+            let delete_record = get_delete_record_with_context(
                 conn,
                 resolved.asset_id.as_str(),
                 ItemType::Asset,
+                "during purge",
             )?
             .ok_or_else(|| AppError::ItemNotTrashed {
                 target: target.clone(),
@@ -794,8 +806,8 @@ fn build_trashed_item(
         ItemKind::Note => zk_domain::sync::ItemType::Note,
         ItemKind::Asset => zk_domain::sync::ItemType::Asset,
     };
-    let delete_record =
-        DeleteRecordRepo::get_delete_record(conn, item_id, item_type)?.ok_or_else(|| {
+    let delete_record = get_delete_record_with_context(conn, item_id, item_type, "after trash")?
+        .ok_or_else(|| {
             AppError::Index(IndexError::Sqlite {
                 source: rusqlite::Error::QueryReturnedNoRows,
                 context: "get delete record after trash".to_string(),
@@ -1269,6 +1281,32 @@ fn rollback_file_move(
     }
 }
 
+fn get_delete_record_with_context(
+    conn: &Connection,
+    item_id: &str,
+    item_type: ItemType,
+    operation: &str,
+) -> Result<Option<zk_domain::sync_state::DeleteRecord>> {
+    DeleteRecordRepo::get_delete_record(conn, item_id, item_type).map_err(|source| {
+        AppError::IndexContext {
+            context: format!(
+                "while fetching delete record for {} {} {}",
+                item_type_label(item_type),
+                item_id,
+                operation
+            ),
+            source,
+        }
+    })
+}
+
+fn item_type_label(item_type: ItemType) -> &'static str {
+    match item_type {
+        ItemType::Note => "note",
+        ItemType::Asset => "asset",
+    }
+}
+
 fn preserve_existing_original_path(
     conn: &Connection,
     item_id: &str,
@@ -1276,7 +1314,7 @@ fn preserve_existing_original_path(
     fallback: &RelativePath,
 ) -> Result<RelativePath> {
     Ok(
-        DeleteRecordRepo::get_delete_record(conn, item_id, item_type)?
+        get_delete_record_with_context(conn, item_id, item_type, "while preserving original path")?
             .map_or_else(|| fallback.clone(), |record| record.original_path),
     )
 }
@@ -1287,7 +1325,9 @@ fn persist_delete_record_original_path(
     item_type: ItemType,
     original_path: &RelativePath,
 ) -> Result<()> {
-    let Some(delete_record) = DeleteRecordRepo::get_delete_record(conn, item_id, item_type)? else {
+    let Some(delete_record) =
+        get_delete_record_with_context(conn, item_id, item_type, "while persisting original path")?
+    else {
         return Ok(());
     };
 

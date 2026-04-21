@@ -355,6 +355,62 @@ fn preview_restore_note_returns_destination_without_mutating_disk_or_db() {
 }
 
 #[test]
+fn preview_restore_note_reports_operation_context_when_delete_record_lookup_fails() {
+    let root = unique_test_dir("preview-restore-note-delete-record-context");
+    let vault_root = root.join("vault");
+    let note_id = NoteId::new("01RESTORELOOKUPCONTEXT000001");
+    let original_relative_path = RelativePath::new("notes/context.md");
+    write_note(
+        &vault_root.join(original_relative_path.as_str()),
+        note_id.as_str(),
+        "Context",
+    );
+
+    let config = base_config(&vault_root);
+    let mut conn = seeded_connection(
+        &vault_root,
+        &config,
+        "preview-restore-note-delete-record-context.sqlite",
+    );
+    trash_note(
+        &vault_root,
+        &config,
+        &mut conn,
+        &TrashRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            reason: None,
+        },
+    )
+    .expect("trash note should succeed");
+    conn.execute(
+        "ALTER TABLE delete_records RENAME TO delete_records_broken",
+        [],
+    )
+    .expect("table rename should succeed");
+
+    let err = preview_restore_note(
+        &vault_root,
+        &config,
+        &conn,
+        &RestoreRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            alternate_path: None,
+        },
+    )
+    .expect_err("missing delete_records table should surface as an error");
+
+    let err_text = err.to_string();
+    assert!(err_text.contains("while attempting to access local index data"));
+    assert!(err_text.contains(&format!(
+        "while fetching delete record for note {} during preview restore",
+        note_id.as_str()
+    )));
+    assert!(err_text.contains("get delete record"));
+}
+
+#[test]
 fn restore_asset_uses_original_path_by_default() {
     let root = unique_test_dir("restore-asset-default");
     let vault_root = root.join("vault");

@@ -16,6 +16,15 @@ pub enum AppError {
     /// SQLite/indexing failure propagated from `zk-index`.
     #[error("while attempting to access local index data: {0}")]
     Index(#[from] IndexError),
+    /// SQLite/indexing failure with extra app-layer operation context.
+    #[error("while attempting to access local index data: {context}: {source}")]
+    IndexContext {
+        /// Operation-specific context added by the app layer.
+        context: String,
+        /// Original index-layer failure.
+        #[source]
+        source: IndexError,
+    },
     /// Global config load/parse failure.
     #[error("while attempting to load global config: {0}")]
     GlobalConfig(#[from] GlobalConfigError),

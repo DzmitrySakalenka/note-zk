@@ -150,3 +150,31 @@ fn preserves_trash_lifecycle_error_payloads() {
         AppError::TrashedItemMissingId { path } if path.as_str() == "99_trash/lost.md"
     ));
 }
+
+#[test]
+fn preserves_index_context_payload_and_display() {
+    let source = IndexError::Sqlite {
+        source: rusqlite::Error::QueryReturnedNoRows,
+        context: "get delete record".to_string(),
+    };
+    let err = AppError::IndexContext {
+        context: "while fetching delete record for note 01TESTNOTEID00000000000000 during restore"
+            .to_string(),
+        source,
+    };
+
+    assert!(matches!(
+        &err,
+        AppError::IndexContext { context, source: IndexError::Sqlite { context: source_context, .. } }
+            if context == "while fetching delete record for note 01TESTNOTEID00000000000000 during restore"
+                && source_context == "get delete record"
+    ));
+    assert!(
+        err.to_string()
+            .contains("while attempting to access local index data")
+    );
+    assert!(err.to_string().contains(
+        "while fetching delete record for note 01TESTNOTEID00000000000000 during restore"
+    ));
+    assert!(err.to_string().contains("get delete record"));
+}
