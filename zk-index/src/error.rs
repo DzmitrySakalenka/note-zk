@@ -23,4 +23,6 @@ pub enum IndexError {
         version: u32,
         source: rusqlite::Error,
     },
+    #[error("unsupported schema version {found}; this build supports up to {max_supported}")]
+    UnsupportedSchemaVersion { found: u32, max_supported: u32 },
 }

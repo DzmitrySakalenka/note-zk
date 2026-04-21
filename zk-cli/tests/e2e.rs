@@ -7,6 +7,7 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::Value;
 use tempfile::TempDir;
+use zk_index::{ensure_schema, open_or_create};
 use zk_vault::parse_note_file;
 
 fn test_roots() -> (TempDir, PathBuf, PathBuf) {
@@ -122,6 +123,27 @@ fn e2e_scan_rejects_file_vault_path() {
         .arg("--check")
         .assert()
         .code(2);
+}
+
+#[test]
+fn e2e_status_rejects_future_index_schema_version() {
+    let (_tempdir, vault_root, home_root) = test_roots();
+    let database_path = home_root.join("future-schema.sqlite");
+    let connection = open_or_create(&database_path).expect("database should open");
+    ensure_schema(&connection).expect("schema should be created");
+    connection
+        .execute("UPDATE schema_version SET version = 2", [])
+        .expect("schema version should be writable for fixture setup");
+
+    base_command(&home_root)
+        .arg("status")
+        .arg("--vault")
+        .arg(&vault_root)
+        .arg("--db")
+        .arg(&database_path)
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("unsupported schema version 2"));
 }
 
 #[test]

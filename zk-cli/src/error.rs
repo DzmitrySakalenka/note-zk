@@ -28,7 +28,16 @@ impl fmt::Display for CliError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Argument(message) | Self::Issue(message) => formatter.write_str(message),
-            Self::Bootstrap(source) => write!(formatter, "bootstrap error: {source}"),
+            Self::Bootstrap(source) => {
+                formatter.write_str("bootstrap error: ")?;
+                for (index, cause) in source.chain().enumerate() {
+                    if index > 0 {
+                        formatter.write_str(": ")?;
+                    }
+                    write!(formatter, "{cause}")?;
+                }
+                Ok(())
+            }
             Self::Issues => formatter.write_str("issues detected"),
             Self::Internal(source) => write!(formatter, "internal error: {source}"),
         }
