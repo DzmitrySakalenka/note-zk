@@ -30,7 +30,9 @@ pub use bridge::{build_asset_inputs, build_note_inputs};
 pub use doctor::{DoctorIssue, DoctorReport, doctor_report};
 pub use error::{AppError, Result};
 pub use rebuild::{RebuildOptions, RebuildOutcome, rebuild_index};
-pub use retention::{Clock, SystemClock, compute_retention_until};
+pub use retention::{
+    Clock, ReconciliationStats, SystemClock, compute_retention_until, reconcile_delete_records,
+};
 pub use scan::{ScanOutcome, scan_vault};
 pub use status::{StatusSummary, status_summary};
 pub use write::{

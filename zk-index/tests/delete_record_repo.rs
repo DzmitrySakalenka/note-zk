@@ -252,3 +252,53 @@ fn insert_delete_record_works_inside_outer_transaction() {
             .expect("delete record should exist");
     assert_eq!(actual, record);
 }
+
+#[test]
+fn delete_delete_record_removes_only_requested_logical_key() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    let note_record = sample_delete_record();
+    let asset_record = DeleteRecord {
+        item_id: "01HZ3ASSET00000000000000A".to_string(),
+        item_type: ItemType::Asset,
+        original_path: RelativePath::new("99_trash/diagram.png"),
+        ..sample_delete_record()
+    };
+
+    DeleteRecordRepo::insert_delete_record(&connection, &note_record)
+        .expect("note delete-record insert should succeed");
+    DeleteRecordRepo::insert_delete_record(&connection, &asset_record)
+        .expect("asset delete-record insert should succeed");
+
+    let transaction = connection
+        .unchecked_transaction()
+        .expect("outer transaction should begin");
+    DeleteRecordRepo::delete_delete_record(
+        &transaction,
+        &note_record.item_id,
+        note_record.item_type,
+    )
+    .expect("logical delete-record removal should succeed");
+    transaction
+        .commit()
+        .expect("outer transaction should commit");
+
+    assert!(
+        DeleteRecordRepo::get_delete_record(
+            &connection,
+            &note_record.item_id,
+            note_record.item_type
+        )
+        .expect("note delete-record query should succeed")
+        .is_none()
+    );
+    assert_eq!(
+        DeleteRecordRepo::get_delete_record(
+            &connection,
+            &asset_record.item_id,
+            asset_record.item_type
+        )
+        .expect("asset delete-record query should succeed"),
+        Some(asset_record)
+    );
+}

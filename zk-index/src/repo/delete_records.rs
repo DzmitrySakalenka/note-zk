@@ -139,6 +139,29 @@ impl DeleteRecordRepo {
         })
     }
 
+    /// Deletes one delete record by logical key `(item_id, item_type)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if enum conversion or delete execution fails.
+    pub fn delete_delete_record(
+        conn: &Connection,
+        item_id: &str,
+        item_type: ItemType,
+    ) -> Result<(), IndexError> {
+        let item_type = encode_item_type(item_type)?;
+
+        conn.execute(
+            DELETE_LOGICAL_DELETE_RECORD,
+            rusqlite::params![item_id, item_type],
+        )
+        .map(|_| ())
+        .map_err(|source| IndexError::Sqlite {
+            source,
+            context: "delete delete record".to_string(),
+        })
+    }
+
     /// Lists delete records whose retention window has expired and were not yet hard-deleted.
     ///
     /// # Errors

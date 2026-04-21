@@ -45,22 +45,11 @@ pub fn rebuild_index(
     notes: &[NoteInput],
     assets: &[AssetInput],
 ) -> Result<RebuildStats, IndexError> {
-    let stats = RebuildStats {
-        notes_upserted: notes.len(),
-        assets_upserted: assets.len(),
-        note_links_inserted: notes.iter().map(|note| note.note_links.len()).sum(),
-        external_links_inserted: notes.iter().map(|note| note.external_links.len()).sum(),
-        asset_references_inserted: notes.iter().map(|note| note.asset_references.len()).sum(),
-    };
-
     let transaction = conn.transaction().map_err(|source| IndexError::Sqlite {
         source,
         context: "begin rebuild transaction".to_string(),
     })?;
-
-    clear_derived_tables(&transaction)?;
-    rebuild_notes(&transaction, notes)?;
-    rebuild_assets(&transaction, assets)?;
+    let stats = rebuild_index_in_transaction(&transaction, notes, assets)?;
 
     transaction.commit().map_err(|source| IndexError::Sqlite {
         source,
@@ -68,6 +57,35 @@ pub fn rebuild_index(
     })?;
 
     Ok(stats)
+}
+
+/// Rebuilds the local index inside an already-open transaction.
+///
+/// # Errors
+///
+/// Returns [`IndexError`] if derived-table clearing, timestamp generation, or
+/// repository writes fail.
+pub fn rebuild_index_in_transaction(
+    transaction: &Transaction<'_>,
+    notes: &[NoteInput],
+    assets: &[AssetInput],
+) -> Result<RebuildStats, IndexError> {
+    let stats = build_rebuild_stats(notes, assets);
+    clear_derived_tables(transaction)?;
+    rebuild_notes(transaction, notes)?;
+    rebuild_assets(transaction, assets)?;
+
+    Ok(stats)
+}
+
+fn build_rebuild_stats(notes: &[NoteInput], assets: &[AssetInput]) -> RebuildStats {
+    RebuildStats {
+        notes_upserted: notes.len(),
+        assets_upserted: assets.len(),
+        note_links_inserted: notes.iter().map(|note| note.note_links.len()).sum(),
+        external_links_inserted: notes.iter().map(|note| note.external_links.len()).sum(),
+        asset_references_inserted: notes.iter().map(|note| note.asset_references.len()).sum(),
+    }
 }
 
 fn clear_derived_tables(transaction: &Transaction<'_>) -> Result<(), IndexError> {
