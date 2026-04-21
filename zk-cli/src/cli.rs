@@ -25,6 +25,12 @@ pub enum Command {
     Status(StatusArgs),
     /// Print grouped diagnostics (header conveys severity).
     Doctor(DoctorArgs),
+    /// Move one note or asset into the configured trash directory.
+    Trash(TrashArgs),
+    /// Move one trashed note or asset back into the vault.
+    Restore(RestoreArgs),
+    /// Hard-delete expired trash items or one explicit trashed item.
+    Purge(PurgeArgs),
 }
 
 /// Shared per-invocation flags that later map onto `CliOverrides`.
@@ -108,6 +114,68 @@ pub struct StatusArgs {
 /// Arguments for the `doctor` subcommand.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub struct DoctorArgs {
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for the `trash` subcommand.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct TrashArgs {
+    /// Note or asset identifier, or vault-relative path.
+    pub target: String,
+    /// Force asset handling instead of the default note handling.
+    #[arg(long = "as-asset")]
+    pub as_asset: bool,
+    /// Optional user-supplied trash reason.
+    #[arg(long)]
+    pub reason: Option<String>,
+    /// Preview the operation without mutating disk or `SQLite` state.
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for the `restore` subcommand.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct RestoreArgs {
+    /// Note or asset identifier, or vault-relative path.
+    pub target: String,
+    /// Force asset handling instead of the default note handling.
+    #[arg(long = "as-asset")]
+    pub as_asset: bool,
+    /// Optional alternate vault-relative restore destination.
+    #[arg(long = "to")]
+    pub to: Option<String>,
+    /// Preview the operation without mutating disk or `SQLite` state.
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for the `purge` subcommand.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("purge_scope").args(["expired", "target"]).multiple(false)))]
+#[allow(clippy::struct_excessive_bools)]
+pub struct PurgeArgs {
+    /// Purge every expired delete record. Default when no target is supplied.
+    #[arg(long)]
+    pub expired: bool,
+    /// Explicit note or asset identifier, or vault-relative path, to purge.
+    pub target: Option<String>,
+    /// Force asset handling instead of the default note handling.
+    #[arg(long = "as-asset")]
+    pub as_asset: bool,
+    /// Confirm destructive execution.
+    #[arg(long)]
+    pub yes: bool,
+    /// Preview the purge outcome without deleting files or updating `SQLite`.
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
     /// Render compact JSON to stdout.
     #[arg(long)]
     pub json: bool,

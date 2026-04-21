@@ -30,5 +30,8 @@ pub fn run(cli: Cli) -> Result<i32, CliError> {
         Command::Scan(args) => commands::scan::run(&args, &shared),
         Command::Status(args) => commands::status::run(&args, &shared),
         Command::Doctor(args) => commands::doctor::run(&args, &shared),
+        Command::Trash(args) => commands::trash::run(&args, &shared),
+        Command::Restore(args) => commands::restore::run(&args, &shared),
+        Command::Purge(args) => commands::purge::run(&args, &shared),
     }
 }

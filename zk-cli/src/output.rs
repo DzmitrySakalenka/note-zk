@@ -3,7 +3,9 @@
 use std::io::{self, Write};
 
 use serde::Serialize;
-use zk_app::{DoctorIssue, DoctorReport, ScanOutcome, StatusSummary};
+use zk_app::{
+    DoctorIssue, DoctorReport, PurgeOutcome, RestoredItem, ScanOutcome, StatusSummary, TrashedItem,
+};
 use zk_domain::note::DiagnosticLevel;
 use zk_vault::NormalizationSummary;
 
@@ -47,6 +49,16 @@ pub struct ScanJsonOutput {
     /// Mode-specific payload fields.
     #[serde(flatten)]
     pub payload: ScanCommandPayload,
+}
+
+/// Top-level JSON object emitted by lifecycle commands.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LifecycleJsonOutput<T> {
+    /// Whether the command only previewed the requested action.
+    pub dry_run: bool,
+    /// Flattened command payload.
+    #[serde(flatten)]
+    pub payload: T,
 }
 
 /// Derives the user-facing `scan` counters from a full `ScanOutcome`.
@@ -184,6 +196,110 @@ pub fn write_doctor_human(out: &mut dyn io::Write, report: &DoctorReport) -> io:
     Ok(())
 }
 
+/// Writes human-readable `trash` output to the provided writer.
+///
+/// # Errors
+///
+/// Returns an `io::Error` when writing to the provided output fails.
+pub fn write_trash_human(
+    out: &mut dyn io::Write,
+    trashed_item: &TrashedItem,
+    dry_run: bool,
+) -> io::Result<()> {
+    if dry_run {
+        writeln!(
+            out,
+            "Would trash {} -> {} (retain until {})",
+            trashed_item.item_id,
+            trashed_item.new_path.as_str(),
+            trashed_item.retention_until
+        )
+    } else {
+        writeln!(
+            out,
+            "Trashed {} -> {} (retain until {})",
+            trashed_item.item_id,
+            trashed_item.new_path.as_str(),
+            trashed_item.retention_until
+        )
+    }
+}
+
+/// Writes human-readable `restore` output to the provided writer.
+///
+/// # Errors
+///
+/// Returns an `io::Error` when writing to the provided output fails.
+pub fn write_restore_human(
+    out: &mut dyn io::Write,
+    restored_item: &RestoredItem,
+    dry_run: bool,
+) -> io::Result<()> {
+    if dry_run {
+        writeln!(
+            out,
+            "Would restore {} -> {}",
+            restored_item.item_id,
+            restored_item.restored_to.as_str()
+        )
+    } else {
+        writeln!(
+            out,
+            "Restored {} -> {}",
+            restored_item.item_id,
+            restored_item.restored_to.as_str()
+        )
+    }
+}
+
+/// Writes human-readable `purge` output to the provided writer.
+///
+/// # Errors
+///
+/// Returns an `io::Error` when writing to the provided output fails.
+pub fn write_purge_human(
+    out: &mut dyn io::Write,
+    outcome: &PurgeOutcome,
+    dry_run: bool,
+) -> io::Result<()> {
+    let affected_items = if dry_run {
+        &outcome.planned
+    } else {
+        &outcome.executed
+    };
+    if dry_run {
+        writeln!(
+            out,
+            "Would purge {} items, skipped {}",
+            affected_items.len(),
+            outcome.skipped.len()
+        )?;
+    } else {
+        writeln!(
+            out,
+            "Purged {} items, skipped {}",
+            affected_items.len(),
+            outcome.skipped.len()
+        )?;
+    }
+
+    for item in affected_items {
+        writeln!(
+            out,
+            "  {} {} ({})",
+            item_kind_label(&item.kind),
+            item.item_id,
+            item.original_path.as_str()
+        )?;
+    }
+
+    for skipped in &outcome.skipped {
+        writeln!(out, "  skipped {} ({})", skipped.item_id, skipped.reason)?;
+    }
+
+    Ok(())
+}
+
 fn count_findings(findings: &[zk_domain::note::ValidationFinding], level: &DiagnosticLevel) -> u32 {
     findings
         .iter()
@@ -298,4 +414,11 @@ fn write_doctor_section(
     }
 
     Ok(())
+}
+
+fn item_kind_label(kind: &zk_domain::ItemKind) -> &'static str {
+    match kind {
+        zk_domain::ItemKind::Note => "note",
+        zk_domain::ItemKind::Asset => "asset",
+    }
 }

@@ -38,6 +38,9 @@ zk-cli scan --vault <path> --check
 zk-cli scan --vault <path> --write
 zk-cli status --vault <path>
 zk-cli doctor --vault <path>
+zk-cli trash --vault <path> <note-id>
+zk-cli restore --vault <path> <note-id>
+zk-cli purge --vault <path> --expired --yes
 ```
 
 Add `--json` to any subcommand for machine-readable output on stdout.

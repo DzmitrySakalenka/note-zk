@@ -75,6 +75,82 @@ fn optional_bool_flags_parse_bare_flag_as_true() {
 }
 
 #[test]
+fn trash_parses_target_and_flags() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "trash",
+        "assets/diagram.png",
+        "--as-asset",
+        "--reason",
+        "archive",
+        "--dry-run",
+        "--json",
+    ])
+    .expect("trash arguments should parse");
+
+    match cli.command {
+        Command::Trash(args) => {
+            assert_eq!(args.target, "assets/diagram.png");
+            assert!(args.as_asset);
+            assert_eq!(args.reason.as_deref(), Some("archive"));
+            assert!(args.dry_run);
+            assert_eq!(OutputMode::from(args.json), OutputMode::Json);
+        }
+        other => panic!("expected trash command, got {other:?}"),
+    }
+}
+
+#[test]
+fn restore_parses_target_and_alternate_destination() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "restore",
+        "01RESTORETARGET",
+        "--to",
+        "notes/restored.md",
+        "--dry-run",
+    ])
+    .expect("restore arguments should parse");
+
+    match cli.command {
+        Command::Restore(args) => {
+            assert_eq!(args.target, "01RESTORETARGET");
+            assert_eq!(args.to.as_deref(), Some("notes/restored.md"));
+            assert!(args.dry_run);
+            assert!(!args.as_asset);
+        }
+        other => panic!("expected restore command, got {other:?}"),
+    }
+}
+
+#[test]
+fn purge_defaults_to_expired_mode_without_target() {
+    let cli = Cli::try_parse_from(["zk-cli", "purge", "--yes", "--json"])
+        .expect("purge arguments should parse");
+
+    match cli.command {
+        Command::Purge(args) => {
+            assert!(
+                !args.expired,
+                "default expired mode should not require the flag"
+            );
+            assert!(args.target.is_none());
+            assert!(args.yes);
+            assert_eq!(OutputMode::from(args.json), OutputMode::Json);
+        }
+        other => panic!("expected purge command, got {other:?}"),
+    }
+}
+
+#[test]
+fn purge_rejects_target_and_expired_flag_together() {
+    let error = Cli::try_parse_from(["zk-cli", "purge", "--expired", "01TARGET"])
+        .expect_err("purge should reject explicit target with --expired");
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
 fn scan_rejects_conflicting_modes() {
     let error = Cli::try_parse_from(["zk-cli", "scan", "--check", "--write"])
         .expect_err("scan should reject conflicting mode flags");
@@ -106,6 +182,10 @@ fn exit_code_matches_cli_error_policy() {
         EXIT_USAGE
     );
     assert_eq!(exit_code(&CliError::Issues), EXIT_ISSUES);
+    assert_eq!(
+        exit_code(&CliError::Issue("lifecycle issue".to_string())),
+        EXIT_ISSUES
+    );
     assert_eq!(
         exit_code(&CliError::Internal(anyhow::anyhow!("internal failure"))),
         EXIT_ISSUES

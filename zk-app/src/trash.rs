@@ -6,7 +6,7 @@ use std::{
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use zk_domain::{
     ItemKind, PurgeRequest, PurgeScope, RestoreRequest, TargetSelector, TrashRequest,
     config::EffectiveConfig,
@@ -15,14 +15,17 @@ use zk_domain::{
 };
 use zk_index::{AssetInput, AssetRepo, DeleteRecordRepo, IndexError, NoteInput, NoteRepo};
 
-use crate::{AppError, Clock, Result, SystemClock, ensure_writable, reconcile_delete_records};
+use crate::{
+    AppError, Clock, Result, SystemClock, compute_retention_until, ensure_writable,
+    reconcile_delete_records,
+};
 
 const SELECT_NOTE_METADATA_BY_ID: &str =
     "SELECT title, frontmatter_json FROM notes_index WHERE note_id = ?1 LIMIT 1";
 const SKIPPED_PURGE_REASON_ALREADY_PURGED: &str = "already-purged";
 const SKIPPED_PURGE_REASON_FILE_MISSING: &str = "file-missing";
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct TrashedItem {
     pub item_id: String,
     pub kind: ItemKind,
@@ -31,28 +34,28 @@ pub struct TrashedItem {
     pub retention_until: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct RestoredItem {
     pub item_id: String,
     pub kind: ItemKind,
     pub restored_to: RelativePath,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
 pub struct PurgeOutcome {
     pub planned: Vec<PurgedItem>,
     pub executed: Vec<PurgedItem>,
     pub skipped: Vec<SkippedPurge>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct PurgedItem {
     pub item_id: String,
     pub kind: ItemKind,
     pub original_path: RelativePath,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SkippedPurge {
     pub item_id: String,
     pub reason: String,
@@ -118,6 +121,105 @@ pub fn trash_asset(
     }
 
     trash_live_asset(vault_root, config, conn, &resolved)
+}
+
+/// Plans the result of trashing a note without mutating disk or `SQLite` state.
+///
+/// # Errors
+///
+/// Returns the same target-resolution and policy errors as [`trash_note`].
+pub fn preview_trash_note(
+    vault_root: &Path,
+    config: &EffectiveConfig,
+    conn: &Connection,
+    request: &TrashRequest,
+) -> Result<TrashedItem> {
+    let target = render_target(&request.target);
+    let resolved = resolve_note_target(conn, &request.target, &target)?;
+    ensure_not_purged(resolved.note.is_deleted, &target)?;
+    ensure_writable(&resolved.note.current_path, &config.folders)?;
+
+    if resolved.note.is_trashed {
+        let trashed_at = resolved
+            .note
+            .trashed_at
+            .clone()
+            .unwrap_or_else(|| format_timestamp(SystemClock.now()));
+        return build_preview_trashed_item(
+            config,
+            resolved.note.note_id.as_str(),
+            ItemKind::Note,
+            resolved.note.current_path.clone(),
+            &trashed_at,
+        );
+    }
+
+    let now = SystemClock.now();
+    let trashed_at = resolved
+        .note
+        .trashed_at
+        .clone()
+        .unwrap_or_else(|| format_timestamp(now));
+    let new_path = next_trash_path(
+        vault_root,
+        &config.trash_dir,
+        &resolved.note.current_path,
+        &now,
+    )?;
+
+    build_preview_trashed_item(
+        config,
+        resolved.note.note_id.as_str(),
+        ItemKind::Note,
+        new_path,
+        &trashed_at,
+    )
+}
+
+/// Plans the result of trashing an asset without mutating disk or `SQLite` state.
+///
+/// # Errors
+///
+/// Returns the same target-resolution and policy errors as [`trash_asset`].
+pub fn preview_trash_asset(
+    vault_root: &Path,
+    config: &EffectiveConfig,
+    conn: &Connection,
+    request: &TrashRequest,
+) -> Result<TrashedItem> {
+    let target = render_target(&request.target);
+    let resolved = resolve_asset_target(conn, &request.target, &target)?;
+    ensure_not_purged(resolved.is_deleted, &target)?;
+    ensure_writable(&resolved.current_path, &config.folders)?;
+
+    if resolved.is_trashed {
+        let trashed_at = resolved
+            .trashed_at
+            .clone()
+            .unwrap_or_else(|| format_timestamp(SystemClock.now()));
+        return build_preview_trashed_item(
+            config,
+            resolved.asset_id.as_str(),
+            ItemKind::Asset,
+            resolved.current_path.clone(),
+            &trashed_at,
+        );
+    }
+
+    let now = SystemClock.now();
+    let trashed_at = resolved
+        .trashed_at
+        .clone()
+        .unwrap_or_else(|| format_timestamp(now));
+    let new_path = next_trash_path(vault_root, &config.trash_dir, &resolved.current_path, &now)?;
+
+    build_preview_trashed_item(
+        config,
+        resolved.asset_id.as_str(),
+        ItemKind::Asset,
+        new_path,
+        &trashed_at,
+    )
 }
 
 /// Moves a trashed note back into the vault and clears its trash bookkeeping.
@@ -262,6 +364,78 @@ pub fn restore_asset(
             primary_error,
         )),
     }
+}
+
+/// Plans the result of restoring a trashed note without mutating state.
+///
+/// # Errors
+///
+/// Returns the same target-resolution and policy errors as [`restore_note`].
+pub fn preview_restore_note(
+    vault_root: &Path,
+    config: &EffectiveConfig,
+    conn: &Connection,
+    request: &RestoreRequest,
+) -> Result<RestoredItem> {
+    let target = render_target(&request.target);
+    let resolved =
+        find_note_target(conn, &request.target)?.ok_or_else(|| AppError::ItemNotTrashed {
+            target: target.clone(),
+        })?;
+    ensure_not_purged(resolved.note.is_deleted, &target)?;
+    ensure_item_is_trashed(resolved.note.is_trashed, &target)?;
+
+    let delete_record =
+        DeleteRecordRepo::get_delete_record(conn, resolved.note.note_id.as_str(), ItemType::Note)?;
+    let destination_path = resolve_restore_destination(
+        request.alternate_path.as_ref(),
+        delete_record.as_ref().map(|record| &record.original_path),
+        &resolved.note.current_path,
+    )?;
+    ensure_restore_destination_available(vault_root, &destination_path)?;
+    ensure_writable(&destination_path, &config.folders)?;
+
+    Ok(RestoredItem {
+        item_id: resolved.note.note_id.as_str().to_string(),
+        kind: ItemKind::Note,
+        restored_to: destination_path,
+    })
+}
+
+/// Plans the result of restoring a trashed asset without mutating state.
+///
+/// # Errors
+///
+/// Returns the same target-resolution and policy errors as [`restore_asset`].
+pub fn preview_restore_asset(
+    vault_root: &Path,
+    config: &EffectiveConfig,
+    conn: &Connection,
+    request: &RestoreRequest,
+) -> Result<RestoredItem> {
+    let target = render_target(&request.target);
+    let resolved =
+        find_asset_target(conn, &request.target)?.ok_or_else(|| AppError::ItemNotTrashed {
+            target: target.clone(),
+        })?;
+    ensure_not_purged(resolved.is_deleted, &target)?;
+    ensure_item_is_trashed(resolved.is_trashed, &target)?;
+
+    let delete_record =
+        DeleteRecordRepo::get_delete_record(conn, resolved.asset_id.as_str(), ItemType::Asset)?;
+    let destination_path = resolve_restore_destination(
+        request.alternate_path.as_ref(),
+        delete_record.as_ref().map(|record| &record.original_path),
+        &resolved.current_path,
+    )?;
+    ensure_restore_destination_available(vault_root, &destination_path)?;
+    ensure_writable(&destination_path, &config.folders)?;
+
+    Ok(RestoredItem {
+        item_id: resolved.asset_id.as_str().to_string(),
+        kind: ItemKind::Asset,
+        restored_to: destination_path,
+    })
 }
 
 /// Purges every currently expired delete record, optionally as a dry run.
@@ -613,6 +787,25 @@ fn build_trashed_item(
         new_path,
         trashed_at: trashed_at.to_string(),
         retention_until: delete_record.retention_until,
+    })
+}
+
+fn build_preview_trashed_item(
+    config: &EffectiveConfig,
+    item_id: &str,
+    kind: ItemKind,
+    new_path: RelativePath,
+    trashed_at: &str,
+) -> Result<TrashedItem> {
+    let retention_until =
+        compute_retention_until(Some(trashed_at), config.retention_days, &SystemClock)?;
+
+    Ok(TrashedItem {
+        item_id: item_id.to_string(),
+        kind,
+        new_path,
+        trashed_at: trashed_at.to_string(),
+        retention_until,
     })
 }
 

@@ -6,8 +6,9 @@ use chrono::{DateTime, Utc};
 use common::{unique_test_dir, write_text};
 use rusqlite::OpenFlags;
 use zk_app::{
-    AppError, Clock, RebuildOptions, purge_expired, purge_item, rebuild_index, restore_asset,
-    restore_note, trash_asset, trash_note,
+    AppError, Clock, RebuildOptions, preview_restore_asset, preview_restore_note,
+    preview_trash_asset, preview_trash_note, purge_expired, purge_item, rebuild_index,
+    restore_asset, restore_note, trash_asset, trash_note,
 };
 use zk_domain::{
     ItemKind, PurgeRequest, PurgeScope, RestoreRequest, TargetSelector, TrashRequest,
@@ -76,6 +77,59 @@ fn trash_note_by_id_moves_file_updates_index_and_creates_delete_record() {
 }
 
 #[test]
+fn preview_trash_note_returns_planned_path_without_mutating_disk_or_db() {
+    let root = unique_test_dir("preview-trash-note");
+    let vault_root = root.join("vault");
+    let note_id = NoteId::new("01PREVIEWTRASHNOTE000000001");
+    let note_relative_path = RelativePath::new("notes/alpha.md");
+    write_note(
+        &vault_root.join(note_relative_path.as_str()),
+        note_id.as_str(),
+        "Alpha",
+    );
+
+    let config = base_config(&vault_root);
+    let mut conn = seeded_connection(&vault_root, &config, "preview-trash-note.sqlite");
+    let preview = preview_trash_note(
+        &vault_root,
+        &config,
+        &conn,
+        &TrashRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            reason: Some("preview".to_string()),
+        },
+    )
+    .expect("preview trash note should succeed");
+
+    assert_eq!(preview.item_id, note_id.as_str());
+    assert!(vault_root.join(note_relative_path.as_str()).exists());
+    assert!(!vault_root.join(preview.new_path.as_str()).exists());
+    assert!(
+        DeleteRecordRepo::get_delete_record(
+            &conn,
+            note_id.as_str(),
+            zk_domain::sync::ItemType::Note
+        )
+        .expect("delete-record query should succeed")
+        .is_none()
+    );
+
+    let actual = trash_note(
+        &vault_root,
+        &config,
+        &mut conn,
+        &TrashRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            reason: Some("preview".to_string()),
+        },
+    )
+    .expect("real trash note should succeed");
+    assert_eq!(actual.new_path, preview.new_path);
+}
+
+#[test]
 fn trash_asset_by_path_moves_file_updates_index_and_creates_delete_record() {
     let root = unique_test_dir("trash-asset-by-path");
     let vault_root = root.join("vault");
@@ -127,6 +181,53 @@ fn trash_asset_by_path_moves_file_updates_index_and_creates_delete_record() {
         RelativePath::new("assets/diagram.png")
     );
     assert_eq!(delete_record.retention_until, trashed.retention_until);
+}
+
+#[test]
+fn preview_trash_asset_returns_planned_path_without_mutating_disk_or_db() {
+    let root = unique_test_dir("preview-trash-asset");
+    let vault_root = root.join("vault");
+    let asset_relative_path = RelativePath::new("assets/diagram.png");
+    write_text(&vault_root.join(asset_relative_path.as_str()), "png-bytes");
+
+    let config = base_config(&vault_root);
+    let mut conn = seeded_connection(&vault_root, &config, "preview-trash-asset.sqlite");
+    let preview = preview_trash_asset(
+        &vault_root,
+        &config,
+        &conn,
+        &TrashRequest {
+            kind: ItemKind::Asset,
+            target: TargetSelector::ByPath(asset_relative_path.clone()),
+            reason: Some("preview".to_string()),
+        },
+    )
+    .expect("preview trash asset should succeed");
+
+    assert!(vault_root.join(asset_relative_path.as_str()).exists());
+    assert!(!vault_root.join(preview.new_path.as_str()).exists());
+    assert!(
+        DeleteRecordRepo::get_delete_record(
+            &conn,
+            &preview.item_id,
+            zk_domain::sync::ItemType::Asset
+        )
+        .expect("delete-record query should succeed")
+        .is_none()
+    );
+
+    let actual = trash_asset(
+        &vault_root,
+        &config,
+        &mut conn,
+        &TrashRequest {
+            kind: ItemKind::Asset,
+            target: TargetSelector::ByPath(asset_relative_path),
+            reason: Some("preview".to_string()),
+        },
+    )
+    .expect("real trash asset should succeed");
+    assert_eq!(actual.new_path, preview.new_path);
 }
 
 #[test]
@@ -189,6 +290,71 @@ fn restore_note_uses_original_path_by_default() {
 }
 
 #[test]
+fn preview_restore_note_returns_destination_without_mutating_disk_or_db() {
+    let root = unique_test_dir("preview-restore-note");
+    let vault_root = root.join("vault");
+    let note_id = NoteId::new("01PREVIEWRESTORENOTE0000001");
+    let original_relative_path = RelativePath::new("notes/alpha.md");
+    write_note(
+        &vault_root.join(original_relative_path.as_str()),
+        note_id.as_str(),
+        "Alpha",
+    );
+
+    let config = base_config(&vault_root);
+    let mut conn = seeded_connection(&vault_root, &config, "preview-restore-note.sqlite");
+    let trashed = trash_note(
+        &vault_root,
+        &config,
+        &mut conn,
+        &TrashRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            reason: None,
+        },
+    )
+    .expect("trash note should succeed");
+
+    let preview = preview_restore_note(
+        &vault_root,
+        &config,
+        &conn,
+        &RestoreRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            alternate_path: None,
+        },
+    )
+    .expect("preview restore note should succeed");
+
+    assert_eq!(preview.restored_to, original_relative_path);
+    assert!(vault_root.join(trashed.new_path.as_str()).exists());
+    assert!(!vault_root.join(original_relative_path.as_str()).exists());
+    assert!(
+        DeleteRecordRepo::get_delete_record(
+            &conn,
+            note_id.as_str(),
+            zk_domain::sync::ItemType::Note
+        )
+        .expect("delete-record query should succeed")
+        .is_some()
+    );
+
+    let actual = restore_note(
+        &vault_root,
+        &config,
+        &mut conn,
+        &RestoreRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            alternate_path: None,
+        },
+    )
+    .expect("real restore note should succeed");
+    assert_eq!(actual.restored_to, preview.restored_to);
+}
+
+#[test]
 fn restore_asset_uses_original_path_by_default() {
     let root = unique_test_dir("restore-asset-default");
     let vault_root = root.join("vault");
@@ -243,6 +409,69 @@ fn restore_asset_uses_original_path_by_default() {
         .expect("delete-record query should succeed")
         .is_none()
     );
+}
+
+#[test]
+fn preview_restore_asset_returns_destination_without_mutating_disk_or_db() {
+    let root = unique_test_dir("preview-restore-asset");
+    let vault_root = root.join("vault");
+    let original_relative_path = RelativePath::new("assets/diagram.png");
+    write_text(
+        &vault_root.join(original_relative_path.as_str()),
+        "png-bytes",
+    );
+
+    let config = base_config(&vault_root);
+    let mut conn = seeded_connection(&vault_root, &config, "preview-restore-asset.sqlite");
+    let trashed = trash_asset(
+        &vault_root,
+        &config,
+        &mut conn,
+        &TrashRequest {
+            kind: ItemKind::Asset,
+            target: TargetSelector::ByPath(original_relative_path.clone()),
+            reason: None,
+        },
+    )
+    .expect("trash asset should succeed");
+
+    let preview = preview_restore_asset(
+        &vault_root,
+        &config,
+        &conn,
+        &RestoreRequest {
+            kind: ItemKind::Asset,
+            target: TargetSelector::ByPath(trashed.new_path.clone()),
+            alternate_path: None,
+        },
+    )
+    .expect("preview restore asset should succeed");
+
+    assert_eq!(preview.restored_to, original_relative_path);
+    assert!(vault_root.join(trashed.new_path.as_str()).exists());
+    assert!(!vault_root.join(original_relative_path.as_str()).exists());
+    assert!(
+        DeleteRecordRepo::get_delete_record(
+            &conn,
+            &trashed.item_id,
+            zk_domain::sync::ItemType::Asset
+        )
+        .expect("delete-record query should succeed")
+        .is_some()
+    );
+
+    let actual = restore_asset(
+        &vault_root,
+        &config,
+        &mut conn,
+        &RestoreRequest {
+            kind: ItemKind::Asset,
+            target: TargetSelector::ByPath(trashed.new_path),
+            alternate_path: None,
+        },
+    )
+    .expect("real restore asset should succeed");
+    assert_eq!(actual.restored_to, preview.restored_to);
 }
 
 #[test]
