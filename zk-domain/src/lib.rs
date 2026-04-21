@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! Core domain models shared across vault, app, sync, and CLI layers.
 
 /// Asset metadata and index-facing asset record models.

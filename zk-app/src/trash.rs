@@ -26,38 +26,59 @@ const SKIPPED_PURGE_REASON_ALREADY_PURGED: &str = "already-purged";
 const SKIPPED_PURGE_REASON_FILE_MISSING: &str = "file-missing";
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+/// Result payload returned after one item is moved into the trash.
 pub struct TrashedItem {
+    /// Stable note or asset identifier for the trashed item.
     pub item_id: String,
+    /// Caller-visible item kind for the trashed item.
     pub kind: ItemKind,
+    /// New vault-relative path under the configured trash directory.
     pub new_path: RelativePath,
+    /// Timestamp when the item entered the trash lifecycle.
     pub trashed_at: String,
+    /// Timestamp when the item becomes eligible for hard purge.
     pub retention_until: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+/// Result payload returned after one trashed item is restored.
 pub struct RestoredItem {
+    /// Stable note or asset identifier for the restored item.
     pub item_id: String,
+    /// Caller-visible item kind for the restored item.
     pub kind: ItemKind,
+    /// Vault-relative destination path after restore succeeds.
     pub restored_to: RelativePath,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+/// Aggregate result for one purge request.
 pub struct PurgeOutcome {
+    /// Items that would be purged by a dry run.
     pub planned: Vec<PurgedItem>,
+    /// Items that were actually purged.
     pub executed: Vec<PurgedItem>,
+    /// Candidates that were examined but not purged.
     pub skipped: Vec<SkippedPurge>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+/// One item included in the planned or executed portion of a purge result.
 pub struct PurgedItem {
+    /// Stable note or asset identifier for the purged item.
     pub item_id: String,
+    /// Caller-visible item kind for the purged item.
     pub kind: ItemKind,
+    /// Vault-relative pre-trash restore target preserved in `delete_records`.
     pub original_path: RelativePath,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+/// One candidate skipped during purge execution.
 pub struct SkippedPurge {
+    /// Stable note or asset identifier for the skipped item.
     pub item_id: String,
+    /// Stable machine-readable skip reason code.
     pub reason: String,
 }
 
