@@ -38,10 +38,16 @@ pub enum AppError {
         source: io::Error,
     },
     /// Write blocked by immutable folder policy.
-    #[error("while attempting to write note at {path}: folder is immutable")]
+    #[error("while attempting to write item at {path}: folder is immutable")]
     ImmutableFolder {
         /// Relative path that falls under an immutable folder policy.
         path: RelativePath,
+    },
+    /// Requested note or asset target was not found in the local index.
+    #[error("while attempting to access item {target}: item not found")]
+    ItemNotFound {
+        /// User-supplied target string that could not be resolved.
+        target: String,
     },
     /// Requested note ID was not found in the vault.
     #[error("while attempting to update note {note_id}: note not found")]

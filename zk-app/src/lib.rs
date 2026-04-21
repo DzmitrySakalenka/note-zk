@@ -16,6 +16,7 @@ mod rebuild;
 mod retention;
 mod scan;
 mod status;
+mod trash;
 mod write;
 mod write_policy;
 
@@ -35,6 +36,7 @@ pub use retention::{
 };
 pub use scan::{ScanOutcome, scan_vault};
 pub use status::{StatusSummary, status_summary};
+pub use trash::{TrashedItem, trash_asset, trash_note};
 pub use write::{
     BatchWriteFailure, BatchWriteKind, BatchWriteOutcome, batch_write, create_note, update_note,
 };

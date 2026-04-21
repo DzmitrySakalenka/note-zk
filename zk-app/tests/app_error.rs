@@ -65,6 +65,9 @@ fn preserves_app_owned_payloads() {
     let not_found = AppError::NoteNotFound {
         note_id: NoteId::new("01TESTNOTEID00000000000000"),
     };
+    let item_not_found = AppError::ItemNotFound {
+        target: "assets/missing.png".to_string(),
+    };
     let path_exists = AppError::NotePathExists {
         path: RelativePath::new("notes/existing.md"),
     };
@@ -80,6 +83,10 @@ fn preserves_app_owned_payloads() {
     assert!(matches!(
         not_found,
         AppError::NoteNotFound { note_id } if note_id.as_str() == "01TESTNOTEID00000000000000"
+    ));
+    assert!(matches!(
+        item_not_found,
+        AppError::ItemNotFound { target } if target == "assets/missing.png"
     ));
     assert!(matches!(
         path_exists,

@@ -11,7 +11,8 @@ use zk_domain::{
     note::DiagnosticLevel,
 };
 use zk_vault::{
-    NormalizationResult, apply_normalization, atomic_write_file, parse_note_file, scan_vault,
+    NormalizationResult, apply_normalization, atomic_move_file, atomic_write_file, parse_note_file,
+    scan_vault,
 };
 
 fn write_text_file(path: &Path, content: &str) {
@@ -423,6 +424,36 @@ fn atomic_write_file_cleans_temp_file_on_rename_failure() {
         .collect();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0], target_dir_path);
+}
+
+#[test]
+fn atomic_move_file_moves_existing_file_and_creates_destination_parent() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let source_path = tempdir.path().join("notes/source.md");
+    let destination_path = tempdir.path().join("99_trash/2026-04-21/source.md");
+    write_text_file(&source_path, "move me");
+
+    atomic_move_file(&source_path, &destination_path).expect("atomic move should succeed");
+
+    assert!(!source_path.exists());
+    assert_eq!(read_file_text(&destination_path), "move me");
+}
+
+#[test]
+fn atomic_move_file_leaves_source_untouched_when_rename_fails() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let source_path = tempdir.path().join("notes/source.md");
+    let destination_dir = tempdir.path().join("target-is-directory");
+    write_text_file(&source_path, "move me");
+    fs::create_dir_all(&destination_dir).expect("directory should be created");
+
+    let err = atomic_move_file(&source_path, &destination_dir)
+        .expect_err("rename to directory path should fail");
+    let rendered = err.to_string();
+
+    assert!(!rendered.is_empty());
+    assert_eq!(read_file_text(&source_path), "move me");
+    assert!(destination_dir.is_dir());
 }
 
 #[test]

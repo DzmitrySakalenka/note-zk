@@ -29,4 +29,4 @@ pub use pipeline::{
 pub use scan::{AssetCandidate, NoteCandidate, TrashState, VaultFileSet, scan_vault_files};
 pub use serialize::{render_note_file, serialize_frontmatter};
 pub use validate::{validate_vault, validate_vault_with_parsed_indexes};
-pub use write::atomic_write_file;
+pub use write::{atomic_move_file, atomic_write_file};
