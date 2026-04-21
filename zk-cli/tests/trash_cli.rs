@@ -67,7 +67,7 @@ fn set_retention_until(
 }
 
 #[test]
-fn trash_then_status_reports_trash_count_one() {
+fn trash_then_status_reports_trashed_note_count_one() {
     let (_tempdir, vault_root, home_root) = test_roots();
     let note_id = NoteId::new("01CLITRASHTHENSTATUS0000001");
     write_note(
@@ -88,11 +88,11 @@ fn trash_then_status_reports_trash_count_one() {
     command_for(&home_root, &vault_root, "status")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Trash: 1"));
+        .stdout(predicate::str::contains("Trashed notes: 1"));
 }
 
 #[test]
-fn restore_then_status_reports_trash_count_zero() {
+fn restore_then_status_reports_trashed_note_count_zero() {
     let (_tempdir, vault_root, home_root) = test_roots();
     let note_id = NoteId::new("01CLIRESTORESTATUSZERO00001");
     write_note(
@@ -118,7 +118,7 @@ fn restore_then_status_reports_trash_count_zero() {
     command_for(&home_root, &vault_root, "status")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Trash: 0"));
+        .stdout(predicate::str::contains("Trashed notes: 0"));
 }
 
 #[test]

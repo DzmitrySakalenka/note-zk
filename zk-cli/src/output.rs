@@ -6,7 +6,7 @@ use serde::Serialize;
 use zk_app::{
     DoctorIssue, DoctorReport, PurgeOutcome, RestoredItem, ScanOutcome, StatusSummary, TrashedItem,
 };
-use zk_domain::note::DiagnosticLevel;
+use zk_domain::{note::DiagnosticLevel, sync::ItemType};
 use zk_vault::NormalizationSummary;
 
 /// Aggregate counters rendered by the `scan` command.
@@ -135,7 +135,11 @@ pub fn write_status_human(out: &mut dyn io::Write, summary: &StatusSummary) -> i
         summary.notes_with_warnings,
         summary.unresolved_link_count,
         summary.duplicate_id_count,
-        summary.trash_count,
+        summary.trashed_notes,
+        summary.trashed_assets,
+        summary.pending_purge,
+        summary.purged_notes,
+        summary.purged_assets,
     ]);
 
     write_aligned_value(out, "Total notes", summary.total_notes, width)?;
@@ -154,7 +158,11 @@ pub fn write_status_human(out: &mut dyn io::Write, summary: &StatusSummary) -> i
         width,
     )?;
     write_aligned_value(out, "Duplicate IDs", summary.duplicate_id_count, width)?;
-    write_aligned_value(out, "Trash", summary.trash_count, width)
+    write_aligned_value(out, "Trashed notes", summary.trashed_notes, width)?;
+    write_aligned_value(out, "Trashed assets", summary.trashed_assets, width)?;
+    write_aligned_value(out, "Pending purge", summary.pending_purge, width)?;
+    write_aligned_value(out, "Purged notes", summary.purged_notes, width)?;
+    write_aligned_value(out, "Purged assets", summary.purged_assets, width)
 }
 
 /// Writes human-readable `doctor` output to the provided writer.
@@ -401,19 +409,40 @@ fn write_doctor_section(
     writeln!(out, "{name} ({:>width$}):", issues.len(), width = width)?;
 
     for issue in issues {
+        let identity = format_doctor_identity(issue);
+
         match &issue.path {
             Some(path) => writeln!(
                 out,
-                "  {} {}: {}",
+                "  {} {}{}: {}",
                 issue.rule_id,
                 path.as_str(),
+                identity,
                 issue.message
             )?,
-            None => writeln!(out, "  {}: {}", issue.rule_id, issue.message)?,
+            None => writeln!(out, "  {}{}: {}", issue.rule_id, identity, issue.message)?,
         }
     }
 
     Ok(())
+}
+
+fn format_doctor_identity(issue: &DoctorIssue) -> String {
+    match (issue.item_type, issue.item_id.as_deref()) {
+        (Some(item_type), Some(item_id)) => {
+            format!(" [{} {}]", item_type_label(item_type), item_id)
+        }
+        (Some(item_type), None) => format!(" [{}]", item_type_label(item_type)),
+        (None, Some(item_id)) => format!(" [{item_id}]"),
+        (None, None) => String::new(),
+    }
+}
+
+fn item_type_label(item_type: ItemType) -> &'static str {
+    match item_type {
+        ItemType::Note => "note",
+        ItemType::Asset => "asset",
+    }
 }
 
 fn item_kind_label(kind: &zk_domain::ItemKind) -> &'static str {

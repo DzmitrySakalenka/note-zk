@@ -117,7 +117,7 @@ Trashed content
     assert!(summary.notes_with_errors >= 1);
     assert_eq!(summary.unresolved_link_count, 1);
     assert_eq!(summary.duplicate_id_count, 0);
-    assert_eq!(summary.trash_count, 1);
+    assert_eq!(summary.trashed_notes, 1);
 }
 
 #[test]
@@ -170,6 +170,6 @@ Trashed content
     let summary =
         status_summary(&vault_root, &config, &conn).expect("status summary should succeed");
 
-    assert_eq!(summary.trash_count, 1);
+    assert_eq!(summary.trashed_notes, 1);
     assert_eq!(count.load(Ordering::Relaxed), 1);
 }

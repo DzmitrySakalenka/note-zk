@@ -17,6 +17,7 @@ pub fn unique_test_dir(prefix: &str) -> PathBuf {
     dir
 }
 
+#[allow(dead_code, reason = "test crates do not all use every shared helper")]
 pub fn write_text(path: &Path, text: &str) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("create parent directories");

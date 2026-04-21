@@ -3,10 +3,10 @@ source: zk-cli/tests/output_snapshots.rs
 expression: render_doctor(&doctor_fixture())
 ---
 Errors (1):
-  duplicate-id notes/dup-a.md: duplicate note id detected
+  duplicate-id notes/dup-a.md [note 01SNAPSHOTDUPLICATE000000001]: duplicate note id detected
 
 Warnings (1):
-  unresolved-link notes/issues.md: wiki link points to a missing note
+  trash-file-without-record 99_trash/issues.md [note 01SNAPSHOTTRASHRULE000000001]: trashed note file has no matching delete record
 
 Infos (1):
-  title-derived-from-h1: title derived from the first heading
+  retention-expired-not-purged 99_trash/expired.md [note 01SNAPSHOTRETENTION00000001]: retention expired on 2026-04-01T00:00:00Z; run `zk-cli purge --expired --yes`

@@ -261,7 +261,11 @@ fn e2e_json_outputs_parse_for_all_commands() {
         "notes_with_warnings",
         "unresolved_link_count",
         "duplicate_id_count",
-        "trash_count",
+        "trashed_notes",
+        "trashed_assets",
+        "pending_purge",
+        "purged_notes",
+        "purged_assets",
     ] {
         assert!(
             status_json.get(field).is_some(),
