@@ -96,7 +96,7 @@ impl DeviceRepo {
     pub fn update_sync_cursor(
         conn: &Connection,
         device_id: &DeviceId,
-        cursor: i64,
+        cursor: Option<i64>,
     ) -> Result<(), IndexError> {
         conn.execute(
             UPDATE_DEVICE_SYNC_CURSOR,

@@ -10,9 +10,11 @@ workspace = true
 
 [dependencies]
 async-trait = "0.1.89"
+base64 = "0.22.1"
 chrono = { version = "0.4.44", default-features = false, features = ["alloc", "serde"] }
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
 thiserror = "2.0.18"
 tracing = "0.1.44"
 zk-domain = { path = "../zk-domain" }

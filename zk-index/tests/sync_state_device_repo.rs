@@ -317,13 +317,29 @@ fn update_sync_cursor_updates_existing_device() {
     let device = sample_device_record();
     DeviceRepo::upsert_device(&connection, &device).expect("device upsert should succeed");
 
-    DeviceRepo::update_sync_cursor(&connection, &device.device_id, 999_999)
+    DeviceRepo::update_sync_cursor(&connection, &device.device_id, Some(999_999))
         .expect("device cursor update should succeed");
 
     let actual = DeviceRepo::get_device(&connection, &device.device_id)
         .expect("device query should succeed")
         .expect("device should exist");
     assert_eq!(actual.last_sync_cursor, Some(999_999));
+}
+
+#[test]
+fn update_sync_cursor_can_clear_existing_cursor() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    let device = sample_device_record();
+    DeviceRepo::upsert_device(&connection, &device).expect("device upsert should succeed");
+
+    DeviceRepo::update_sync_cursor(&connection, &device.device_id, None)
+        .expect("device cursor clear should succeed");
+
+    let actual = DeviceRepo::get_device(&connection, &device.device_id)
+        .expect("device query should succeed")
+        .expect("device should exist");
+    assert_eq!(actual.last_sync_cursor, None);
 }
 
 #[test]

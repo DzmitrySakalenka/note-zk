@@ -159,13 +159,17 @@ fn sync_wire_round_trip_preserves_structs_and_omits_none_fields() {
         event_type: WireEventType::Update,
         path: Some("notes/alpha.md".to_string()),
         content: Some("# Alpha".to_string()),
+        asset_bytes_base64: None,
         content_hash: Some("abc123".to_string()),
         server_revision: Some(9),
         trashed_at: None,
+        retention_until: None,
         deleted_at: None,
     };
     let change_json = serde_json::to_value(&change).expect("serialize change");
+    assert_eq!(change_json.get("asset_bytes_base64"), None);
     assert_eq!(change_json.get("trashed_at"), None);
+    assert_eq!(change_json.get("retention_until"), None);
     assert_eq!(change_json.get("deleted_at"), None);
     assert_eq!(
         serde_json::from_value::<SyncChange>(change_json).expect("deserialize change"),
@@ -174,6 +178,32 @@ fn sync_wire_round_trip_preserves_structs_and_omits_none_fields() {
 }
 
 #[test]
+fn sync_change_round_trip_preserves_retention_and_asset_bytes() {
+    let change = SyncChange {
+        event_seq: 91,
+        item_id: "asset-1".to_string(),
+        item_type: WireItemType::Asset,
+        event_type: WireEventType::Update,
+        path: Some("assets/diagram.png".to_string()),
+        content: None,
+        asset_bytes_base64: Some("aGVsbG8=".to_string()),
+        content_hash: Some("deadbeef".to_string()),
+        server_revision: Some(12),
+        trashed_at: Some("2026-04-22T18:00:00Z".to_string()),
+        retention_until: Some("2026-05-22T18:00:00Z".to_string()),
+        deleted_at: None,
+    };
+
+    let actual = serde_json::from_value::<SyncChange>(
+        serde_json::to_value(&change).expect("serialize sync change"),
+    )
+    .expect("deserialize sync change");
+
+    assert_eq!(actual, change);
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
 fn sync_api_model_json_examples_deserialize() {
     let register_request = r#"{
         "device_id": "device-1",
@@ -255,12 +285,31 @@ fn sync_api_model_json_examples_deserialize() {
             "server_revision": 4
         }, {
             "event_seq": 13,
+            "item_id": "01ASSET0000000000000000001",
+            "item_type": "asset",
+            "event_type": "update",
+            "path": "assets/diagram.png",
+            "asset_bytes_base64": "aGVsbG8=",
+            "content_hash": "def456",
+            "server_revision": 5
+        }, {
+            "event_seq": 14,
+            "item_id": "01NOTE00000000000000000002",
+            "item_type": "note",
+            "event_type": "trash",
+            "path": "notes/beta.md",
+            "server_revision": 6,
+            "trashed_at": "2026-04-03T12:30:00Z",
+            "retention_until": "2026-05-03T12:30:00Z"
+        }, {
+            "event_seq": 15,
             "item_id": "01NOTE00000000000000000001",
             "item_type": "note",
             "event_type": "purge",
-            "deleted_at": "2026-04-03T13:00:00Z"
+            "deleted_at": "2026-04-03T13:00:00Z",
+            "server_revision": 7
         }],
-        "next_cursor": 13
+        "next_cursor": 15
     }"##;
     let _: SyncPullResponse =
         serde_json::from_str(pull_response).expect("pull response JSON should parse");

@@ -118,9 +118,11 @@ pub struct SyncChange {
     pub event_type: String,
     pub path: Option<String>,
     pub content: Option<String>,
+    pub asset_bytes_base64: Option<String>,
     pub content_hash: Option<String>,
     pub server_revision: Option<i64>,
     pub trashed_at: Option<String>,
+    pub retention_until: Option<String>,
     pub deleted_at: Option<String>,
 }
 ```

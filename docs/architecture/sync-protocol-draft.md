@@ -311,8 +311,9 @@ So V1 should preserve user-visible ambiguity instead of pretending to merge safe
 ### Remote trash
 
 1. server returns trashed state in pull
-2. client moves local note to trash representation or marks it trashed
-3. local sync state updates accordingly
+2. pull event `path` carries the original live path, not a device-specific trash path
+3. client moves local note to a local trash representation or marks it trashed
+4. local sync state updates accordingly
 
 ## 8. Restore Flow
 

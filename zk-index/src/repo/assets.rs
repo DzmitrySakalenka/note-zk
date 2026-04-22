@@ -33,6 +33,16 @@ SET
     is_deleted = 1
 WHERE asset_id = ?1
 ";
+const MARK_ASSET_DELETED_WITH_SERVER_REVISION: &str = r"
+UPDATE assets_index
+SET
+    trashed_at = NULL,
+    deleted_at = ?2,
+    is_trashed = 0,
+    is_deleted = 1,
+    server_revision = ?3
+WHERE asset_id = ?1
+";
 const DELETE_ASSET_BY_ID: &str = "DELETE FROM assets_index WHERE asset_id = ?1";
 const SELECT_ASSET_BY_ID: &str = r"
 SELECT
@@ -206,6 +216,28 @@ impl AssetRepo {
         .map_err(|source| IndexError::Sqlite {
             source,
             context: "mark asset deleted".to_string(),
+        })
+    }
+
+    /// Marks one asset row as deleted and refreshes its `server_revision`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if the update fails.
+    pub fn mark_deleted_with_server_revision(
+        conn: &Connection,
+        asset_id: &AssetId,
+        deleted_at: &str,
+        server_revision: &ServerRevision,
+    ) -> Result<(), IndexError> {
+        conn.execute(
+            MARK_ASSET_DELETED_WITH_SERVER_REVISION,
+            rusqlite::params![asset_id.as_str(), deleted_at, server_revision.value()],
+        )
+        .map(|_| ())
+        .map_err(|source| IndexError::Sqlite {
+            source,
+            context: "mark asset deleted with server revision".to_string(),
         })
     }
 

@@ -275,13 +275,14 @@ pub struct SyncPullRequest {
 ///
 /// Fields populated by `event_type`:
 ///
-/// | `event_type` | `path` | `content` | `content_hash` | `server_revision` | `trashed_at` | `deleted_at` |
-/// | --- | --- | --- | --- | --- | --- | --- |
-/// | `create` / `update` | yes | yes | yes | yes | no | no |
-/// | `move` | yes | no | no | yes | no | no |
-/// | `trash` | yes | no | no | yes | yes | no |
-/// | `restore` | yes | no | no | yes | no | no |
-/// | `purge` | no | no | no | yes | no | yes |
+/// | `event_type` | `path` | `content` | `asset_bytes_base64` | `content_hash` | `server_revision` | `trashed_at` | `retention_until` | `deleted_at` |
+/// | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+/// | note `create` / `update` | yes | yes | no | yes | yes | no | no | no |
+/// | asset `create` / `update` | yes | no | yes | yes | yes | no | no | no |
+/// | `move` | yes | no | no | no | yes | no | no | no |
+/// | `trash` | yes | no | no | no | yes | yes | yes | no |
+/// | `restore` | yes | no | no | no | yes | no | no | no |
+/// | `purge` | no | no | no | no | yes | no | no | yes |
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SyncChange {
     /// Global monotonic event sequence number.
@@ -298,6 +299,9 @@ pub struct SyncChange {
     /// Full content snapshot when the event carries one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// Base64-encoded asset bytes when the event carries a binary snapshot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_bytes_base64: Option<String>,
     /// Content hash associated with the event payload.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
@@ -307,6 +311,9 @@ pub struct SyncChange {
     /// Timestamp when the item entered trash, if applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trashed_at: Option<String>,
+    /// Timestamp when the item becomes eligible for hard purge, if applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retention_until: Option<String>,
     /// Timestamp when the item was hard-deleted, if applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<String>,
