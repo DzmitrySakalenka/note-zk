@@ -9,4 +9,10 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+async-trait = "0.1.89"
+serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2.0.18"
+tracing = "0.1.44"
 zk-domain = { path = "../zk-domain" }
+zk-index = { version = "0.1.0", path = "../zk-index" }
+zk-vault = { version = "0.1.0", path = "../zk-vault" }
