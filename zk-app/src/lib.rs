@@ -26,6 +26,8 @@ mod write_policy;
 
 /// Config loading, merge, and validation helpers for facade entry points.
 pub mod config;
+/// High-level sync transport orchestration for register, bootstrap, push, and pull.
+pub mod sync;
 
 pub use bootstrap::{
     bootstrap_effective_config, bootstrap_effective_config_from_env, detect_platform,
@@ -61,5 +63,10 @@ pub use purge::{
 #[rustfmt::skip]
 pub use retention::{
     Clock, ReconciliationStats, SystemClock, compute_retention_until, reconcile_delete_records,
+};
+#[rustfmt::skip]
+pub use sync::{
+    BootstrapOutcome, PullApplyOutcome, PushApplyOutcome, SyncContext, bootstrap,
+    plan_and_push, pull_and_apply, register_device,
 };
 pub use write_policy::{ensure_writable, is_path_immutable};

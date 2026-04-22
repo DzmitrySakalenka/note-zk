@@ -4,6 +4,7 @@ use zk_app::AppError;
 use zk_app::config::{ConfigValidationError, GlobalConfigError, VaultConfigError};
 use zk_domain::id::{NoteId, RelativePath};
 use zk_index::IndexError;
+use zk_sync::SyncError;
 use zk_vault::error::VaultError;
 
 #[test]
@@ -55,6 +56,13 @@ fn converts_config_validation_error_via_from() {
         AppError::from(source),
         AppError::ConfigValidation(_)
     ));
+}
+
+#[test]
+fn converts_sync_error_via_from() {
+    let source = SyncError::AmbiguousBootstrap;
+
+    assert!(matches!(AppError::from(source), AppError::Sync(_)));
 }
 
 #[test]

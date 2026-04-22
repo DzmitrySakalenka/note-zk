@@ -3,6 +3,7 @@ use std::{io, path::PathBuf};
 use thiserror::Error;
 use zk_domain::id::{NoteId, RelativePath};
 use zk_index::IndexError;
+use zk_sync::SyncError;
 use zk_vault::error::VaultError;
 
 use crate::config::{ConfigValidationError, GlobalConfigError, VaultConfigError};
@@ -34,6 +35,9 @@ pub enum AppError {
     /// Effective config merge/validation failure.
     #[error("while attempting to validate effective config: {0}")]
     ConfigValidation(#[from] ConfigValidationError),
+    /// Sync transport or local sync-state workflow failure.
+    #[error("while attempting to perform sync workflow: {0}")]
+    Sync(#[from] SyncError),
     /// Generic path-scoped I/O failure.
     #[error(
         "while attempting to access path {path_display}: {source}",
