@@ -10,6 +10,8 @@ workspace = true
 
 [dependencies]
 async-trait = "0.1.89"
+chrono = { version = "0.4.44", default-features = false, features = ["alloc", "serde"] }
+rusqlite = { version = "0.39.0", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"
 tracing = "0.1.44"

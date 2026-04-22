@@ -1,5 +1,5 @@
 use zk_domain::{
-    id::{AssetId, ContentHash, DeviceId, NoteId, ServerRevision},
+    id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     sync::{PendingOperation, SyncStatus},
     sync_state::{AssetSyncState, DeviceRecord, NoteSyncState},
 };
@@ -35,6 +35,7 @@ fn sample_note_sync_state() -> NoteSyncState {
         device_id: device_id(),
         last_local_hash: Some(ContentHash::from_bytes(b"local note content")),
         last_synced_hash: Some(ContentHash::from_bytes(b"synced note content")),
+        last_synced_path: Some(RelativePath::new("notes/alpha.md")),
         last_known_server_revision: Some(ServerRevision::new(5)),
         sync_status: SyncStatus::Synced,
         last_sync_attempt_at: Some("2026-04-10T12:00:00Z".to_string()),
@@ -49,6 +50,7 @@ fn sample_asset_sync_state() -> AssetSyncState {
         device_id: second_device_id(),
         last_local_hash: Some(ContentHash::from_bytes(b"local asset bytes")),
         last_synced_hash: Some(ContentHash::from_bytes(b"synced asset bytes")),
+        last_synced_path: Some(RelativePath::new("assets/diagram.png")),
         last_known_server_revision: Some(ServerRevision::new(3)),
         sync_status: SyncStatus::Synced,
         last_sync_attempt_at: Some("2026-04-10T09:00:00Z".to_string()),
@@ -206,6 +208,7 @@ fn sync_state_round_trip_preserves_nullables_and_pending_operation() {
     let state = NoteSyncState {
         last_local_hash: None,
         last_synced_hash: None,
+        last_synced_path: None,
         last_known_server_revision: None,
         sync_status: SyncStatus::PendingUpload,
         last_sync_attempt_at: None,
@@ -221,6 +224,39 @@ fn sync_state_round_trip_preserves_nullables_and_pending_operation() {
         .expect("note sync-state query should succeed")
         .expect("note sync state should exist");
     assert_eq!(actual, state);
+}
+
+#[test]
+fn sync_state_round_trip_preserves_last_synced_path_presence_and_absence() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+
+    let note_state = NoteSyncState {
+        last_synced_path: Some(RelativePath::new("notes/moved.md")),
+        ..sample_note_sync_state()
+    };
+    SyncStateRepo::upsert_note_sync_state(&connection, &note_state)
+        .expect("note sync-state upsert should succeed");
+
+    let stored_note = SyncStateRepo::get_note_sync_state(&connection, &note_state.item_id)
+        .expect("note sync-state query should succeed")
+        .expect("note sync state should exist");
+    assert_eq!(
+        stored_note.last_synced_path,
+        Some(RelativePath::new("notes/moved.md"))
+    );
+
+    let asset_state = AssetSyncState {
+        last_synced_path: None,
+        ..sample_asset_sync_state()
+    };
+    SyncStateRepo::upsert_asset_sync_state(&connection, &asset_state)
+        .expect("asset sync-state upsert should succeed");
+
+    let stored_asset = SyncStateRepo::get_asset_sync_state(&connection, &asset_state.item_id)
+        .expect("asset sync-state query should succeed")
+        .expect("asset sync state should exist");
+    assert_eq!(stored_asset.last_synced_path, None);
 }
 
 #[test]

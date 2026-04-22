@@ -1,7 +1,7 @@
 use rusqlite::{Connection, OptionalExtension, types::Type};
 use serde_json::Value;
 use zk_domain::{
-    id::{AssetId, ContentHash, DeviceId, NoteId, ServerRevision},
+    id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     sync::{PendingOperation, SyncStatus},
     sync_state::{AssetSyncState, NoteSyncState},
 };
@@ -14,12 +14,13 @@ INSERT OR REPLACE INTO note_sync_state (
     device_id,
     last_local_hash,
     last_synced_hash,
+    last_synced_path,
     last_known_server_revision,
     sync_status,
     last_sync_attempt_at,
     last_sync_error,
     pending_operation
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
 ";
 const SELECT_NOTE_SYNC_STATE_BY_ID: &str = r"
 SELECT
@@ -27,6 +28,7 @@ SELECT
     device_id,
     last_local_hash,
     last_synced_hash,
+    last_synced_path,
     last_known_server_revision,
     sync_status,
     last_sync_attempt_at,
@@ -41,12 +43,13 @@ INSERT OR REPLACE INTO asset_sync_state (
     device_id,
     last_local_hash,
     last_synced_hash,
+    last_synced_path,
     last_known_server_revision,
     sync_status,
     last_sync_attempt_at,
     last_sync_error,
     pending_operation
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
 ";
 const SELECT_ASSET_SYNC_STATE_BY_ID: &str = r"
 SELECT
@@ -54,6 +57,7 @@ SELECT
     device_id,
     last_local_hash,
     last_synced_hash,
+    last_synced_path,
     last_known_server_revision,
     sync_status,
     last_sync_attempt_at,
@@ -93,6 +97,7 @@ impl SyncStateRepo {
                 state.device_id.as_str(),
                 state.last_local_hash.as_ref().map(ContentHash::as_str),
                 state.last_synced_hash.as_ref().map(ContentHash::as_str),
+                state.last_synced_path.as_ref().map(RelativePath::as_str),
                 state
                     .last_known_server_revision
                     .as_ref()
@@ -153,6 +158,7 @@ impl SyncStateRepo {
                 state.device_id.as_str(),
                 state.last_local_hash.as_ref().map(ContentHash::as_str),
                 state.last_synced_hash.as_ref().map(ContentHash::as_str),
+                state.last_synced_path.as_ref().map(RelativePath::as_str),
                 state
                     .last_known_server_revision
                     .as_ref()
@@ -261,11 +267,12 @@ fn decode_note_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSyncS
         device_id: decode_device_id(row, 1)?,
         last_local_hash: decode_optional_content_hash(row, 2)?,
         last_synced_hash: decode_optional_content_hash(row, 3)?,
-        last_known_server_revision: row.get::<_, Option<i64>>(4)?.map(ServerRevision::new),
-        sync_status: decode_sync_status(row, 5)?,
-        last_sync_attempt_at: row.get(6)?,
-        last_sync_error: row.get(7)?,
-        pending_operation: decode_optional_pending_operation(row, 8)?,
+        last_synced_path: decode_optional_relative_path(row, 4)?,
+        last_known_server_revision: row.get::<_, Option<i64>>(5)?.map(ServerRevision::new),
+        sync_status: decode_sync_status(row, 6)?,
+        last_sync_attempt_at: row.get(7)?,
+        last_sync_error: row.get(8)?,
+        pending_operation: decode_optional_pending_operation(row, 9)?,
     })
 }
 
@@ -276,11 +283,12 @@ fn decode_asset_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssetSyn
         device_id: decode_device_id(row, 1)?,
         last_local_hash: decode_optional_content_hash(row, 2)?,
         last_synced_hash: decode_optional_content_hash(row, 3)?,
-        last_known_server_revision: row.get::<_, Option<i64>>(4)?.map(ServerRevision::new),
-        sync_status: decode_sync_status(row, 5)?,
-        last_sync_attempt_at: row.get(6)?,
-        last_sync_error: row.get(7)?,
-        pending_operation: decode_optional_pending_operation(row, 8)?,
+        last_synced_path: decode_optional_relative_path(row, 4)?,
+        last_known_server_revision: row.get::<_, Option<i64>>(5)?.map(ServerRevision::new),
+        sync_status: decode_sync_status(row, 6)?,
+        last_sync_attempt_at: row.get(7)?,
+        last_sync_error: row.get(8)?,
+        pending_operation: decode_optional_pending_operation(row, 9)?,
     })
 }
 
@@ -295,6 +303,14 @@ fn decode_optional_content_hash(
 ) -> rusqlite::Result<Option<ContentHash>> {
     row.get::<_, Option<String>>(column)
         .map(|value| value.as_deref().map(ContentHash::new))
+}
+
+fn decode_optional_relative_path(
+    row: &rusqlite::Row<'_>,
+    column: usize,
+) -> rusqlite::Result<Option<RelativePath>> {
+    row.get::<_, Option<String>>(column)
+        .map(|value| value.as_deref().map(RelativePath::new))
 }
 
 fn encode_sync_status(status: SyncStatus) -> Result<String, IndexError> {

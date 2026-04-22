@@ -894,14 +894,12 @@ fn purge_expired_confirm_deletes_files_and_marks_tombstones() {
         note_id.as_str(),
         zk_domain::sync::ItemType::Note,
         "2026-05-01T00:00:00Z",
-        1,
     );
     assert_deleted_delete_record(
         &conn,
         &trashed_asset.item_id,
         zk_domain::sync::ItemType::Asset,
         "2026-05-01T00:00:00Z",
-        2,
     );
 }
 
@@ -1464,18 +1462,10 @@ fn assert_deleted_delete_record(
     item_id: &str,
     item_type: zk_domain::sync::ItemType,
     deleted_at: &str,
-    delete_revision: i64,
 ) {
     let delete_record = fetch_delete_record(conn, item_id, item_type);
     assert_eq!(delete_record.deleted_at.as_deref(), Some(deleted_at));
-    assert_eq!(
-        delete_record
-            .delete_revision
-            .as_ref()
-            .expect("revision should be assigned")
-            .value(),
-        delete_revision
-    );
+    assert_eq!(delete_record.delete_revision, None);
 }
 
 struct FixedClock {

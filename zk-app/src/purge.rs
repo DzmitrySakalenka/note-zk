@@ -304,14 +304,13 @@ fn execute_purge_candidate(
     deleted_at: &str,
 ) -> Result<Option<PurgedItem>> {
     let transaction = begin_item_lifecycle_transaction(conn)?;
-    let delete_revision = DeleteRecordRepo::next_delete_revision(&transaction)?;
     mark_index_item_deleted(&transaction, candidate, deleted_at)?;
     DeleteRecordRepo::mark_deleted(
         &transaction,
         &candidate.item_id,
         candidate.item_type,
         deleted_at,
-        Some(&delete_revision),
+        None,
     )?;
 
     let absolute_path = vault_root.join(candidate.current_path.as_str());

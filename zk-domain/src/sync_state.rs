@@ -20,6 +20,8 @@ pub struct SyncState<Id> {
     pub last_local_hash: Option<ContentHash>,
     /// Hash from the last successful sync checkpoint, if available.
     pub last_synced_hash: Option<ContentHash>,
+    /// Path from the last successful sync checkpoint, if available.
+    pub last_synced_path: Option<RelativePath>,
     /// Latest server revision observed for this item, if known.
     pub last_known_server_revision: Option<ServerRevision>,
     /// Current high-level sync status.

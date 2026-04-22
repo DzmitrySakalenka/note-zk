@@ -1,4 +1,4 @@
-use zk_domain::id::{AssetId, ContentHash, DeviceId, NoteId, ServerRevision};
+use zk_domain::id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision};
 use zk_domain::sync::{PendingOperation, SyncStatus};
 use zk_domain::sync_state::{AssetSyncState, DeviceRecord, NoteSyncState};
 
@@ -12,6 +12,7 @@ fn sample_note_sync_state() -> NoteSyncState {
         device_id: DeviceId::new("device-alpha"),
         last_local_hash: Some(ContentHash::from_bytes(b"local content")),
         last_synced_hash: Some(ContentHash::from_bytes(b"synced content")),
+        last_synced_path: Some(RelativePath::new("notes/alpha.md")),
         last_known_server_revision: Some(ServerRevision::new(5)),
         sync_status: SyncStatus::Synced,
         last_sync_attempt_at: Some("2026-04-10T12:00:00Z".to_string()),
@@ -27,6 +28,10 @@ fn note_sync_state_construction() {
     assert_eq!(s.device_id.to_string(), "device-alpha");
     assert!(s.last_local_hash.is_some());
     assert!(s.last_synced_hash.is_some());
+    assert_eq!(
+        s.last_synced_path,
+        Some(RelativePath::new("notes/alpha.md"))
+    );
     assert_eq!(
         s.last_known_server_revision
             .as_ref()
@@ -47,6 +52,7 @@ fn note_sync_state_fresh_unsynced() {
     let s = NoteSyncState {
         last_local_hash: Some(ContentHash::from_bytes(b"new note")),
         last_synced_hash: None,
+        last_synced_path: None,
         last_known_server_revision: None,
         sync_status: SyncStatus::PendingUpload,
         last_sync_attempt_at: None,
@@ -128,6 +134,7 @@ fn sample_asset_sync_state() -> AssetSyncState {
         device_id: DeviceId::new("device-beta"),
         last_local_hash: Some(ContentHash::from_bytes(b"asset bytes")),
         last_synced_hash: Some(ContentHash::from_bytes(b"asset bytes")),
+        last_synced_path: Some(RelativePath::new("assets/diagram.png")),
         last_known_server_revision: Some(ServerRevision::new(3)),
         sync_status: SyncStatus::Synced,
         last_sync_attempt_at: Some("2026-04-10T09:00:00Z".to_string()),
@@ -143,6 +150,10 @@ fn asset_sync_state_construction() {
     assert_eq!(s.device_id.to_string(), "device-beta");
     assert!(s.last_local_hash.is_some());
     assert!(s.last_synced_hash.is_some());
+    assert_eq!(
+        s.last_synced_path,
+        Some(RelativePath::new("assets/diagram.png"))
+    );
     assert_eq!(
         s.last_known_server_revision
             .as_ref()
