@@ -11,8 +11,8 @@ use crate::{
     Result, ensure_writable,
     item_lifecycle::{
         ResolvedAssetTarget, begin_item_lifecycle_transaction, commit_item_lifecycle_transaction,
-        ensure_item_is_trashed, ensure_not_purged, find_asset_target, find_note_target,
-        get_delete_record_with_context, render_target, rollback_file_move,
+        delete_record_target, ensure_item_is_trashed, ensure_not_purged, find_asset_target,
+        find_note_target, get_delete_record_with_context, render_target, rollback_file_move,
     },
 };
 
@@ -80,11 +80,8 @@ pub fn restore_note(
             None,
             false,
         )?;
-        DeleteRecordRepo::delete_delete_record(
-            &transaction,
-            resolved.note.note_id.as_str(),
-            ItemType::Note,
-        )?;
+        let delete_target = delete_record_target(resolved.note.note_id.as_str(), ItemType::Note);
+        DeleteRecordRepo::delete_delete_record(&transaction, &delete_target)?;
 
         Ok(RestoredItem {
             item_id: resolved.note.note_id.as_str().to_string(),
@@ -149,11 +146,8 @@ pub fn restore_asset(
     let moved_result = (|| -> Result<RestoredItem> {
         let restored_record = build_restored_asset_record(&resolved, destination_path.clone());
         AssetRepo::upsert_asset(&transaction, &restored_record)?;
-        DeleteRecordRepo::delete_delete_record(
-            &transaction,
-            resolved.asset_id.as_str(),
-            ItemType::Asset,
-        )?;
+        let delete_target = delete_record_target(resolved.asset_id.as_str(), ItemType::Asset);
+        DeleteRecordRepo::delete_delete_record(&transaction, &delete_target)?;
 
         Ok(RestoredItem {
             item_id: resolved.asset_id.as_str().to_string(),

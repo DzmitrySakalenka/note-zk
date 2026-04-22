@@ -22,6 +22,8 @@ pub mod write;
 /// Write-request models for trash, restore, and purge operations.
 pub mod write_request;
 
+pub use sync::ItemType;
+pub use sync_state::{DeleteRecord, DeleteRecordTarget};
 pub use write_request::{
     ItemKind, PurgeRequest, PurgeScope, RestoreRequest, TargetSelector, TrashRequest,
 };

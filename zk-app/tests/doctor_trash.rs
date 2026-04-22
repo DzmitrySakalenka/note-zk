@@ -92,8 +92,9 @@ fn doctor_report_warns_when_delete_record_has_no_matching_index_row() {
     DeleteRecordRepo::insert_delete_record(
         &conn,
         &DeleteRecord {
-            item_id: "01TG10ORPHANDELETE0000000001".to_string(),
-            item_type: ItemType::Note,
+            target: zk_domain::DeleteRecordTarget::Note(NoteId::new(
+                "01TG10ORPHANDELETE0000000001",
+            )),
             original_path: RelativePath::new("notes/missing.md"),
             trashed_at: "2026-04-20T10:00:00Z".to_string(),
             retention_until: "2099-01-01T00:00:00Z".to_string(),
@@ -143,8 +144,9 @@ fn doctor_report_reports_expired_retention_with_purge_hint() {
     DeleteRecordRepo::insert_delete_record(
         &conn,
         &DeleteRecord {
-            item_id: "01TG10RETENTIONDUE0000000001".to_string(),
-            item_type: ItemType::Note,
+            target: zk_domain::DeleteRecordTarget::Note(NoteId::new(
+                "01TG10RETENTIONDUE0000000001",
+            )),
             original_path: RelativePath::new("notes/expired.md"),
             trashed_at: "2026-04-01T10:00:00Z".to_string(),
             retention_until: "2026-04-02T00:00:00Z".to_string(),

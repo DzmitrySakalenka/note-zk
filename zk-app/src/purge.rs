@@ -12,6 +12,7 @@ use zk_domain::{
     config::EffectiveConfig,
     id::{AssetId, NoteId, RelativePath},
     sync::ItemType,
+    sync_state::DeleteRecordTarget,
 };
 use zk_index::{AssetRepo, DeleteRecordRepo, IndexError, NoteRepo};
 
@@ -93,10 +94,10 @@ pub fn purge_expired(
         left.retention_until
             .cmp(&right.retention_until)
             .then_with(|| {
-                kind_sort_rank(&item_kind_from_type(left.item_type))
-                    .cmp(&kind_sort_rank(&item_kind_from_type(right.item_type)))
+                kind_sort_rank(&item_kind_from_type(left.item_type()))
+                    .cmp(&kind_sort_rank(&item_kind_from_type(right.item_type())))
             })
-            .then_with(|| left.item_id.cmp(&right.item_id))
+            .then_with(|| left.item_id_str().cmp(right.item_id_str()))
     });
 
     let mut outcome = PurgeOutcome::default();
@@ -244,34 +245,33 @@ fn resolve_expired_purge_candidate(
     vault_root: &Path,
     delete_record: zk_domain::sync_state::DeleteRecord,
 ) -> Result<ExpiredPurgeResolution> {
-    let current_path = match delete_record.item_type {
-        ItemType::Note => {
-            let Some(note) = NoteRepo::get_note(conn, &NoteId::new(&delete_record.item_id))? else {
+    let current_path = match &delete_record.target {
+        DeleteRecordTarget::Note(note_id) => {
+            let Some(note) = NoteRepo::get_note(conn, note_id)? else {
                 return Ok(ExpiredPurgeResolution::Skipped(build_skipped_purge(
-                    &delete_record.item_id,
+                    delete_record.item_id_str(),
                     SKIPPED_PURGE_REASON_ALREADY_PURGED,
                 )));
             };
             if note.is_deleted || !note.is_trashed {
                 return Ok(ExpiredPurgeResolution::Skipped(build_skipped_purge(
-                    &delete_record.item_id,
+                    delete_record.item_id_str(),
                     SKIPPED_PURGE_REASON_ALREADY_PURGED,
                 )));
             }
 
             note.current_path
         }
-        ItemType::Asset => {
-            let Some(asset) = AssetRepo::get_asset(conn, &AssetId::new(&delete_record.item_id))?
-            else {
+        DeleteRecordTarget::Asset(asset_id) => {
+            let Some(asset) = AssetRepo::get_asset(conn, asset_id)? else {
                 return Ok(ExpiredPurgeResolution::Skipped(build_skipped_purge(
-                    &delete_record.item_id,
+                    delete_record.item_id_str(),
                     SKIPPED_PURGE_REASON_ALREADY_PURGED,
                 )));
             };
             if asset.is_deleted || !asset.is_trashed {
                 return Ok(ExpiredPurgeResolution::Skipped(build_skipped_purge(
-                    &delete_record.item_id,
+                    delete_record.item_id_str(),
                     SKIPPED_PURGE_REASON_ALREADY_PURGED,
                 )));
             }
@@ -282,15 +282,15 @@ fn resolve_expired_purge_candidate(
 
     if !purge_file_exists(vault_root, &current_path)? {
         return Ok(ExpiredPurgeResolution::Skipped(build_skipped_purge(
-            &delete_record.item_id,
+            delete_record.item_id_str(),
             SKIPPED_PURGE_REASON_FILE_MISSING,
         )));
     }
 
     Ok(ExpiredPurgeResolution::Candidate(PurgeCandidate {
-        item_id: delete_record.item_id,
-        kind: item_kind_from_type(delete_record.item_type),
-        item_type: delete_record.item_type,
+        item_id: delete_record.item_id_str().to_string(),
+        kind: item_kind_from_type(delete_record.item_type()),
+        item_type: delete_record.item_type(),
         current_path,
         original_path: delete_record.original_path,
     }))

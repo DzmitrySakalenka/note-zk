@@ -9,7 +9,6 @@ use zk_domain::{
     config::EffectiveConfig,
     id::{AssetId, ContentHash, NoteId, RelativePath, ServerRevision},
     note::NoteFrontmatter,
-    sync::ItemType,
     sync_state::DeleteRecord,
 };
 use zk_index::{AssetRepo, DeleteRecordRepo, NoteRepo, ensure_schema, open_memory};
@@ -157,8 +156,9 @@ fn status_summary_reports_trash_and_purge_counters_from_index() {
     DeleteRecordRepo::insert_delete_record(
         &conn,
         &DeleteRecord {
-            item_id: "01TG10STATUSNOTE000000000002".to_string(),
-            item_type: ItemType::Note,
+            target: zk_domain::DeleteRecordTarget::Note(NoteId::new(
+                "01TG10STATUSNOTE000000000002",
+            )),
             original_path: RelativePath::new("notes/trashed.md"),
             trashed_at: "2026-04-20T10:00:00Z".to_string(),
             retention_until: "2099-01-01T00:00:00Z".to_string(),
@@ -170,8 +170,9 @@ fn status_summary_reports_trash_and_purge_counters_from_index() {
     DeleteRecordRepo::insert_delete_record(
         &conn,
         &DeleteRecord {
-            item_id: "01tg10statusasset000000000002".to_string(),
-            item_type: ItemType::Asset,
+            target: zk_domain::DeleteRecordTarget::Asset(AssetId::new(
+                "01tg10statusasset000000000002",
+            )),
             original_path: RelativePath::new("assets/trashed.png"),
             trashed_at: "2026-04-20T10:00:00Z".to_string(),
             retention_until: "2026-04-01T00:00:00Z".to_string(),

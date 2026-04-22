@@ -1,10 +1,11 @@
 use rusqlite::Connection;
 use std::{thread, time::Duration};
 use zk_domain::{
+    DeleteRecordTarget,
     asset::AssetRecord,
     derived::{AssetReference, ExternalLink, ResolvedNoteLink},
     id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
-    sync::{ItemType, PendingOperation, SyncStatus},
+    sync::{PendingOperation, SyncStatus},
     sync_state::{AssetSyncState, DeleteRecord, DeviceRecord, NoteSyncState},
 };
 use zk_index::{
@@ -205,8 +206,7 @@ fn device_record() -> DeviceRecord {
 
 fn delete_record() -> DeleteRecord {
     DeleteRecord {
-        item_id: "01HZ3NOTE000000000000000Z".to_string(),
-        item_type: ItemType::Note,
+        target: DeleteRecordTarget::Note(NoteId::new("01HZ3NOTE000000000000000Z")),
         original_path: RelativePath::new("notes/deleted.md"),
         trashed_at: "2026-04-05T08:00:00Z".to_string(),
         retention_until: "2026-05-05T08:00:00Z".to_string(),
@@ -781,12 +781,8 @@ fn rebuild_does_not_touch_sync_device_or_delete_tables() {
         Some(device)
     );
     assert_eq!(
-        DeleteRecordRepo::get_delete_record(
-            &connection,
-            &delete_record.item_id,
-            delete_record.item_type
-        )
-        .expect("delete-record query should succeed"),
+        DeleteRecordRepo::get_delete_record(&connection, &delete_record.target)
+            .expect("delete-record query should succeed"),
         Some(delete_record)
     );
 }

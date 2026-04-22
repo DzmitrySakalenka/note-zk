@@ -2,14 +2,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Days, SecondsFormat, TimeZone, Utc};
 use rusqlite::Connection;
-use zk_domain::{
-    id::{AssetId, NoteId, RelativePath},
-    sync::ItemType,
-    sync_state::DeleteRecord,
-};
+use zk_domain::{id::RelativePath, sync::ItemType, sync_state::DeleteRecord};
 use zk_index::{AssetInput, AssetRepo, DeleteRecordRepo, IndexError, NoteInput, NoteRepo};
 
-use crate::{AppError, config::ConfigValidationError};
+use crate::{AppError, config::ConfigValidationError, item_lifecycle::delete_record_target};
 
 /// Summary counts for one delete-record reconciliation pass.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -190,14 +186,14 @@ fn upsert_delete_record_if_needed(
     let effective_trashed_at = resolve_trashed_at(trashed_at, clock)?;
     let retention_until =
         compute_retention_until(Some(&effective_trashed_at), retention_days, clock)?;
-    let existing_record = DeleteRecordRepo::get_delete_record(conn, item_id, item_type)?;
+    let target = delete_record_target(item_id, item_type);
+    let existing_record = DeleteRecordRepo::get_delete_record(conn, &target)?;
     let preserved_original_path = existing_record.as_ref().map_or_else(
         || original_path.clone(),
         |record| record.original_path.clone(),
     );
     let replacement = DeleteRecord {
-        item_id: item_id.to_string(),
-        item_type,
+        target,
         original_path: preserved_original_path,
         trashed_at: effective_trashed_at,
         retention_until,
@@ -226,8 +222,9 @@ fn clear_delete_record_if_present(
     item_type: ItemType,
     stats: &mut ReconciliationStats,
 ) -> Result<(), AppError> {
-    if DeleteRecordRepo::get_delete_record(conn, item_id, item_type)?.is_some() {
-        DeleteRecordRepo::delete_delete_record(conn, item_id, item_type)?;
+    let target = delete_record_target(item_id, item_type);
+    if DeleteRecordRepo::get_delete_record(conn, &target)?.is_some() {
+        DeleteRecordRepo::delete_delete_record(conn, &target)?;
         stats.cleared += 1;
     }
 
@@ -264,7 +261,7 @@ fn warn_about_orphaned_delete_records(
         if !delete_record_points_to_existing_index_row(conn, &record)? {
             tracing::warn!(
                 target: "zk_app::retention",
-                item_id = %record.item_id,
+                item_id = %record.item_id_str(),
                 message = "orphaned delete record remains after rebuild",
                 "orphaned delete record remains after rebuild"
             );
@@ -279,10 +276,12 @@ fn delete_record_points_to_existing_index_row(
     conn: &Connection,
     record: &DeleteRecord,
 ) -> Result<bool, AppError> {
-    match record.item_type {
-        ItemType::Note => Ok(NoteRepo::get_note(conn, &NoteId::new(&record.item_id))?.is_some()),
-        ItemType::Asset => {
-            Ok(AssetRepo::get_asset(conn, &AssetId::new(&record.item_id))?.is_some())
+    match &record.target {
+        zk_domain::sync_state::DeleteRecordTarget::Note(note_id) => {
+            Ok(NoteRepo::get_note(conn, note_id)?.is_some())
+        }
+        zk_domain::sync_state::DeleteRecordTarget::Asset(asset_id) => {
+            Ok(AssetRepo::get_asset(conn, asset_id)?.is_some())
         }
     }
 }

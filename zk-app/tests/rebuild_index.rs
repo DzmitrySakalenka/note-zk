@@ -5,9 +5,9 @@ mod common;
 use common::{unique_test_dir, write_text};
 use zk_app::{RebuildOptions, RebuildOutcome, ReconciliationStats, rebuild_index};
 use zk_domain::{
+    DeleteRecordTarget,
     config::EffectiveConfig,
     id::{NoteId, RelativePath},
-    sync::ItemType,
 };
 use zk_index::{DeleteRecordRepo, NoteRepo, open_memory};
 
@@ -211,9 +211,12 @@ title: Archived Note
     assert_eq!(reconciliation.cleared, 0u32);
     assert_eq!(reconciliation.orphans_warned, 0u32);
     assert!(
-        DeleteRecordRepo::get_delete_record(&conn, trashed_note_id.as_str(), ItemType::Note)
-            .expect("trashed note delete-record query should succeed")
-            .is_some()
+        DeleteRecordRepo::get_delete_record(
+            &conn,
+            &DeleteRecordTarget::Note(trashed_note_id.clone()),
+        )
+        .expect("trashed note delete-record query should succeed")
+        .is_some()
     );
     assert_eq!(
         DeleteRecordRepo::list_all(&conn)

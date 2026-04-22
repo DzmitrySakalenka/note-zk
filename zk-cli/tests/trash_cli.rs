@@ -7,7 +7,7 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 use zk_app::{PurgeOutcome, RestoredItem, TrashedItem};
-use zk_domain::{id::NoteId, sync::ItemType};
+use zk_domain::{DeleteRecordTarget, id::NoteId, sync::ItemType};
 use zk_index::{DeleteRecordRepo, ensure_schema, open_or_create};
 
 fn test_roots() -> (TempDir, PathBuf, PathBuf) {
@@ -58,12 +58,20 @@ fn set_retention_until(
 ) {
     let connection = open_or_create(&database_path(vault_root)).expect("database should open");
     ensure_schema(&connection).expect("schema should exist");
-    let mut record = DeleteRecordRepo::get_delete_record(&connection, item_id, item_type)
-        .expect("delete-record query should succeed")
-        .expect("delete record should exist");
+    let mut record =
+        DeleteRecordRepo::get_delete_record(&connection, &delete_record_target(item_id, item_type))
+            .expect("delete-record query should succeed")
+            .expect("delete record should exist");
     record.retention_until = retention_until.to_string();
     DeleteRecordRepo::insert_delete_record(&connection, &record)
         .expect("delete-record update should succeed");
+}
+
+fn delete_record_target(item_id: &str, item_type: ItemType) -> DeleteRecordTarget {
+    match item_type {
+        ItemType::Note => DeleteRecordTarget::Note(NoteId::new(item_id)),
+        ItemType::Asset => DeleteRecordTarget::Asset(zk_domain::id::AssetId::new(item_id)),
+    }
 }
 
 #[test]

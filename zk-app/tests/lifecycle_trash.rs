@@ -19,7 +19,8 @@ use zk_app::{
     restore_note, scan_vault, trash_note,
 };
 use zk_domain::{
-    ItemKind, PurgeRequest, PurgeScope, RestoreRequest, TargetSelector, TrashRequest,
+    DeleteRecord, DeleteRecordTarget, ItemKind, PurgeRequest, PurgeScope, RestoreRequest,
+    TargetSelector, TrashRequest,
     config::{EffectiveConfig, FolderPolicy},
     id::{NoteId, RelativePath},
     sync::ItemType,
@@ -60,8 +61,8 @@ fn manual_trash_rebuild_marks_note_trashed_and_creates_delete_record() {
     assert!(note_row.trashed_at.is_some());
 
     let delete_record = fetch_note_delete_record(&conn, &note_id);
-    assert_eq!(delete_record.item_id, note_id.as_str());
-    assert_eq!(delete_record.item_type, ItemType::Note);
+    assert_eq!(delete_record.item_id_str(), note_id.as_str());
+    assert_eq!(delete_record.item_type(), ItemType::Note);
     assert!(delete_record.deleted_at.is_none());
     assert!(
         !delete_record.retention_until.is_empty(),
@@ -102,7 +103,7 @@ fn manual_restore_rebuild_clears_trash_fields_and_delete_record() {
     assert!(!note_row.is_trashed);
     assert!(note_row.trashed_at.is_none());
     assert!(
-        DeleteRecordRepo::get_delete_record(&conn, note_id.as_str(), ItemType::Note)
+        DeleteRecordRepo::get_delete_record(&conn, &note_delete_target(&note_id))
             .expect("delete-record query should succeed")
             .is_none()
     );
@@ -137,7 +138,7 @@ fn api_trash_and_restore_round_trip_moves_file_and_clears_row() {
     assert!(!vault_root.join(live_path.as_str()).exists());
     assert!(vault_root.join(trashed.new_path.as_str()).exists());
     assert!(
-        DeleteRecordRepo::get_delete_record(&conn, note_id.as_str(), ItemType::Note)
+        DeleteRecordRepo::get_delete_record(&conn, &note_delete_target(&note_id))
             .expect("delete-record query should succeed")
             .is_some()
     );
@@ -165,7 +166,7 @@ fn api_trash_and_restore_round_trip_moves_file_and_clears_row() {
     assert!(!note_row.is_trashed);
     assert!(note_row.trashed_at.is_none());
     assert!(
-        DeleteRecordRepo::get_delete_record(&conn, note_id.as_str(), ItemType::Note)
+        DeleteRecordRepo::get_delete_record(&conn, &note_delete_target(&note_id))
             .expect("delete-record query should succeed")
             .is_none()
     );
@@ -317,9 +318,8 @@ fn rebuild_warns_about_orphan_and_doctor_reports_it() {
         .expect("initial rebuild should succeed");
     DeleteRecordRepo::insert_delete_record(
         &conn,
-        &zk_domain::sync_state::DeleteRecord {
-            item_id: "01LIFECYCLEORPHANDETECT00001".to_string(),
-            item_type: ItemType::Note,
+        &DeleteRecord {
+            target: DeleteRecordTarget::Note(NoteId::new("01LIFECYCLEORPHANDETECT00001")),
             original_path: RelativePath::new("notes/orphan.md"),
             trashed_at: "2026-04-20T10:00:00Z".to_string(),
             retention_until: "2099-01-01T00:00:00Z".to_string(),
@@ -405,7 +405,7 @@ fn trashing_note_under_immutable_folder_is_rejected_without_side_effects() {
     assert!(!note_row.is_trashed);
     assert!(note_row.trashed_at.is_none());
     assert!(
-        DeleteRecordRepo::get_delete_record(&conn, note_id.as_str(), ItemType::Note)
+        DeleteRecordRepo::get_delete_record(&conn, &note_delete_target(&note_id))
             .expect("delete-record query should succeed")
             .is_none()
     );
@@ -527,9 +527,13 @@ fn fetch_note_delete_record(
     conn: &rusqlite::Connection,
     note_id: &NoteId,
 ) -> zk_domain::sync_state::DeleteRecord {
-    DeleteRecordRepo::get_delete_record(conn, note_id.as_str(), ItemType::Note)
+    DeleteRecordRepo::get_delete_record(conn, &note_delete_target(note_id))
         .expect("delete-record query should succeed")
         .expect("delete record should exist")
+}
+
+fn note_delete_target(note_id: &NoteId) -> DeleteRecordTarget {
+    DeleteRecordTarget::Note(note_id.clone())
 }
 
 fn age_note_delete_record(
