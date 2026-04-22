@@ -13,8 +13,9 @@
 //! For pull comparison, "unchanged" and "advanced" are both judged relative to
 //! `last_synced_hash`. Missing `last_synced_hash` counts as locally changed, and
 //! any present remote `content_hash` counts as a remote advance. The
-//! filesystem-facing conflict-copy writer below is kept here for now, but it is
-//! intentionally separate from the pure helper surface.
+//! filesystem-facing conflict-copy writer below owns the V1 "preserve both
+//! versions" policy, but it stays intentionally separate from the pure helper
+//! surface.
 
 use std::{
     fs,
@@ -27,7 +28,7 @@ use zk_domain::{
     id::{ContentHash, RelativePath, ServerRevision},
     sync::{PendingOperation, SyncStatus},
 };
-use zk_vault::{atomic_write_file, error::VaultError};
+use zk_vault::{VaultRoot, atomic_write_file, error::VaultError};
 
 use crate::{SyncError, SyncResult, plan::Clock};
 
@@ -108,12 +109,25 @@ pub fn detect_pull_conflict(snapshot: &SyncStateSnapshot, change: &SyncChange) -
 
 /// Writes a remote conflict copy beside the current local file and returns its path.
 ///
+/// The conflict copy always stays in the same directory as `input.local_path`
+/// and uses the deterministic V1 filename pattern
+/// `{stem}.conflict-remote-{YYYYMMDDTHHMMSSZ}{ext}`. The timestamp uses the
+/// ISO-8601 basic UTC form so the filename avoids punctuation that interacts
+/// poorly with shells and some filesystems. If that base name already exists,
+/// the writer appends `-2`, `-3`, and so on before the extension.
+///
+/// This helper only preserves the remote bytes on disk via the vault's atomic
+/// writer. It never mutates the local file, and it does not update index,
+/// sync-state, or delete-record tables. V1 also deliberately omits
+/// `keep_remote` / `.conflict-local-*` handling; later conflict-resolution
+/// flows own that behavior instead.
+///
 /// # Errors
 ///
 /// Returns [`SyncError::VaultWrite`] when the local file cannot be inspected,
 /// when collision probing fails, or when the conflict copy cannot be written.
 pub fn write_conflict_copy(
-    vault_root: &Path,
+    vault_root: &VaultRoot,
     input: ConflictCopyInput<'_>,
 ) -> SyncResult<RelativePath> {
     let local_absolute_path = vault_root.join(input.local_path.as_str());

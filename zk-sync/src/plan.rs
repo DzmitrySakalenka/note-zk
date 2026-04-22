@@ -144,11 +144,45 @@ pub fn plan_local_changes(ctx: &PlannerContext<'_>) -> SyncResult<Vec<PlannedOpe
         }
     }
 
-    planned.sort_by(|left, right| {
-        left.item_id()
-            .cmp(right.item_id())
-            .then(left.item_type_rank().cmp(&right.item_type_rank()))
-    });
+    sort_planned_operations(&mut planned);
+
+    Ok(planned)
+}
+
+pub(crate) fn plan_all_local_items_as_creates(
+    ctx: &PlannerContext<'_>,
+) -> SyncResult<Vec<PlannedOperation>> {
+    let mut planned = Vec::new();
+
+    for note in NoteRepo::list_notes(ctx.conn)? {
+        if note.is_deleted {
+            continue;
+        }
+
+        planned.push(PlannedOperation::Note(NotePlannedOperation {
+            note_id: note.note_id,
+            current_path: note.current_path,
+            op: PlannedOp::Create,
+            local_hash: note.content_hash,
+            base_server_revision: None,
+        }));
+    }
+
+    for asset in AssetRepo::list_assets(ctx.conn)? {
+        if asset.is_deleted {
+            continue;
+        }
+
+        planned.push(PlannedOperation::Asset(AssetPlannedOperation {
+            asset_id: asset.asset_id,
+            current_path: asset.current_path,
+            op: PlannedOp::Create,
+            local_hash: asset.content_hash,
+            base_server_revision: None,
+        }));
+    }
+
+    sort_planned_operations(&mut planned);
 
     Ok(planned)
 }
@@ -411,4 +445,12 @@ impl PlannedOperation {
             Self::Note(_) => 1,
         }
     }
+}
+
+fn sort_planned_operations(planned: &mut [PlannedOperation]) {
+    planned.sort_by(|left, right| {
+        left.item_id()
+            .cmp(right.item_id())
+            .then(left.item_type_rank().cmp(&right.item_type_rank()))
+    });
 }
