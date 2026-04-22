@@ -137,6 +137,21 @@ fn sync_wire_round_trip_preserves_structs_and_omits_none_fields() {
         push_result
     );
 
+    let note_item = PushNoteItem {
+        note_id: "01NOTE00000000000000000001".to_string(),
+        path: "notes/alpha.md".to_string(),
+        content: None,
+        content_hash: "abc123".to_string(),
+        base_server_revision: Some(7),
+        operation: WireOperation::Trash,
+    };
+    let note_item_json = serde_json::to_value(&note_item).expect("serialize note item");
+    assert_eq!(note_item_json.get("content"), None);
+    assert_eq!(
+        serde_json::from_value::<PushNoteItem>(note_item_json).expect("deserialize note item"),
+        note_item
+    );
+
     let change = SyncChange {
         event_seq: 42,
         item_id: "note-1".to_string(),
@@ -188,6 +203,12 @@ fn sync_api_model_json_examples_deserialize() {
             "content_hash": "abc123",
             "base_server_revision": 3,
             "operation": "update"
+        }, {
+            "note_id": "01NOTE00000000000000000002",
+            "path": "99_trash/2026-04-03/beta.md",
+            "content_hash": "trash123",
+            "base_server_revision": 4,
+            "operation": "trash"
         }],
         "assets": [{
             "asset_id": "01ASSET0000000000000000001",

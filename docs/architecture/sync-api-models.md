@@ -40,12 +40,15 @@ pub struct RegisterDeviceResponse {
 pub struct PushNoteItem {
     pub note_id: String,
     pub path: String,
-    pub content: String,
+    pub content: Option<String>,
     pub content_hash: String,
     pub base_server_revision: Option<i64>,
     pub operation: String,
 }
 ```
+
+`content` is populated for `create`, `update`, and `move`, and omitted for
+`trash`, `restore`, and `delete`.
 
 ### Asset payload
 

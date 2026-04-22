@@ -1,5 +1,5 @@
 #![warn(missing_docs)]
-//! Vault scanning, parsing, normalization, and atomic filesystem writes.
+//! Vault scanning, parsing, normalization, raw byte reads, and atomic filesystem writes.
 
 /// Error types returned by vault scan, parse, and write operations.
 pub mod error;
@@ -9,6 +9,7 @@ mod normalize;
 mod normalize_reorder;
 mod parse;
 mod pipeline;
+mod read;
 mod scan;
 mod serialize;
 mod validate;
@@ -30,6 +31,7 @@ pub use pipeline::{
     FrontmatterParseFailure, NormalizationResult, NormalizationSummary, NotePathIndex,
     NotePathIndexBuild, VaultScanResult, apply_normalization, build_note_path_index, scan_vault,
 };
+pub use read::{VaultRoot, read_asset_bytes, read_note_bytes};
 pub use scan::{AssetCandidate, NoteCandidate, TrashState, VaultFileSet, scan_vault_files};
 pub use serialize::{render_note_file, serialize_frontmatter};
 pub use validate::{validate_vault, validate_vault_with_parsed_indexes};

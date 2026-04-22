@@ -142,11 +142,14 @@ Per note:
 
 - `note_id`
 - `path`
-- full content snapshot
+- full content snapshot for `create`, `update`, and `move`
 - `content_hash`
 - `base_server_revision`
 - operation type
 - client timestamps if needed
+
+For `trash`, `restore`, and `delete`, the note payload omits `content` and
+reuses the indexed `content_hash`.
 
 Per attachment:
 

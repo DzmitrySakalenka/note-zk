@@ -189,8 +189,9 @@ pub struct PushNoteItem {
     pub note_id: String,
     /// Canonical note path relative to the vault root.
     pub path: String,
-    /// Full note content snapshot.
-    pub content: String,
+    /// Full note content snapshot when the operation carries one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
     /// Content hash of the uploaded note snapshot.
     pub content_hash: String,
     /// Server revision the client is updating from, if known.
