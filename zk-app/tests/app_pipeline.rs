@@ -2,19 +2,19 @@ use std::path::Path;
 
 mod common;
 
-use common::{unique_test_dir, write_text};
+use common::{open_index_connection, unique_test_dir, write_text};
 use tempfile::TempDir;
 use zk_app::{
-    AppError, RebuildOptions, RebuildOutcome, bootstrap_effective_config, create_note,
-    doctor_report, rebuild_index, scan_vault, status_summary, update_note,
+    AppError, RebuildOptions, RebuildOutcome, WriteContext, bootstrap_effective_config,
+    create_note, doctor_report, rebuild_index, scan_vault, status_summary, update_note,
 };
 use zk_domain::{
     config::CliOverrides,
-    id::{NoteId, RelativePath},
+    id::{DeviceId, NoteId, RelativePath},
     note::NoteFrontmatter,
     write::{CreateNoteRequest, UpdateNoteRequest},
 };
-use zk_index::{NoteRepo, open_memory};
+use zk_index::NoteRepo;
 
 fn sample_frontmatter(note_id: &str, title: &str) -> NoteFrontmatter {
     NoteFrontmatter {
@@ -38,6 +38,10 @@ fn env_for_home(home_root: &Path) -> impl Fn(&str) -> Option<String> {
         "HOME" | "APPDATA" => Some(home_text.clone()),
         _ => None,
     }
+}
+
+fn device_id() -> DeviceId {
+    DeviceId::new("device-app-pipeline-tests")
 }
 
 #[test]
@@ -138,7 +142,7 @@ Trashed content
     let scan_outcome = scan_vault(&vault_root, &config).expect("scan vault should succeed");
     assert!(scan_outcome.scan_result.notes.len() >= 5);
 
-    let mut conn = open_memory().expect("open in-memory sqlite");
+    let mut conn = open_index_connection();
     let rebuild_outcome = rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
         .expect("rebuild index should succeed");
     let rebuild_index_stats = match &rebuild_outcome {
@@ -201,11 +205,16 @@ immutable = true
     let env = env_for_home(&home_root);
     let config = bootstrap_effective_config(&vault_root, &CliOverrides::default(), &env)
         .expect("bootstrap effective config");
+    let mut conn = open_index_connection();
 
     let note_id = NoteId::new("01B6S01M2YQWZ6K2H8M7V1QY9A");
     create_note(
         &vault_root,
         &config,
+        &mut WriteContext {
+            conn: &mut conn,
+            device_id: &device_id(),
+        },
         CreateNoteRequest {
             path: RelativePath::new("notes/roundtrip.md"),
             frontmatter: sample_frontmatter(note_id.as_str(), "Roundtrip"),
@@ -214,7 +223,6 @@ immutable = true
     )
     .expect("create note should succeed");
 
-    let mut conn = open_memory().expect("open in-memory sqlite");
     rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
         .expect("initial rebuild should succeed");
 
@@ -225,6 +233,10 @@ immutable = true
     update_note(
         &vault_root,
         &config,
+        &mut WriteContext {
+            conn: &mut conn,
+            device_id: &device_id(),
+        },
         UpdateNoteRequest {
             note_id: note_id.clone(),
             frontmatter: None,
@@ -248,6 +260,10 @@ immutable = true
     let err = create_note(
         &vault_root,
         &config,
+        &mut WriteContext {
+            conn: &mut conn,
+            device_id: &device_id(),
+        },
         CreateNoteRequest {
             path: RelativePath::new("raw/new.md"),
             frontmatter: sample_frontmatter("01B6S01M2YQWZ6K2H8M7V1QY9B", "Raw"),

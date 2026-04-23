@@ -205,6 +205,16 @@ fn plan_note_change(
         return Ok(None);
     }
 
+    if state.last_synced_hash.is_none() && state.last_known_server_revision.is_none() {
+        return Ok(Some(NotePlannedOperation {
+            note_id: note.note_id.clone(),
+            current_path: note.current_path.clone(),
+            op: PlannedOp::Create,
+            local_hash: note.content_hash.clone(),
+            base_server_revision: None,
+        }));
+    }
+
     let last_synced_in_trash = state
         .last_synced_path
         .as_ref()

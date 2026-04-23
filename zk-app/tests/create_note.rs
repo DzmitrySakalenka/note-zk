@@ -2,11 +2,11 @@ use std::{collections::BTreeMap, fs};
 
 mod common;
 
-use common::{unique_test_dir, write_text};
-use zk_app::{AppError, create_note};
+use common::{open_index_connection, unique_test_dir, write_text};
+use zk_app::{AppError, WriteContext, create_note};
 use zk_domain::{
     config::{EffectiveConfig, FolderPolicy},
-    id::{NoteId, RelativePath},
+    id::{DeviceId, NoteId, RelativePath},
     note::NoteFrontmatter,
     write::CreateNoteRequest,
 };
@@ -28,6 +28,10 @@ fn sample_frontmatter(id: &str, title: &str) -> NoteFrontmatter {
     }
 }
 
+fn device_id() -> DeviceId {
+    DeviceId::new("device-create-note-tests")
+}
+
 #[test]
 fn fresh_create_writes_file_returns_note_id_and_roundtrips() {
     let root = unique_test_dir("create-note-fresh");
@@ -39,9 +43,18 @@ fn fresh_create_writes_file_returns_note_id_and_roundtrips() {
     };
     let expected_path = vault_root.join("notes").join("new.md");
     let config = EffectiveConfig::default();
+    let mut connection = open_index_connection();
 
-    let created_id =
-        create_note(&vault_root, &config, request.clone()).expect("create_note should succeed");
+    let created_id = create_note(
+        &vault_root,
+        &config,
+        &mut WriteContext {
+            conn: &mut connection,
+            device_id: &device_id(),
+        },
+        request.clone(),
+    )
+    .expect("create_note should succeed");
 
     assert!(!created_id.as_str().is_empty());
     assert_eq!(created_id, request.frontmatter.id);
@@ -66,9 +79,18 @@ fn empty_frontmatter_id_triggers_ulid_generation() {
         body_markdown: "body".to_string(),
     };
     let config = EffectiveConfig::default();
+    let mut connection = open_index_connection();
 
-    let created_id =
-        create_note(&vault_root, &config, request).expect("create_note should succeed");
+    let created_id = create_note(
+        &vault_root,
+        &config,
+        &mut WriteContext {
+            conn: &mut connection,
+            device_id: &device_id(),
+        },
+        request,
+    )
+    .expect("create_note should succeed");
 
     assert!(!created_id.as_str().is_empty());
     assert_eq!(created_id.as_str().len(), 26);
@@ -85,9 +107,18 @@ fn caller_supplied_id_is_preserved_verbatim() {
         body_markdown: "body".to_string(),
     };
     let config = EffectiveConfig::default();
+    let mut connection = open_index_connection();
 
-    let created_id =
-        create_note(&vault_root, &config, request).expect("create_note should preserve id");
+    let created_id = create_note(
+        &vault_root,
+        &config,
+        &mut WriteContext {
+            conn: &mut connection,
+            device_id: &device_id(),
+        },
+        request,
+    )
+    .expect("create_note should preserve id");
 
     assert_eq!(created_id, supplied_id);
 }
@@ -114,8 +145,18 @@ Existing body
         body_markdown: "body".to_string(),
     };
     let config = EffectiveConfig::default();
+    let mut connection = open_index_connection();
 
-    let err = create_note(&vault_root, &config, request).expect_err("duplicate should fail");
+    let err = create_note(
+        &vault_root,
+        &config,
+        &mut WriteContext {
+            conn: &mut connection,
+            device_id: &device_id(),
+        },
+        request,
+    )
+    .expect_err("duplicate should fail");
     assert!(matches!(
         err,
         AppError::NotePathExists { path } if path == RelativePath::new("notes/existing.md")
@@ -140,8 +181,18 @@ fn immutable_folder_target_yields_immutable_folder_error() {
         )]),
         ..EffectiveConfig::default()
     };
+    let mut connection = open_index_connection();
 
-    let err = create_note(&vault_root, &config, request).expect_err("raw path should be blocked");
+    let err = create_note(
+        &vault_root,
+        &config,
+        &mut WriteContext {
+            conn: &mut connection,
+            device_id: &device_id(),
+        },
+        request,
+    )
+    .expect_err("raw path should be blocked");
     assert!(matches!(
         err,
         AppError::ImmutableFolder { path } if path == RelativePath::new("raw/new.md")
@@ -159,9 +210,18 @@ fn nested_target_path_creates_intermediate_directories() {
         body_markdown: "body".to_string(),
     };
     let config = EffectiveConfig::default();
+    let mut connection = open_index_connection();
 
-    let _created_id =
-        create_note(&vault_root, &config, request).expect("create_note should succeed");
+    let _created_id = create_note(
+        &vault_root,
+        &config,
+        &mut WriteContext {
+            conn: &mut connection,
+            device_id: &device_id(),
+        },
+        request,
+    )
+    .expect("create_note should succeed");
 
     let expected_file = vault_root.join(nested_path.as_str());
     let expected_parent = expected_file

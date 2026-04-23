@@ -14,8 +14,8 @@ use pollster::block_on;
 use tempfile::TempDir;
 use zk_app::{
     AppError, BootstrapOutcome, Clock, PullApplyOutcome, PushApplyOutcome, RebuildOptions,
-    SyncContext, bootstrap, create_note, plan_and_push, pull_and_apply, purge_expired,
-    rebuild_index, register_device, restore_note, trash_note, update_note,
+    SyncContext, WriteContext, bootstrap, create_note, plan_and_push, pull_and_apply,
+    purge_expired, rebuild_index, register_device, restore_note, trash_note, update_note,
 };
 use zk_domain::{
     ItemKind, PurgeRequest, PurgeScope, RegisterDeviceRequest, RegisterDeviceResponse,
@@ -501,6 +501,10 @@ impl ClientFixture {
         create_note(
             self.vault.path(),
             &self.config,
+            &mut WriteContext {
+                conn: &mut self.conn,
+                device_id: &self.device_id,
+            },
             CreateNoteRequest {
                 path: RelativePath::new(path),
                 frontmatter: NoteFrontmatter {
@@ -529,6 +533,10 @@ impl ClientFixture {
         update_note(
             self.vault.path(),
             &self.config,
+            &mut WriteContext {
+                conn: &mut self.conn,
+                device_id: &self.device_id,
+            },
             UpdateNoteRequest {
                 note_id: note_id.clone(),
                 frontmatter: None,

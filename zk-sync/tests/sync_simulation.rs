@@ -268,7 +268,7 @@ fn note_lifecycle_round_trip_and_asset_pull_smoke() {
 }
 
 #[test]
-fn concurrent_edit_push_conflict_then_pull_overwrites_local_copy() {
+fn concurrent_edit_push_conflict_then_pull_writes_conflict_copy() {
     let clock = fixed_clock();
     let server = FakeServer::new(clock.clone());
     let mut client_a = ClientFixture::new("client-a", clock.clone());
@@ -315,24 +315,28 @@ fn concurrent_edit_push_conflict_then_pull_overwrites_local_copy() {
         client_b.note_state(&note_id).sync_status,
         SyncStatus::Conflict
     );
+    let local_before_pull = client_b.note_bytes("notes/shared.md");
 
     let pull_b = client_b
         .pull(&server)
         .expect("client B pull should succeed");
-    assert_eq!(pull_b.applied, 1);
-    assert!(pull_b.conflicts.is_empty());
-
-    assert_eq!(
-        client_b.note_bytes("notes/shared.md"),
-        client_a.note_bytes("notes/shared.md")
-    );
+    assert_eq!(pull_b.applied, 0);
+    assert_eq!(pull_b.conflicts.len(), 1);
 
     let expected_conflict_copy = "notes/shared.conflict-remote-20260423T120000Z.md".to_string();
-    assert!(!client_b.file_exists(&expected_conflict_copy));
+    assert!(client_b.file_exists(&expected_conflict_copy));
+    assert_eq!(client_b.note_bytes("notes/shared.md"), local_before_pull);
     assert_eq!(
-        client_b.note_state(&note_id).sync_status,
-        SyncStatus::Synced
+        client_b.note_bytes(&expected_conflict_copy),
+        client_a.note_bytes("notes/shared.md")
     );
+    let state = client_b.note_state(&note_id);
+    assert_eq!(state.sync_status, SyncStatus::Conflict);
+    assert_eq!(
+        state.last_local_hash,
+        Some(client_b.note_row(&note_id).content_hash)
+    );
+    assert_ne!(state.last_local_hash, state.last_synced_hash);
     assert_eq!(client_b.device_cursor(), Some(server.last_event_seq()));
 }
 

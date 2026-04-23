@@ -46,7 +46,8 @@ pub use status::{StatusSummary, status_summary};
 pub use doctor::{DoctorIssue, DoctorReport, doctor_report};
 #[rustfmt::skip]
 pub use write::{
-    BatchWriteFailure, BatchWriteKind, BatchWriteOutcome, batch_write, create_note, update_note,
+    BatchWriteFailure, BatchWriteKind, BatchWriteOutcome, WriteContext, batch_write, create_note,
+    update_note,
 };
 #[rustfmt::skip]
 pub use trash::{

@@ -4,7 +4,7 @@ use zk_domain::{
     asset::AssetRecord,
     id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     note::NoteRecord,
-    sync::SyncStatus,
+    sync::{PendingOperation, SyncStatus},
     sync_state::{DeleteRecord, DeleteRecordTarget, NoteSyncState},
 };
 use zk_index::{AssetRepo, DeleteRecordRepo, NoteRepo, SyncStateRepo, ensure_schema, open_memory};
@@ -169,6 +169,52 @@ fn planner_emits_nothing_when_current_state_matches_last_synced_state() {
     .expect("planner should succeed");
 
     assert!(planned.is_empty());
+}
+
+#[test]
+fn planner_treats_unsynced_state_rows_as_creates() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    let note_id = NoteId::new("01TG11015CREATEPLAN00000001");
+    let note = base_note(&note_id, "notes/create-from-state.md", b"local create body");
+    insert_note(&connection, &note);
+    SyncStateRepo::upsert_note_sync_state(
+        &connection,
+        &NoteSyncState {
+            item_id: note_id.clone(),
+            device_id: device_id(),
+            last_local_hash: Some(note.content_hash.clone()),
+            last_synced_hash: None,
+            last_synced_path: None,
+            last_known_server_revision: None,
+            sync_status: SyncStatus::PendingUpload,
+            last_sync_attempt_at: None,
+            last_sync_error: None,
+            pending_operation: Some(PendingOperation::Create),
+        },
+    )
+    .expect("unsynced sync-state should be inserted");
+
+    let planned = plan_local_changes(&PlannerContext {
+        conn: &connection,
+        device_id: &device_id(),
+        clock: &fixed_clock(),
+        trash_dir: &trash_dir(),
+    })
+    .expect("planner should succeed");
+
+    assert_eq!(
+        planned,
+        vec![PlannedOperation::Note(
+            zk_sync::plan::NotePlannedOperation {
+                note_id,
+                current_path: RelativePath::new("notes/create-from-state.md"),
+                op: PlannedOp::Create,
+                local_hash: ContentHash::from_bytes(b"local create body"),
+                base_server_revision: None,
+            }
+        )]
+    );
 }
 
 #[test]
