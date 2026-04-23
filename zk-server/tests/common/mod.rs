@@ -1,3 +1,8 @@
+#![allow(dead_code)]
+
+// Shared integration-test helpers are compiled separately for each test target,
+// so some helpers are intentionally unused in a given target.
+
 use std::{
     ffi::OsString,
     fs,
