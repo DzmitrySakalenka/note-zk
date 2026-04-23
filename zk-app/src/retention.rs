@@ -55,12 +55,8 @@ impl Clock for SystemClock {
 /// # Errors
 ///
 /// Returns [`AppError::ConfigValidation`] if `trashed_at` is present but not a
-/// valid RFC-3339 timestamp.
-///
-/// # Panics
-///
-/// Panics if `trashed_at` is so close to chrono's maximum representable
-/// timestamp that even the clamped retention window cannot be added safely.
+/// valid RFC-3339 timestamp, or [`AppError::RetentionArithmeticOverflow`] if
+/// the clamped retention window cannot be added to the base timestamp safely.
 pub fn compute_retention_until(
     trashed_at: Option<&str>,
     retention_days: u32,
@@ -72,7 +68,10 @@ pub fn compute_retention_until(
         base
     } else {
         base.checked_add_days(Days::new(u64::from(clamped_days)))
-            .expect("retention helper clamps day arithmetic to a representable range")
+            .ok_or_else(|| AppError::RetentionArithmeticOverflow {
+                base: format_timestamp(base),
+                days: clamped_days,
+            })?
     };
 
     Ok(format_timestamp(retention_until))

@@ -38,6 +38,16 @@ pub enum AppError {
     /// Sync transport or local sync-state workflow failure.
     #[error("while attempting to perform sync workflow: {0}")]
     Sync(#[from] SyncError),
+    /// Retention arithmetic overflowed the representable chrono range.
+    #[error(
+        "while attempting to compute retention timestamp from {base}: adding {days} days overflowed representable datetime range"
+    )]
+    RetentionArithmeticOverflow {
+        /// Base timestamp used for retention arithmetic.
+        base: String,
+        /// Effective clamped retention window in days.
+        days: u32,
+    },
     /// Generic path-scoped I/O failure.
     #[error(
         "while attempting to access path {path_display}: {source}",

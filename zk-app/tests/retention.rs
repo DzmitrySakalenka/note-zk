@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Days, SecondsFormat, Utc};
 
 use zk_app::config::ConfigValidationError;
 use zk_app::{AppError, Clock, compute_retention_until};
@@ -63,6 +63,21 @@ fn retention_days_saturates_to_ten_year_cap() {
     .expect("retention timestamp should compute");
 
     assert_eq!(retention_until, "2035-12-30T00:00:00Z");
+}
+
+#[test]
+fn retention_overflow_returns_app_error_instead_of_panicking() {
+    let near_max = DateTime::<Utc>::MAX_UTC
+        .checked_sub_days(Days::new(1))
+        .expect("near-max timestamp should be representable");
+    let err = compute_retention_until(None, 10_000, &FixedClock { now: near_max })
+        .expect_err("overflowing retention arithmetic should fail");
+
+    assert!(matches!(
+        err,
+        AppError::RetentionArithmeticOverflow { ref base, days }
+            if base == &near_max.to_rfc3339_opts(SecondsFormat::Secs, true) && days == 3650
+    ));
 }
 
 #[test]

@@ -135,6 +135,10 @@ fn preserves_trash_lifecycle_error_payloads() {
         target: "notes/fresh.md".to_string(),
         retention_until: "2026-05-01T00:00:00Z".to_string(),
     };
+    let retention_overflow = AppError::RetentionArithmeticOverflow {
+        base: "9999-12-31T00:00:00Z".to_string(),
+        days: 3650,
+    };
     let trashed_item_missing_id = AppError::TrashedItemMissingId {
         path: RelativePath::new("99_trash/lost.md"),
     };
@@ -161,6 +165,11 @@ fn preserves_trash_lifecycle_error_payloads() {
             target,
             retention_until
         } if target == "notes/fresh.md" && retention_until == "2026-05-01T00:00:00Z"
+    ));
+    assert!(matches!(
+        retention_overflow,
+        AppError::RetentionArithmeticOverflow { base, days }
+            if base == "9999-12-31T00:00:00Z" && days == 3650
     ));
     assert!(matches!(
         trashed_item_missing_id,
