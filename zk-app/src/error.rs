@@ -48,6 +48,12 @@ pub enum AppError {
         /// Effective clamped retention window in days.
         days: u32,
     },
+    /// Status summary count overflowed the public `u32` output contract.
+    #[error("while attempting to compute status summary: {field} exceeds supported u32 range")]
+    StatusCountOverflow {
+        /// Summary field whose count did not fit in the status output type.
+        field: &'static str,
+    },
     /// Generic path-scoped I/O failure.
     #[error(
         "while attempting to access path {path_display}: {source}",

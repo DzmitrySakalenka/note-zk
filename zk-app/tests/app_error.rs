@@ -131,6 +131,9 @@ fn preserves_trash_lifecycle_error_payloads() {
     let restore_target_exists = AppError::RestoreTargetExists {
         path: RelativePath::new("notes/existing.md"),
     };
+    let status_count_overflow = AppError::StatusCountOverflow {
+        field: "duplicate_id_count",
+    };
     let retention_not_expired = AppError::RetentionNotExpired {
         target: "notes/fresh.md".to_string(),
         retention_until: "2026-05-01T00:00:00Z".to_string(),
@@ -158,6 +161,10 @@ fn preserves_trash_lifecycle_error_payloads() {
     assert!(matches!(
         restore_target_exists,
         AppError::RestoreTargetExists { path } if path.as_str() == "notes/existing.md"
+    ));
+    assert!(matches!(
+        status_count_overflow,
+        AppError::StatusCountOverflow { field } if field == "duplicate_id_count"
     ));
     assert!(matches!(
         retention_not_expired,
