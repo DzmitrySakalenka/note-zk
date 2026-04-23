@@ -1,5 +1,4 @@
 //! Remote pull application and cursor advancement.
-#![allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 
 use std::{
     fs,
@@ -36,8 +35,6 @@ use crate::{
 
 /// Borrowed inputs required to apply one pulled batch into the local vault and index.
 pub struct PullApplyContext<'a> {
-    /// Mutable index connection used to wrap the batch in one transaction.
-    pub conn: &'a mut Connection,
     /// Vault root used for file writes, moves, and deletes.
     pub vault: &'a VaultRoot,
     /// Device whose cursor should advance after the batch commits.
@@ -59,6 +56,54 @@ pub struct PullApplyOutcome {
     pub next_cursor: Option<i64>,
 }
 
+struct PullWorkspace<'a, 'conn> {
+    transaction: &'a Transaction<'conn>,
+    vault: &'a VaultRoot,
+    device_id: &'a DeviceId,
+    clock: &'a dyn Clock,
+    trash_dir: &'a RelativePath,
+    outcome: &'a mut PullApplyOutcome,
+}
+
+struct LoadedNoteState {
+    note_id: NoteId,
+    note: Option<NoteRecord>,
+    sync_state: Option<NoteSyncState>,
+    snapshot: SyncStateSnapshot,
+}
+
+struct LoadedAssetState {
+    asset_id: AssetId,
+    asset: Option<AssetRecord>,
+    sync_state: Option<AssetSyncState>,
+    snapshot: SyncStateSnapshot,
+}
+
+struct NoteConflictStateInput<'a> {
+    device_id: &'a DeviceId,
+    note_id: &'a NoteId,
+    note: Option<&'a NoteRecord>,
+    sync_state: Option<&'a NoteSyncState>,
+    message: Option<&'a str>,
+}
+
+struct AssetConflictStateInput<'a> {
+    device_id: &'a DeviceId,
+    asset_id: &'a AssetId,
+    asset: Option<&'a AssetRecord>,
+    sync_state: Option<&'a AssetSyncState>,
+    message: Option<&'a str>,
+}
+
+struct NoteMetadataRow<'a> {
+    path: &'a RelativePath,
+    note: &'a NoteRecord,
+    metadata: &'a NoteIndexedMetadata,
+    trashed_at: Option<&'a str>,
+    is_trashed: bool,
+    server_revision: &'a ServerRevision,
+}
+
 /// Applies one pull batch and advances the device cursor on successful commit.
 ///
 /// # Errors
@@ -67,17 +112,17 @@ pub struct PullApplyOutcome {
 /// [`SyncError::Transport`] for malformed remote payloads,
 /// [`SyncError::ItemMissing`] for impossible local-state gaps, and
 /// [`SyncError::VaultWrite`] or [`SyncError::Index`] when local apply fails.
-#[allow(clippy::needless_pass_by_value)]
 pub fn apply_pull_response(
-    ctx: PullApplyContext<'_>,
+    conn: &mut Connection,
+    ctx: &PullApplyContext<'_>,
     response: &SyncPullResponse,
 ) -> SyncResult<PullApplyOutcome> {
-    let device = DeviceRepo::get_device(ctx.conn, ctx.device_id)?
+    let device = DeviceRepo::get_device(conn, ctx.device_id)?
         .ok_or_else(|| SyncError::ItemMissing(ctx.device_id.to_string()))?;
     validate_event_order(device.last_sync_cursor, &response.changes)?;
 
     let next_cursor = response.next_cursor;
-    let transaction = ctx.conn.transaction().map_err(|source| {
+    let transaction = conn.transaction().map_err(|source| {
         SyncError::Index(IndexError::Sqlite {
             source,
             context: "begin pull response apply transaction".to_string(),
@@ -89,26 +134,21 @@ pub fn apply_pull_response(
         next_cursor,
     };
 
-    for change in &response.changes {
-        match change.item_type {
-            WireItemType::Note => apply_note_change(
-                &transaction,
-                ctx.vault,
-                ctx.device_id,
-                ctx.clock,
-                ctx.trash_dir,
-                change,
-                &mut outcome,
-            )?,
-            WireItemType::Asset => apply_asset_change(
-                &transaction,
-                ctx.vault,
-                ctx.device_id,
-                ctx.clock,
-                ctx.trash_dir,
-                change,
-                &mut outcome,
-            )?,
+    {
+        let mut workspace = PullWorkspace {
+            transaction: &transaction,
+            vault: ctx.vault,
+            device_id: ctx.device_id,
+            clock: ctx.clock,
+            trash_dir: ctx.trash_dir,
+            outcome: &mut outcome,
+        };
+
+        for change in &response.changes {
+            match change.item_type {
+                WireItemType::Note => apply_note_change(&mut workspace, change)?,
+                WireItemType::Asset => apply_asset_change(&mut workspace, change)?,
+            }
         }
     }
 
@@ -141,233 +181,142 @@ fn validate_event_order(last_cursor: Option<i64>, changes: &[SyncChange]) -> Syn
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn apply_note_change(
+fn load_note_state(
     transaction: &Transaction<'_>,
-    vault: &VaultRoot,
-    device_id: &DeviceId,
-    clock: &dyn Clock,
-    trash_dir: &RelativePath,
     change: &SyncChange,
-    outcome: &mut PullApplyOutcome,
-) -> SyncResult<()> {
+) -> SyncResult<LoadedNoteState> {
     let note_id = NoteId::new(&change.item_id);
     let note = NoteRepo::get_note(transaction, &note_id)?;
-    let state = SyncStateRepo::get_note_sync_state(transaction, &note_id)?;
-    let snapshot = note_snapshot(note.as_ref(), state.as_ref());
+    let sync_state = SyncStateRepo::get_note_sync_state(transaction, &note_id)?;
+    let snapshot = note_snapshot(note.as_ref(), sync_state.as_ref());
 
-    match change.event_type {
-        WireEventType::Create | WireEventType::Update => apply_note_content_change(
-            transaction,
-            vault,
-            device_id,
-            clock,
-            change,
-            note_id,
-            note,
-            state,
-            snapshot,
-            outcome,
-        ),
-        WireEventType::Move => apply_note_move(
-            transaction,
-            vault,
-            device_id,
-            change,
-            note_id,
-            note,
-            state,
-            snapshot,
-            outcome,
-        ),
-        WireEventType::Trash => apply_note_trash(
-            transaction,
-            vault,
-            device_id,
-            trash_dir,
-            change,
-            note_id,
-            note,
-            state,
-            snapshot,
-            outcome,
-        ),
-        WireEventType::Restore => apply_note_restore(
-            transaction,
-            vault,
-            device_id,
-            change,
-            note_id,
-            note,
-            state,
-            snapshot,
-            outcome,
-        ),
-        WireEventType::Purge => apply_note_purge(
-            transaction,
-            vault,
-            device_id,
-            change,
-            note_id,
-            note,
-            state,
-            snapshot,
-            outcome,
-        ),
-    }
+    Ok(LoadedNoteState {
+        note_id,
+        note,
+        sync_state,
+        snapshot,
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn apply_asset_change(
+fn load_asset_state(
     transaction: &Transaction<'_>,
-    vault: &VaultRoot,
-    device_id: &DeviceId,
-    clock: &dyn Clock,
-    trash_dir: &RelativePath,
     change: &SyncChange,
-    outcome: &mut PullApplyOutcome,
-) -> SyncResult<()> {
+) -> SyncResult<LoadedAssetState> {
     let asset_id = AssetId::new(&change.item_id);
     let asset = AssetRepo::get_asset(transaction, &asset_id)?;
-    let state = SyncStateRepo::get_asset_sync_state(transaction, &asset_id)?;
-    let snapshot = asset_snapshot(asset.as_ref(), state.as_ref());
+    let sync_state = SyncStateRepo::get_asset_sync_state(transaction, &asset_id)?;
+    let snapshot = asset_snapshot(asset.as_ref(), sync_state.as_ref());
+
+    Ok(LoadedAssetState {
+        asset_id,
+        asset,
+        sync_state,
+        snapshot,
+    })
+}
+
+fn apply_note_change(workspace: &mut PullWorkspace<'_, '_>, change: &SyncChange) -> SyncResult<()> {
+    let loaded = load_note_state(workspace.transaction, change)?;
 
     match change.event_type {
-        WireEventType::Create | WireEventType::Update => apply_asset_content_change(
-            transaction,
-            vault,
-            device_id,
-            clock,
-            change,
-            asset_id,
-            asset,
-            state,
-            snapshot,
-            outcome,
-        ),
-        WireEventType::Move => apply_asset_move(
-            transaction,
-            vault,
-            device_id,
-            change,
-            asset_id,
-            asset,
-            state,
-            snapshot,
-            outcome,
-        ),
-        WireEventType::Trash => apply_asset_trash(
-            transaction,
-            vault,
-            device_id,
-            trash_dir,
-            change,
-            asset_id,
-            asset,
-            state,
-            snapshot,
-            outcome,
-        ),
-        WireEventType::Restore => apply_asset_restore(
-            transaction,
-            vault,
-            device_id,
-            change,
-            asset_id,
-            asset,
-            state,
-            snapshot,
-            outcome,
-        ),
-        WireEventType::Purge => apply_asset_purge(
-            transaction,
-            vault,
-            device_id,
-            change,
-            asset_id,
-            asset,
-            state,
-            snapshot,
-            outcome,
-        ),
+        WireEventType::Create | WireEventType::Update => {
+            apply_note_content_change(workspace, change, &loaded)
+        }
+        WireEventType::Move => apply_note_move(workspace, change, &loaded),
+        WireEventType::Trash => apply_note_trash(workspace, change, &loaded),
+        WireEventType::Restore => apply_note_restore(workspace, change, &loaded),
+        WireEventType::Purge => apply_note_purge(workspace, change, &loaded),
     }
 }
 
-#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
-fn apply_note_content_change(
-    transaction: &Transaction<'_>,
-    vault: &VaultRoot,
-    device_id: &DeviceId,
-    clock: &dyn Clock,
+fn apply_asset_change(
+    workspace: &mut PullWorkspace<'_, '_>,
     change: &SyncChange,
-    note_id: NoteId,
-    note: Option<NoteRecord>,
-    state: Option<NoteSyncState>,
-    snapshot: SyncStateSnapshot,
-    outcome: &mut PullApplyOutcome,
+) -> SyncResult<()> {
+    let loaded = load_asset_state(workspace.transaction, change)?;
+
+    match change.event_type {
+        WireEventType::Create | WireEventType::Update => {
+            apply_asset_content_change(workspace, change, &loaded)
+        }
+        WireEventType::Move => apply_asset_move(workspace, change, &loaded),
+        WireEventType::Trash => apply_asset_trash(workspace, change, &loaded),
+        WireEventType::Restore => apply_asset_restore(workspace, change, &loaded),
+        WireEventType::Purge => apply_asset_purge(workspace, change, &loaded),
+    }
+}
+
+fn apply_note_content_change(
+    workspace: &mut PullWorkspace<'_, '_>,
+    change: &SyncChange,
+    loaded: &LoadedNoteState,
 ) -> SyncResult<()> {
     let path = required_path(change)?;
     let content = required_note_content(change)?;
     let content_hash = required_content_hash(change)?;
     let server_revision = required_server_revision(change)?;
 
-    if snapshot.last_local_hash.is_some() && detect_pull_conflict(&snapshot, change) {
-        let local_path = note
+    if loaded.snapshot.last_local_hash.is_some() && detect_pull_conflict(&loaded.snapshot, change) {
+        let local_path = loaded
+            .note
             .as_ref()
             .map(|record| record.current_path.clone())
             .or_else(|| {
-                state
+                loaded
+                    .sync_state
                     .as_ref()
                     .and_then(|record| record.last_synced_path.clone())
             })
             .unwrap_or_else(|| path.clone());
         write_conflict_copy(
-            vault,
+            workspace.vault,
             ConflictCopyInput {
                 local_path: &local_path,
                 remote_bytes: content.as_bytes(),
-                clock,
+                clock: workspace.clock,
             },
         )?;
         upsert_note_conflict_state(
-            transaction,
-            device_id,
-            &note_id,
-            note.as_ref(),
-            state.as_ref(),
-            Some("remote content conflicts with local changes"),
+            workspace.transaction,
+            &NoteConflictStateInput {
+                device_id: workspace.device_id,
+                note_id: &loaded.note_id,
+                note: loaded.note.as_ref(),
+                sync_state: loaded.sync_state.as_ref(),
+                message: Some("remote content conflicts with local changes"),
+            },
         )?;
-        outcome.conflicts.push(ConflictedItem {
+        workspace.outcome.conflicts.push(ConflictedItem {
             item_type: ItemType::Note,
-            item_id: note_id.to_string(),
+            item_id: loaded.note_id.to_string(),
             message: Some("remote content conflicts with local changes".to_string()),
         });
         return Ok(());
     }
 
-    ensure_file_content(vault, &path, content.as_bytes())?;
+    ensure_file_content(workspace.vault, &path, content.as_bytes())?;
 
-    let absolute_path = vault.join(path.as_str());
+    let absolute_path = workspace.vault.join(path.as_str());
     let parsed = parse_note_file(&absolute_path).map_err(map_note_parse_error)?;
     let frontmatter = parsed.frontmatter.ok_or_else(|| {
         protocol_error(format!(
             "pulled note {} is missing frontmatter",
-            note_id.as_str()
+            loaded.note_id.as_str()
         ))
     })?;
-    validate_note_identity(&note_id, &frontmatter)?;
+    validate_note_identity(&loaded.note_id, &frontmatter)?;
     let title = frontmatter.title.clone().ok_or_else(|| {
         protocol_error(format!(
             "pulled note {} is missing a title",
-            note_id.as_str()
+            loaded.note_id.as_str()
         ))
     })?;
     let frontmatter_json = serde_json::to_string(&frontmatter)
         .map_err(|source| SyncError::Transport(Box::new(source)))?;
 
     NoteRepo::upsert_note_with_server_revision(
-        transaction,
-        &note_id,
+        workspace.transaction,
+        &loaded.note_id,
         &path,
         &title,
         &content_hash,
@@ -379,10 +328,10 @@ fn apply_note_content_change(
         &server_revision,
     )?;
     SyncStateRepo::upsert_note_sync_state(
-        transaction,
+        workspace.transaction,
         &NoteSyncState {
-            item_id: note_id.clone(),
-            device_id: device_id.clone(),
+            item_id: loaded.note_id.clone(),
+            device_id: workspace.device_id.clone(),
             last_local_hash: Some(content_hash.clone()),
             last_synced_hash: Some(content_hash),
             last_synced_path: Some(path),
@@ -393,68 +342,64 @@ fn apply_note_content_change(
             pending_operation: None,
         },
     )?;
-    outcome.applied += 1;
+    workspace.outcome.applied += 1;
 
     Ok(())
 }
 
-#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 fn apply_asset_content_change(
-    transaction: &Transaction<'_>,
-    vault: &VaultRoot,
-    device_id: &DeviceId,
-    clock: &dyn Clock,
+    workspace: &mut PullWorkspace<'_, '_>,
     change: &SyncChange,
-    asset_id: AssetId,
-    asset: Option<AssetRecord>,
-    state: Option<AssetSyncState>,
-    snapshot: SyncStateSnapshot,
-    outcome: &mut PullApplyOutcome,
+    loaded: &LoadedAssetState,
 ) -> SyncResult<()> {
     let path = required_path(change)?;
     let bytes = required_asset_bytes(change)?;
     let content_hash = required_content_hash(change)?;
     let server_revision = required_server_revision(change)?;
 
-    if snapshot.last_local_hash.is_some() && detect_pull_conflict(&snapshot, change) {
-        let local_path = asset
+    if loaded.snapshot.last_local_hash.is_some() && detect_pull_conflict(&loaded.snapshot, change) {
+        let local_path = loaded
+            .asset
             .as_ref()
             .map(|record| record.current_path.clone())
             .or_else(|| {
-                state
+                loaded
+                    .sync_state
                     .as_ref()
                     .and_then(|record| record.last_synced_path.clone())
             })
             .unwrap_or_else(|| path.clone());
         write_conflict_copy(
-            vault,
+            workspace.vault,
             ConflictCopyInput {
                 local_path: &local_path,
                 remote_bytes: &bytes,
-                clock,
+                clock: workspace.clock,
             },
         )?;
         upsert_asset_conflict_state(
-            transaction,
-            device_id,
-            &asset_id,
-            asset.as_ref(),
-            state.as_ref(),
-            Some("remote content conflicts with local changes"),
+            workspace.transaction,
+            &AssetConflictStateInput {
+                device_id: workspace.device_id,
+                asset_id: &loaded.asset_id,
+                asset: loaded.asset.as_ref(),
+                sync_state: loaded.sync_state.as_ref(),
+                message: Some("remote content conflicts with local changes"),
+            },
         )?;
-        outcome.conflicts.push(ConflictedItem {
+        workspace.outcome.conflicts.push(ConflictedItem {
             item_type: ItemType::Asset,
-            item_id: asset_id.to_string(),
+            item_id: loaded.asset_id.to_string(),
             message: Some("remote content conflicts with local changes".to_string()),
         });
         return Ok(());
     }
 
-    ensure_file_content(vault, &path, &bytes)?;
-    let timestamp = timestamp_now(clock);
-    let existing_asset = asset.as_ref();
+    ensure_file_content(workspace.vault, &path, &bytes)?;
+    let timestamp = timestamp_now(workspace.clock);
+    let existing_asset = loaded.asset.as_ref();
     let record = AssetRecord {
-        asset_id: asset_id.clone(),
+        asset_id: loaded.asset_id.clone(),
         current_path: path.clone(),
         content_hash: content_hash.clone(),
         mime_type: existing_asset.and_then(|record| record.mime_type.clone()),
@@ -469,12 +414,12 @@ fn apply_asset_content_change(
         is_deleted: false,
         server_revision: server_revision.clone(),
     };
-    AssetRepo::upsert_asset(transaction, &record)?;
+    AssetRepo::upsert_asset(workspace.transaction, &record)?;
     SyncStateRepo::upsert_asset_sync_state(
-        transaction,
+        workspace.transaction,
         &AssetSyncState {
-            item_id: asset_id,
-            device_id: device_id.clone(),
+            item_id: loaded.asset_id.clone(),
+            device_id: workspace.device_id.clone(),
             last_local_hash: Some(content_hash.clone()),
             last_synced_hash: Some(content_hash),
             last_synced_path: Some(path),
@@ -485,110 +430,108 @@ fn apply_asset_content_change(
             pending_operation: None,
         },
     )?;
-    outcome.applied += 1;
+    workspace.outcome.applied += 1;
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn apply_note_move(
-    transaction: &Transaction<'_>,
-    vault: &VaultRoot,
-    device_id: &DeviceId,
+    workspace: &mut PullWorkspace<'_, '_>,
     change: &SyncChange,
-    note_id: NoteId,
-    note: Option<NoteRecord>,
-    state: Option<NoteSyncState>,
-    snapshot: SyncStateSnapshot,
-    outcome: &mut PullApplyOutcome,
+    loaded: &LoadedNoteState,
 ) -> SyncResult<()> {
     let path = required_path(change)?;
     let server_revision = required_server_revision(change)?;
-    let note = note.ok_or_else(|| SyncError::ItemMissing(note_id.to_string()))?;
-    let metadata = NoteRepo::get_note_metadata(transaction, &note_id)?
-        .ok_or_else(|| SyncError::ItemMissing(note_id.to_string()))?;
+    let note = loaded
+        .note
+        .as_ref()
+        .ok_or_else(|| SyncError::ItemMissing(loaded.note_id.to_string()))?;
+    let metadata = NoteRepo::get_note_metadata(workspace.transaction, &loaded.note_id)?
+        .ok_or_else(|| SyncError::ItemMissing(loaded.note_id.to_string()))?;
 
-    if !local_unchanged_since_sync(&snapshot) {
+    if !local_unchanged_since_sync(&loaded.snapshot) {
         upsert_note_conflict_state(
-            transaction,
-            device_id,
-            &note_id,
-            Some(&note),
-            state.as_ref(),
-            Some("remote move conflicts with local changes"),
+            workspace.transaction,
+            &NoteConflictStateInput {
+                device_id: workspace.device_id,
+                note_id: &loaded.note_id,
+                note: Some(note),
+                sync_state: loaded.sync_state.as_ref(),
+                message: Some("remote move conflicts with local changes"),
+            },
         )?;
-        outcome.conflicts.push(ConflictedItem {
+        workspace.outcome.conflicts.push(ConflictedItem {
             item_type: ItemType::Note,
-            item_id: note_id.to_string(),
+            item_id: loaded.note_id.to_string(),
             message: Some("remote move conflicts with local changes".to_string()),
         });
         return Ok(());
     }
 
-    move_path_if_needed(vault, &note.current_path, &path)?;
+    move_path_if_needed(workspace.vault, &note.current_path, &path)?;
     upsert_note_metadata_row(
-        transaction,
-        &note_id,
-        &path,
-        &note,
-        &metadata,
-        None,
-        false,
-        &server_revision,
+        workspace.transaction,
+        &loaded.note_id,
+        &NoteMetadataRow {
+            path: &path,
+            note,
+            metadata: &metadata,
+            trashed_at: None,
+            is_trashed: false,
+            server_revision: &server_revision,
+        },
     )?;
     SyncStateRepo::upsert_note_sync_state(
-        transaction,
+        workspace.transaction,
         &synced_note_state(
-            device_id,
-            &note_id,
+            workspace.device_id,
+            &loaded.note_id,
             &note.content_hash,
             path,
             server_revision,
         ),
     )?;
-    outcome.applied += 1;
+    workspace.outcome.applied += 1;
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn apply_asset_move(
-    transaction: &Transaction<'_>,
-    vault: &VaultRoot,
-    device_id: &DeviceId,
+    workspace: &mut PullWorkspace<'_, '_>,
     change: &SyncChange,
-    asset_id: AssetId,
-    asset: Option<AssetRecord>,
-    state: Option<AssetSyncState>,
-    snapshot: SyncStateSnapshot,
-    outcome: &mut PullApplyOutcome,
+    loaded: &LoadedAssetState,
 ) -> SyncResult<()> {
     let path = required_path(change)?;
     let server_revision = required_server_revision(change)?;
-    let asset = asset.ok_or_else(|| SyncError::ItemMissing(asset_id.to_string()))?;
+    let asset = loaded
+        .asset
+        .as_ref()
+        .ok_or_else(|| SyncError::ItemMissing(loaded.asset_id.to_string()))?;
 
-    if !local_unchanged_since_sync(&snapshot) {
+    if !local_unchanged_since_sync(&loaded.snapshot) {
         upsert_asset_conflict_state(
-            transaction,
-            device_id,
-            &asset_id,
-            Some(&asset),
-            state.as_ref(),
-            Some("remote move conflicts with local changes"),
+            workspace.transaction,
+            &AssetConflictStateInput {
+                device_id: workspace.device_id,
+                asset_id: &loaded.asset_id,
+                asset: Some(asset),
+                sync_state: loaded.sync_state.as_ref(),
+                message: Some("remote move conflicts with local changes"),
+            },
         )?;
-        outcome.conflicts.push(ConflictedItem {
+        workspace.outcome.conflicts.push(ConflictedItem {
             item_type: ItemType::Asset,
-            item_id: asset_id.to_string(),
+            item_id: loaded.asset_id.to_string(),
             message: Some("remote move conflicts with local changes".to_string()),
         });
         return Ok(());
     }
 
-    move_path_if_needed(vault, &asset.current_path, &path)?;
+    move_path_if_needed(workspace.vault, &asset.current_path, &path)?;
     AssetRepo::upsert_asset(
-        transaction,
+        workspace.transaction,
         &AssetRecord {
-            asset_id: asset_id.clone(),
+            asset_id: loaded.asset_id.clone(),
             current_path: path.clone(),
             content_hash: asset.content_hash.clone(),
             mime_type: asset.mime_type.clone(),
@@ -603,74 +546,78 @@ fn apply_asset_move(
         },
     )?;
     SyncStateRepo::upsert_asset_sync_state(
-        transaction,
+        workspace.transaction,
         &synced_asset_state(
-            device_id,
-            &asset_id,
+            workspace.device_id,
+            &loaded.asset_id,
             &asset.content_hash,
             path,
             server_revision,
         ),
     )?;
-    outcome.applied += 1;
+    workspace.outcome.applied += 1;
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn apply_note_trash(
-    transaction: &Transaction<'_>,
-    vault: &VaultRoot,
-    device_id: &DeviceId,
-    trash_dir: &RelativePath,
+    workspace: &mut PullWorkspace<'_, '_>,
     change: &SyncChange,
-    note_id: NoteId,
-    note: Option<NoteRecord>,
-    state: Option<NoteSyncState>,
-    snapshot: SyncStateSnapshot,
-    outcome: &mut PullApplyOutcome,
+    loaded: &LoadedNoteState,
 ) -> SyncResult<()> {
     let original_path = required_path(change)?;
     let trashed_at = required_trashed_at(change)?;
     let retention_until = required_retention_until(change)?;
     let server_revision = required_server_revision(change)?;
-    let note = note.ok_or_else(|| SyncError::ItemMissing(note_id.to_string()))?;
-    let metadata = NoteRepo::get_note_metadata(transaction, &note_id)?
-        .ok_or_else(|| SyncError::ItemMissing(note_id.to_string()))?;
+    let note = loaded
+        .note
+        .as_ref()
+        .ok_or_else(|| SyncError::ItemMissing(loaded.note_id.to_string()))?;
+    let metadata = NoteRepo::get_note_metadata(workspace.transaction, &loaded.note_id)?
+        .ok_or_else(|| SyncError::ItemMissing(loaded.note_id.to_string()))?;
 
-    if !local_unchanged_since_sync(&snapshot) {
+    if !local_unchanged_since_sync(&loaded.snapshot) {
         upsert_note_conflict_state(
-            transaction,
-            device_id,
-            &note_id,
-            Some(&note),
-            state.as_ref(),
-            Some("remote trash conflicts with local changes"),
+            workspace.transaction,
+            &NoteConflictStateInput {
+                device_id: workspace.device_id,
+                note_id: &loaded.note_id,
+                note: Some(note),
+                sync_state: loaded.sync_state.as_ref(),
+                message: Some("remote trash conflicts with local changes"),
+            },
         )?;
-        outcome.conflicts.push(ConflictedItem {
+        workspace.outcome.conflicts.push(ConflictedItem {
             item_type: ItemType::Note,
-            item_id: note_id.to_string(),
+            item_id: loaded.note_id.to_string(),
             message: Some("remote trash conflicts with local changes".to_string()),
         });
         return Ok(());
     }
 
-    let local_trash_path = next_trash_path(vault, trash_dir, &original_path, &trashed_at)?;
-    move_path_if_needed(vault, &note.current_path, &local_trash_path)?;
+    let local_trash_path = next_trash_path(
+        workspace.vault,
+        workspace.trash_dir,
+        &original_path,
+        &trashed_at,
+    )?;
+    move_path_if_needed(workspace.vault, &note.current_path, &local_trash_path)?;
     upsert_note_metadata_row(
-        transaction,
-        &note_id,
-        &local_trash_path,
-        &note,
-        &metadata,
-        Some(&trashed_at),
-        true,
-        &server_revision,
+        workspace.transaction,
+        &loaded.note_id,
+        &NoteMetadataRow {
+            path: &local_trash_path,
+            note,
+            metadata: &metadata,
+            trashed_at: Some(trashed_at.as_str()),
+            is_trashed: true,
+            server_revision: &server_revision,
+        },
     )?;
     DeleteRecordRepo::insert_delete_record(
-        transaction,
+        workspace.transaction,
         &DeleteRecord {
-            target: DeleteRecordTarget::Note(note_id.clone()),
+            target: DeleteRecordTarget::Note(loaded.note_id.clone()),
             original_path,
             trashed_at: trashed_at.clone(),
             retention_until,
@@ -679,62 +626,64 @@ fn apply_note_trash(
         },
     )?;
     SyncStateRepo::upsert_note_sync_state(
-        transaction,
+        workspace.transaction,
         &synced_note_state(
-            device_id,
-            &note_id,
+            workspace.device_id,
+            &loaded.note_id,
             &note.content_hash,
             local_trash_path,
             server_revision,
         ),
     )?;
-    outcome.applied += 1;
+    workspace.outcome.applied += 1;
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn apply_asset_trash(
-    transaction: &Transaction<'_>,
-    vault: &VaultRoot,
-    device_id: &DeviceId,
-    trash_dir: &RelativePath,
+    workspace: &mut PullWorkspace<'_, '_>,
     change: &SyncChange,
-    asset_id: AssetId,
-    asset: Option<AssetRecord>,
-    state: Option<AssetSyncState>,
-    snapshot: SyncStateSnapshot,
-    outcome: &mut PullApplyOutcome,
+    loaded: &LoadedAssetState,
 ) -> SyncResult<()> {
     let original_path = required_path(change)?;
     let trashed_at = required_trashed_at(change)?;
     let retention_until = required_retention_until(change)?;
     let server_revision = required_server_revision(change)?;
-    let asset = asset.ok_or_else(|| SyncError::ItemMissing(asset_id.to_string()))?;
+    let asset = loaded
+        .asset
+        .as_ref()
+        .ok_or_else(|| SyncError::ItemMissing(loaded.asset_id.to_string()))?;
 
-    if !local_unchanged_since_sync(&snapshot) {
+    if !local_unchanged_since_sync(&loaded.snapshot) {
         upsert_asset_conflict_state(
-            transaction,
-            device_id,
-            &asset_id,
-            Some(&asset),
-            state.as_ref(),
-            Some("remote trash conflicts with local changes"),
+            workspace.transaction,
+            &AssetConflictStateInput {
+                device_id: workspace.device_id,
+                asset_id: &loaded.asset_id,
+                asset: Some(asset),
+                sync_state: loaded.sync_state.as_ref(),
+                message: Some("remote trash conflicts with local changes"),
+            },
         )?;
-        outcome.conflicts.push(ConflictedItem {
+        workspace.outcome.conflicts.push(ConflictedItem {
             item_type: ItemType::Asset,
-            item_id: asset_id.to_string(),
+            item_id: loaded.asset_id.to_string(),
             message: Some("remote trash conflicts with local changes".to_string()),
         });
         return Ok(());
     }
 
-    let local_trash_path = next_trash_path(vault, trash_dir, &original_path, &trashed_at)?;
-    move_path_if_needed(vault, &asset.current_path, &local_trash_path)?;
+    let local_trash_path = next_trash_path(
+        workspace.vault,
+        workspace.trash_dir,
+        &original_path,
+        &trashed_at,
+    )?;
+    move_path_if_needed(workspace.vault, &asset.current_path, &local_trash_path)?;
     AssetRepo::upsert_asset(
-        transaction,
+        workspace.transaction,
         &AssetRecord {
-            asset_id: asset_id.clone(),
+            asset_id: loaded.asset_id.clone(),
             current_path: local_trash_path.clone(),
             content_hash: asset.content_hash.clone(),
             mime_type: asset.mime_type.clone(),
@@ -749,9 +698,9 @@ fn apply_asset_trash(
         },
     )?;
     DeleteRecordRepo::insert_delete_record(
-        transaction,
+        workspace.transaction,
         &DeleteRecord {
-            target: DeleteRecordTarget::Asset(asset_id.clone()),
+            target: DeleteRecordTarget::Asset(loaded.asset_id.clone()),
             original_path,
             trashed_at: trashed_at.clone(),
             retention_until,
@@ -760,120 +709,119 @@ fn apply_asset_trash(
         },
     )?;
     SyncStateRepo::upsert_asset_sync_state(
-        transaction,
+        workspace.transaction,
         &synced_asset_state(
-            device_id,
-            &asset_id,
+            workspace.device_id,
+            &loaded.asset_id,
             &asset.content_hash,
             local_trash_path,
             server_revision,
         ),
     )?;
-    outcome.applied += 1;
+    workspace.outcome.applied += 1;
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn apply_note_restore(
-    transaction: &Transaction<'_>,
-    vault: &VaultRoot,
-    device_id: &DeviceId,
+    workspace: &mut PullWorkspace<'_, '_>,
     change: &SyncChange,
-    note_id: NoteId,
-    note: Option<NoteRecord>,
-    state: Option<NoteSyncState>,
-    snapshot: SyncStateSnapshot,
-    outcome: &mut PullApplyOutcome,
+    loaded: &LoadedNoteState,
 ) -> SyncResult<()> {
     let path = required_path(change)?;
     let server_revision = required_server_revision(change)?;
-    let note = note.ok_or_else(|| SyncError::ItemMissing(note_id.to_string()))?;
-    let metadata = NoteRepo::get_note_metadata(transaction, &note_id)?
-        .ok_or_else(|| SyncError::ItemMissing(note_id.to_string()))?;
+    let note = loaded
+        .note
+        .as_ref()
+        .ok_or_else(|| SyncError::ItemMissing(loaded.note_id.to_string()))?;
+    let metadata = NoteRepo::get_note_metadata(workspace.transaction, &loaded.note_id)?
+        .ok_or_else(|| SyncError::ItemMissing(loaded.note_id.to_string()))?;
 
-    if !local_unchanged_since_sync(&snapshot) {
+    if !local_unchanged_since_sync(&loaded.snapshot) {
         upsert_note_conflict_state(
-            transaction,
-            device_id,
-            &note_id,
-            Some(&note),
-            state.as_ref(),
-            Some("remote restore conflicts with local changes"),
+            workspace.transaction,
+            &NoteConflictStateInput {
+                device_id: workspace.device_id,
+                note_id: &loaded.note_id,
+                note: Some(note),
+                sync_state: loaded.sync_state.as_ref(),
+                message: Some("remote restore conflicts with local changes"),
+            },
         )?;
-        outcome.conflicts.push(ConflictedItem {
+        workspace.outcome.conflicts.push(ConflictedItem {
             item_type: ItemType::Note,
-            item_id: note_id.to_string(),
+            item_id: loaded.note_id.to_string(),
             message: Some("remote restore conflicts with local changes".to_string()),
         });
         return Ok(());
     }
 
-    move_path_if_needed(vault, &note.current_path, &path)?;
+    move_path_if_needed(workspace.vault, &note.current_path, &path)?;
     upsert_note_metadata_row(
-        transaction,
-        &note_id,
-        &path,
-        &note,
-        &metadata,
-        None,
-        false,
-        &server_revision,
+        workspace.transaction,
+        &loaded.note_id,
+        &NoteMetadataRow {
+            path: &path,
+            note,
+            metadata: &metadata,
+            trashed_at: None,
+            is_trashed: false,
+            server_revision: &server_revision,
+        },
     )?;
-    remove_delete_record_if_not_deleted(transaction, DeleteRecordTarget::Note(note_id.clone()))?;
+    let target = DeleteRecordTarget::Note(loaded.note_id.clone());
+    remove_delete_record_if_not_deleted(workspace.transaction, &target)?;
     SyncStateRepo::upsert_note_sync_state(
-        transaction,
+        workspace.transaction,
         &synced_note_state(
-            device_id,
-            &note_id,
+            workspace.device_id,
+            &loaded.note_id,
             &note.content_hash,
             path,
             server_revision,
         ),
     )?;
-    outcome.applied += 1;
+    workspace.outcome.applied += 1;
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn apply_asset_restore(
-    transaction: &Transaction<'_>,
-    vault: &VaultRoot,
-    device_id: &DeviceId,
+    workspace: &mut PullWorkspace<'_, '_>,
     change: &SyncChange,
-    asset_id: AssetId,
-    asset: Option<AssetRecord>,
-    state: Option<AssetSyncState>,
-    snapshot: SyncStateSnapshot,
-    outcome: &mut PullApplyOutcome,
+    loaded: &LoadedAssetState,
 ) -> SyncResult<()> {
     let path = required_path(change)?;
     let server_revision = required_server_revision(change)?;
-    let asset = asset.ok_or_else(|| SyncError::ItemMissing(asset_id.to_string()))?;
+    let asset = loaded
+        .asset
+        .as_ref()
+        .ok_or_else(|| SyncError::ItemMissing(loaded.asset_id.to_string()))?;
 
-    if !local_unchanged_since_sync(&snapshot) {
+    if !local_unchanged_since_sync(&loaded.snapshot) {
         upsert_asset_conflict_state(
-            transaction,
-            device_id,
-            &asset_id,
-            Some(&asset),
-            state.as_ref(),
-            Some("remote restore conflicts with local changes"),
+            workspace.transaction,
+            &AssetConflictStateInput {
+                device_id: workspace.device_id,
+                asset_id: &loaded.asset_id,
+                asset: Some(asset),
+                sync_state: loaded.sync_state.as_ref(),
+                message: Some("remote restore conflicts with local changes"),
+            },
         )?;
-        outcome.conflicts.push(ConflictedItem {
+        workspace.outcome.conflicts.push(ConflictedItem {
             item_type: ItemType::Asset,
-            item_id: asset_id.to_string(),
+            item_id: loaded.asset_id.to_string(),
             message: Some("remote restore conflicts with local changes".to_string()),
         });
         return Ok(());
     }
 
-    move_path_if_needed(vault, &asset.current_path, &path)?;
+    move_path_if_needed(workspace.vault, &asset.current_path, &path)?;
     AssetRepo::upsert_asset(
-        transaction,
+        workspace.transaction,
         &AssetRecord {
-            asset_id: asset_id.clone(),
+            asset_id: loaded.asset_id.clone(),
             current_path: path.clone(),
             content_hash: asset.content_hash.clone(),
             mime_type: asset.mime_type.clone(),
@@ -887,142 +835,139 @@ fn apply_asset_restore(
             server_revision: server_revision.clone(),
         },
     )?;
-    remove_delete_record_if_not_deleted(transaction, DeleteRecordTarget::Asset(asset_id.clone()))?;
+    let target = DeleteRecordTarget::Asset(loaded.asset_id.clone());
+    remove_delete_record_if_not_deleted(workspace.transaction, &target)?;
     SyncStateRepo::upsert_asset_sync_state(
-        transaction,
+        workspace.transaction,
         &synced_asset_state(
-            device_id,
-            &asset_id,
+            workspace.device_id,
+            &loaded.asset_id,
             &asset.content_hash,
             path,
             server_revision,
         ),
     )?;
-    outcome.applied += 1;
+    workspace.outcome.applied += 1;
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn apply_note_purge(
-    transaction: &Transaction<'_>,
-    vault: &VaultRoot,
-    device_id: &DeviceId,
+    workspace: &mut PullWorkspace<'_, '_>,
     change: &SyncChange,
-    note_id: NoteId,
-    note: Option<NoteRecord>,
-    state: Option<NoteSyncState>,
-    snapshot: SyncStateSnapshot,
-    outcome: &mut PullApplyOutcome,
+    loaded: &LoadedNoteState,
 ) -> SyncResult<()> {
     let deleted_at = required_deleted_at(change)?;
     let server_revision = required_server_revision(change)?;
-    let note = note.ok_or_else(|| SyncError::ItemMissing(note_id.to_string()))?;
+    let note = loaded
+        .note
+        .as_ref()
+        .ok_or_else(|| SyncError::ItemMissing(loaded.note_id.to_string()))?;
 
-    if !local_unchanged_since_sync(&snapshot) {
+    if !local_unchanged_since_sync(&loaded.snapshot) {
         upsert_note_conflict_state(
-            transaction,
-            device_id,
-            &note_id,
-            Some(&note),
-            state.as_ref(),
-            Some("remote purge conflicts with local changes"),
+            workspace.transaction,
+            &NoteConflictStateInput {
+                device_id: workspace.device_id,
+                note_id: &loaded.note_id,
+                note: Some(note),
+                sync_state: loaded.sync_state.as_ref(),
+                message: Some("remote purge conflicts with local changes"),
+            },
         )?;
-        outcome.conflicts.push(ConflictedItem {
+        workspace.outcome.conflicts.push(ConflictedItem {
             item_type: ItemType::Note,
-            item_id: note_id.to_string(),
+            item_id: loaded.note_id.to_string(),
             message: Some("remote purge conflicts with local changes".to_string()),
         });
         return Ok(());
     }
 
-    remove_file_if_present(vault, &note.current_path)?;
+    remove_file_if_present(workspace.vault, &note.current_path)?;
     NoteRepo::mark_deleted_with_server_revision(
-        transaction,
-        &note_id,
+        workspace.transaction,
+        &loaded.note_id,
         &deleted_at,
         &server_revision,
     )?;
     DeleteRecordRepo::mark_deleted(
-        transaction,
-        note_id.as_str(),
+        workspace.transaction,
+        loaded.note_id.as_str(),
         ItemType::Note,
         &deleted_at,
         Some(&server_revision),
     )?;
     SyncStateRepo::upsert_note_sync_state(
-        transaction,
+        workspace.transaction,
         &synced_note_state(
-            device_id,
-            &note_id,
+            workspace.device_id,
+            &loaded.note_id,
             &note.content_hash,
-            note.current_path,
+            note.current_path.clone(),
             server_revision,
         ),
     )?;
-    outcome.applied += 1;
+    workspace.outcome.applied += 1;
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn apply_asset_purge(
-    transaction: &Transaction<'_>,
-    vault: &VaultRoot,
-    device_id: &DeviceId,
+    workspace: &mut PullWorkspace<'_, '_>,
     change: &SyncChange,
-    asset_id: AssetId,
-    asset: Option<AssetRecord>,
-    state: Option<AssetSyncState>,
-    snapshot: SyncStateSnapshot,
-    outcome: &mut PullApplyOutcome,
+    loaded: &LoadedAssetState,
 ) -> SyncResult<()> {
     let deleted_at = required_deleted_at(change)?;
     let server_revision = required_server_revision(change)?;
-    let asset = asset.ok_or_else(|| SyncError::ItemMissing(asset_id.to_string()))?;
+    let asset = loaded
+        .asset
+        .as_ref()
+        .ok_or_else(|| SyncError::ItemMissing(loaded.asset_id.to_string()))?;
 
-    if !local_unchanged_since_sync(&snapshot) {
+    if !local_unchanged_since_sync(&loaded.snapshot) {
         upsert_asset_conflict_state(
-            transaction,
-            device_id,
-            &asset_id,
-            Some(&asset),
-            state.as_ref(),
-            Some("remote purge conflicts with local changes"),
+            workspace.transaction,
+            &AssetConflictStateInput {
+                device_id: workspace.device_id,
+                asset_id: &loaded.asset_id,
+                asset: Some(asset),
+                sync_state: loaded.sync_state.as_ref(),
+                message: Some("remote purge conflicts with local changes"),
+            },
         )?;
-        outcome.conflicts.push(ConflictedItem {
+        workspace.outcome.conflicts.push(ConflictedItem {
             item_type: ItemType::Asset,
-            item_id: asset_id.to_string(),
+            item_id: loaded.asset_id.to_string(),
             message: Some("remote purge conflicts with local changes".to_string()),
         });
         return Ok(());
     }
 
-    remove_file_if_present(vault, &asset.current_path)?;
+    remove_file_if_present(workspace.vault, &asset.current_path)?;
     AssetRepo::mark_deleted_with_server_revision(
-        transaction,
-        &asset_id,
+        workspace.transaction,
+        &loaded.asset_id,
         &deleted_at,
         &server_revision,
     )?;
     DeleteRecordRepo::mark_deleted(
-        transaction,
-        asset_id.as_str(),
+        workspace.transaction,
+        loaded.asset_id.as_str(),
         ItemType::Asset,
         &deleted_at,
         Some(&server_revision),
     )?;
     SyncStateRepo::upsert_asset_sync_state(
-        transaction,
+        workspace.transaction,
         &synced_asset_state(
-            device_id,
-            &asset_id,
+            workspace.device_id,
+            &loaded.asset_id,
             &asset.content_hash,
-            asset.current_path,
+            asset.current_path.clone(),
             server_revision,
         ),
     )?;
-    outcome.applied += 1;
+    workspace.outcome.applied += 1;
 
     Ok(())
 }
@@ -1102,31 +1047,32 @@ fn synced_asset_state(
 
 fn upsert_note_conflict_state(
     transaction: &Transaction<'_>,
-    device_id: &DeviceId,
-    note_id: &NoteId,
-    note: Option<&NoteRecord>,
-    state: Option<&NoteSyncState>,
-    message: Option<&str>,
+    input: &NoteConflictStateInput<'_>,
 ) -> SyncResult<()> {
     SyncStateRepo::upsert_note_sync_state(
         transaction,
         &NoteSyncState {
-            item_id: note_id.clone(),
-            device_id: device_id.clone(),
-            last_local_hash: state
+            item_id: input.note_id.clone(),
+            device_id: input.device_id.clone(),
+            last_local_hash: input
+                .sync_state
                 .and_then(|record| record.last_local_hash.clone())
-                .or_else(|| note.map(|record| record.content_hash.clone())),
-            last_synced_hash: state.and_then(|record| record.last_synced_hash.clone()),
-            last_synced_path: state
+                .or_else(|| input.note.map(|record| record.content_hash.clone())),
+            last_synced_hash: input
+                .sync_state
+                .and_then(|record| record.last_synced_hash.clone()),
+            last_synced_path: input
+                .sync_state
                 .and_then(|record| record.last_synced_path.clone())
-                .or_else(|| note.map(|record| record.current_path.clone())),
-            last_known_server_revision: state
+                .or_else(|| input.note.map(|record| record.current_path.clone())),
+            last_known_server_revision: input
+                .sync_state
                 .and_then(|record| record.last_known_server_revision.clone())
-                .or_else(|| note.map(|record| record.server_revision.clone())),
+                .or_else(|| input.note.map(|record| record.server_revision.clone())),
             sync_status: SyncStatus::Conflict,
             last_sync_attempt_at: None,
-            last_sync_error: message.map(ToOwned::to_owned),
-            pending_operation: state.and_then(|record| record.pending_operation),
+            last_sync_error: input.message.map(ToOwned::to_owned),
+            pending_operation: input.sync_state.and_then(|record| record.pending_operation),
         },
     )?;
 
@@ -1135,31 +1081,32 @@ fn upsert_note_conflict_state(
 
 fn upsert_asset_conflict_state(
     transaction: &Transaction<'_>,
-    device_id: &DeviceId,
-    asset_id: &AssetId,
-    asset: Option<&AssetRecord>,
-    state: Option<&AssetSyncState>,
-    message: Option<&str>,
+    input: &AssetConflictStateInput<'_>,
 ) -> SyncResult<()> {
     SyncStateRepo::upsert_asset_sync_state(
         transaction,
         &AssetSyncState {
-            item_id: asset_id.clone(),
-            device_id: device_id.clone(),
-            last_local_hash: state
+            item_id: input.asset_id.clone(),
+            device_id: input.device_id.clone(),
+            last_local_hash: input
+                .sync_state
                 .and_then(|record| record.last_local_hash.clone())
-                .or_else(|| asset.map(|record| record.content_hash.clone())),
-            last_synced_hash: state.and_then(|record| record.last_synced_hash.clone()),
-            last_synced_path: state
+                .or_else(|| input.asset.map(|record| record.content_hash.clone())),
+            last_synced_hash: input
+                .sync_state
+                .and_then(|record| record.last_synced_hash.clone()),
+            last_synced_path: input
+                .sync_state
                 .and_then(|record| record.last_synced_path.clone())
-                .or_else(|| asset.map(|record| record.current_path.clone())),
-            last_known_server_revision: state
+                .or_else(|| input.asset.map(|record| record.current_path.clone())),
+            last_known_server_revision: input
+                .sync_state
                 .and_then(|record| record.last_known_server_revision.clone())
-                .or_else(|| asset.map(|record| record.server_revision.clone())),
+                .or_else(|| input.asset.map(|record| record.server_revision.clone())),
             sync_status: SyncStatus::Conflict,
             last_sync_attempt_at: None,
-            last_sync_error: message.map(ToOwned::to_owned),
-            pending_operation: state.and_then(|record| record.pending_operation),
+            last_sync_error: input.message.map(ToOwned::to_owned),
+            pending_operation: input.sync_state.and_then(|record| record.pending_operation),
         },
     )?;
 
@@ -1169,25 +1116,20 @@ fn upsert_asset_conflict_state(
 fn upsert_note_metadata_row(
     transaction: &Transaction<'_>,
     note_id: &NoteId,
-    path: &RelativePath,
-    note: &NoteRecord,
-    metadata: &NoteIndexedMetadata,
-    trashed_at: Option<&str>,
-    is_trashed: bool,
-    server_revision: &ServerRevision,
+    row: &NoteMetadataRow<'_>,
 ) -> SyncResult<()> {
     NoteRepo::upsert_note_with_server_revision(
         transaction,
         note_id,
-        path,
-        &metadata.title,
-        &note.content_hash,
-        &metadata.frontmatter_json,
-        &note.created_at,
-        &note.updated_at,
-        trashed_at,
-        is_trashed,
-        server_revision,
+        row.path,
+        &row.metadata.title,
+        &row.note.content_hash,
+        &row.metadata.frontmatter_json,
+        &row.note.created_at,
+        &row.note.updated_at,
+        row.trashed_at,
+        row.is_trashed,
+        row.server_revision,
     )?;
 
     Ok(())
@@ -1352,12 +1294,12 @@ fn build_collision_name(
 
 fn remove_delete_record_if_not_deleted(
     transaction: &Transaction<'_>,
-    target: DeleteRecordTarget,
+    target: &DeleteRecordTarget,
 ) -> SyncResult<()> {
-    if let Some(record) = DeleteRecordRepo::get_delete_record(transaction, &target)?
+    if let Some(record) = DeleteRecordRepo::get_delete_record(transaction, target)?
         && record.deleted_at.is_none()
     {
-        DeleteRecordRepo::delete_delete_record(transaction, &target)?;
+        DeleteRecordRepo::delete_delete_record(transaction, target)?;
     }
 
     Ok(())

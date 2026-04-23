@@ -20,7 +20,7 @@ pub use error::{SyncError, SyncResult};
 #[rustfmt::skip]
 pub use plan::{PlannerContext, PlannedOp, PlannedOperation, plan_local_changes};
 #[rustfmt::skip]
-pub use pull::{PullApplyOutcome, apply_pull_response};
+pub use pull::{PullApplyContext, PullApplyOutcome, apply_pull_response};
 #[rustfmt::skip]
 pub use push::{PushApplyOutcome, apply_push_response, build_push_request};
 #[rustfmt::skip]

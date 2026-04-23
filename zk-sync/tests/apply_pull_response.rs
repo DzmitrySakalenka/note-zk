@@ -173,16 +173,17 @@ fn apply(
     vault: &TempDir,
     response: &SyncPullResponse,
 ) -> Result<zk_sync::pull::PullApplyOutcome, SyncError> {
-    apply_pull_response(
-        PullApplyContext {
-            conn: connection,
-            vault: vault.path(),
-            device_id: &device_id(),
-            clock: &fixed_clock(),
-            trash_dir: &trash_dir(),
-        },
-        response,
-    )
+    let local_device_id = device_id();
+    let local_clock = fixed_clock();
+    let local_trash_dir = trash_dir();
+    let ctx = PullApplyContext {
+        vault: vault.path(),
+        device_id: &local_device_id,
+        clock: &local_clock,
+        trash_dir: &local_trash_dir,
+    };
+
+    apply_pull_response(connection, &ctx, response)
 }
 
 #[test]

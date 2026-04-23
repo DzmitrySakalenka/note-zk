@@ -143,16 +143,13 @@ pub async fn pull_and_apply(
         let mut request = plan_empty_local_bootstrap(device_id);
         request.cursor = cursor;
         let response = transport.pull(&request).await?;
-        let batch = apply_pull_response(
-            PullApplyContext {
-                conn,
-                vault,
-                device_id,
-                clock: &sync_clock,
-                trash_dir,
-            },
-            &response,
-        )?;
+        let pull_ctx = PullApplyContext {
+            vault,
+            device_id,
+            clock: &sync_clock,
+            trash_dir,
+        };
+        let batch = apply_pull_response(conn, &pull_ctx, &response)?;
 
         aggregate.applied = aggregate.applied.saturating_add(batch.applied);
         aggregate.conflicts.extend(batch.conflicts);
