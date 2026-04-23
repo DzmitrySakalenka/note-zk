@@ -2,8 +2,7 @@
 
 use std::path::Path;
 
-use zk_app::AppError;
-use zk_domain::{ItemKind, TargetSelector, id::RelativePath};
+use zk_app::{AppError, ItemKind, RelativePath, TargetSelector};
 
 /// Handles the `doctor` subcommand.
 pub mod doctor;

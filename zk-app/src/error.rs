@@ -3,6 +3,7 @@ use std::{io, path::PathBuf};
 use thiserror::Error;
 use zk_domain::id::{NoteId, RelativePath};
 use zk_index::IndexError;
+use zk_sync::SyncError;
 use zk_vault::error::VaultError;
 
 use crate::config::{ConfigValidationError, GlobalConfigError, VaultConfigError};
@@ -34,6 +35,25 @@ pub enum AppError {
     /// Effective config merge/validation failure.
     #[error("while attempting to validate effective config: {0}")]
     ConfigValidation(#[from] ConfigValidationError),
+    /// Sync transport or local sync-state workflow failure.
+    #[error("while attempting to perform sync workflow: {0}")]
+    Sync(#[from] SyncError),
+    /// Retention arithmetic overflowed the representable chrono range.
+    #[error(
+        "while attempting to compute retention timestamp from {base}: adding {days} days overflowed representable datetime range"
+    )]
+    RetentionArithmeticOverflow {
+        /// Base timestamp used for retention arithmetic.
+        base: String,
+        /// Effective clamped retention window in days.
+        days: u32,
+    },
+    /// Status summary count overflowed the public `u32` output contract.
+    #[error("while attempting to compute status summary: {field} exceeds supported u32 range")]
+    StatusCountOverflow {
+        /// Summary field whose count did not fit in the status output type.
+        field: &'static str,
+    },
     /// Generic path-scoped I/O failure.
     #[error(
         "while attempting to access path {path_display}: {source}",
@@ -45,6 +65,12 @@ pub enum AppError {
         /// Source I/O error.
         #[source]
         source: io::Error,
+    },
+    /// App-layer invariant was violated after a local lifecycle write.
+    #[error("while attempting to maintain local lifecycle invariants: {context}")]
+    InvariantViolation {
+        /// Human-readable description of the violated local invariant.
+        context: String,
     },
     /// Write blocked by immutable folder policy.
     #[error("while attempting to write item at {path}: folder is immutable")]

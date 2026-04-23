@@ -16,6 +16,16 @@ SET
     is_deleted = 1
 WHERE note_id = ?1
 ";
+const MARK_NOTE_DELETED_WITH_SERVER_REVISION: &str = r"
+UPDATE notes_index
+SET
+    trashed_at = NULL,
+    deleted_at = ?2,
+    is_trashed = 0,
+    is_deleted = 1,
+    server_revision = ?3
+WHERE note_id = ?1
+";
 const INSERT_OR_UPDATE_NOTE: &str = r"
 INSERT INTO notes_index (
     note_id,
@@ -42,6 +52,35 @@ ON CONFLICT(note_id) DO UPDATE SET
     updated_at = excluded.updated_at,
     trashed_at = excluded.trashed_at,
     is_trashed = excluded.is_trashed
+";
+const INSERT_OR_UPDATE_NOTE_WITH_SERVER_REVISION: &str = r"
+INSERT INTO notes_index (
+    note_id,
+    current_path,
+    title,
+    content_hash,
+    frontmatter_json,
+    created_at,
+    updated_at,
+    trashed_at,
+    deleted_at,
+    is_trashed,
+    is_deleted,
+    last_editor_device_id,
+    server_revision
+) VALUES (
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, 0, NULL, ?10
+)
+ON CONFLICT(note_id) DO UPDATE SET
+    current_path = excluded.current_path,
+    title = excluded.title,
+    content_hash = excluded.content_hash,
+    frontmatter_json = excluded.frontmatter_json,
+    updated_at = excluded.updated_at,
+    trashed_at = excluded.trashed_at,
+    is_trashed = excluded.is_trashed,
+    is_deleted = excluded.is_deleted,
+    server_revision = excluded.server_revision
 ";
 const DELETE_NOTE_BY_ID: &str = "DELETE FROM notes_index WHERE note_id = ?1";
 const SELECT_NOTE_BY_ID: &str = r"
@@ -101,12 +140,23 @@ const SELECT_ALIASES_FOR_NOTE: &str =
     "SELECT alias FROM note_aliases WHERE note_id = ?1 ORDER BY alias ASC";
 const SELECT_NOTES_BY_TAG: &str =
     "SELECT note_id FROM note_tags WHERE tag = ?1 ORDER BY note_id ASC";
+const SELECT_NOTE_METADATA_BY_ID: &str =
+    "SELECT title, frontmatter_json FROM notes_index WHERE note_id = ?1 LIMIT 1";
 const COUNT_NOTES_SQL: &str = "SELECT COUNT(*) FROM notes_index";
 const SAVEPOINT_REPLACE_TAGS: &str = "note_repo_replace_tags";
 const SAVEPOINT_REPLACE_ALIASES: &str = "note_repo_replace_aliases";
 
 /// Repository for persisted note rows and note-owned derived tables.
 pub struct NoteRepo;
+
+/// Indexed note metadata preserved alongside the main note row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteIndexedMetadata {
+    /// Effective title stored in the index.
+    pub title: String,
+    /// Serialized frontmatter JSON stored in the index.
+    pub frontmatter_json: String,
+}
 
 impl NoteRepo {
     /// Returns the total number of note rows in `notes_index`.
@@ -161,6 +211,47 @@ impl NoteRepo {
         })
     }
 
+    /// Inserts or replaces one note row while also updating `server_revision`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if the `SQLite` upsert fails.
+    #[allow(clippy::too_many_arguments)]
+    pub fn upsert_note_with_server_revision(
+        conn: &Connection,
+        note_id: &NoteId,
+        path: &RelativePath,
+        title: &str,
+        content_hash: &ContentHash,
+        frontmatter_json: &str,
+        created_at: &str,
+        updated_at: &str,
+        trashed_at: Option<&str>,
+        is_trashed: bool,
+        server_revision: &ServerRevision,
+    ) -> Result<(), IndexError> {
+        conn.execute(
+            INSERT_OR_UPDATE_NOTE_WITH_SERVER_REVISION,
+            rusqlite::params![
+                note_id.as_str(),
+                path.as_str(),
+                title,
+                content_hash.as_str(),
+                frontmatter_json,
+                created_at,
+                updated_at,
+                trashed_at,
+                i64::from(is_trashed),
+                server_revision.value(),
+            ],
+        )
+        .map(|_| ())
+        .map_err(|source| IndexError::Sqlite {
+            source,
+            context: "upsert note with server revision".to_string(),
+        })
+    }
+
     /// Deletes one note row by `note_id`.
     ///
     /// # Errors
@@ -196,6 +287,28 @@ impl NoteRepo {
         })
     }
 
+    /// Marks one note row as deleted and refreshes its `server_revision`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if the update fails.
+    pub fn mark_deleted_with_server_revision(
+        conn: &Connection,
+        note_id: &NoteId,
+        deleted_at: &str,
+        server_revision: &ServerRevision,
+    ) -> Result<(), IndexError> {
+        conn.execute(
+            MARK_NOTE_DELETED_WITH_SERVER_REVISION,
+            rusqlite::params![note_id.as_str(), deleted_at, server_revision.value()],
+        )
+        .map(|_| ())
+        .map_err(|source| IndexError::Sqlite {
+            source,
+            context: "mark note deleted with server revision".to_string(),
+        })
+    }
+
     /// Fetches one note row by `note_id`.
     ///
     /// # Errors
@@ -208,6 +321,28 @@ impl NoteRepo {
                 source,
                 context: "get note by id".to_string(),
             })
+    }
+
+    /// Fetches indexed title/frontmatter metadata for one note by `note_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if the query fails or row decoding is invalid.
+    pub fn get_note_metadata(
+        conn: &Connection,
+        note_id: &NoteId,
+    ) -> Result<Option<NoteIndexedMetadata>, IndexError> {
+        conn.query_row(SELECT_NOTE_METADATA_BY_ID, [note_id.as_str()], |row| {
+            Ok(NoteIndexedMetadata {
+                title: row.get(0)?,
+                frontmatter_json: row.get(1)?,
+            })
+        })
+        .optional()
+        .map_err(|source| IndexError::Sqlite {
+            source,
+            context: "get note indexed metadata".to_string(),
+        })
     }
 
     /// Fetches one note row by current vault-relative path.

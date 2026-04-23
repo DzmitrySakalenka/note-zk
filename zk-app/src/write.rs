@@ -11,10 +11,17 @@ use std::{
     path::Path,
 };
 
+use rusqlite::Connection;
 use serde::Serialize;
-use zk_domain::write::UpdateNoteRequest;
-use zk_domain::{config::EffectiveConfig, id::NoteId, write::CreateNoteRequest};
-use zk_domain::{id::RelativePath, note::NoteFrontmatter, write::BatchWriteRequest};
+use zk_domain::{
+    config::EffectiveConfig,
+    id::{ContentHash, DeviceId, NoteId, RelativePath},
+    note::NoteFrontmatter,
+    sync::{PendingOperation, SyncStatus},
+    sync_state::NoteSyncState,
+    write::{BatchWriteRequest, CreateNoteRequest, UpdateNoteRequest},
+};
+use zk_index::{IndexError, NoteRepo, SyncStateRepo};
 
 use crate::{
     AppError, Result, config::validate_effective_config, ensure_writable, is_path_immutable,
@@ -59,15 +66,25 @@ pub struct BatchWriteOutcome {
     pub note_path_index_builds: usize,
 }
 
+/// Shared local index inputs required to persist note writes.
+pub struct WriteContext<'a> {
+    /// Mutable `SQLite` connection used for note-row and sync-state persistence.
+    pub conn: &'a mut Connection,
+    /// Local device identity that owns the refreshed `last_local_hash`.
+    pub device_id: &'a DeviceId,
+}
+
 /// Creates a new note file under `vault_root` using atomic file replacement semantics.
 ///
 /// # Errors
 ///
 /// Returns [`AppError`] when the target folder is immutable, path existence checks
-/// fail, parent directory creation fails, or note rendering/write operations fail.
+/// fail, parent directory creation fails, note rendering/write operations fail,
+/// or local index persistence fails.
 pub fn create_note(
     vault_root: &Path,
     config: &EffectiveConfig,
+    write_ctx: &mut WriteContext<'_>,
     request: CreateNoteRequest,
 ) -> Result<NoteId> {
     ensure_writable(&request.path, &config.folders)?;
@@ -109,6 +126,7 @@ pub fn create_note(
     let rendered = zk_vault::render_note_file(&frontmatter, &request.body_markdown)
         .map_err(|source| AppError::NoteRender { source })?;
     zk_vault::atomic_write_file(&absolute_path, rendered.as_bytes())?;
+    persist_written_note(write_ctx, config, &request.path, &frontmatter, &rendered)?;
 
     Ok(final_note_id)
 }
@@ -118,10 +136,11 @@ pub fn create_note(
 /// # Errors
 ///
 /// Returns [`AppError`] when note lookup fails, IDs mismatch, folder policy blocks
-/// writes, or parse/write operations fail.
+/// writes, parse/write operations fail, or local index persistence fails.
 pub fn update_note(
     vault_root: &Path,
     config: &EffectiveConfig,
+    write_ctx: &mut WriteContext<'_>,
     request: UpdateNoteRequest,
     index: Option<&zk_vault::NotePathIndex>,
 ) -> Result<()> {
@@ -147,6 +166,13 @@ pub fn update_note(
         &vault_root.join(relative_path.as_str()),
         rendered.as_bytes(),
     )?;
+    persist_written_note(
+        write_ctx,
+        config,
+        &relative_path,
+        &final_frontmatter,
+        &rendered,
+    )?;
 
     Ok(())
 }
@@ -161,6 +187,7 @@ pub fn update_note(
 pub fn batch_write(
     vault_root: &Path,
     config: &EffectiveConfig,
+    write_ctx: &mut WriteContext<'_>,
     request: BatchWriteRequest,
 ) -> Result<BatchWriteOutcome> {
     validate_effective_config(config)?;
@@ -183,7 +210,7 @@ pub fn batch_write(
             Some(create_request.frontmatter.id.clone())
         };
 
-        match create_note(vault_root, config, create_request) {
+        match create_note(vault_root, config, write_ctx, create_request) {
             Ok(note_id) => {
                 note_path_index.insert(note_id.clone(), create_path);
                 outcome.created.push(note_id);
@@ -199,7 +226,13 @@ pub fn batch_write(
 
     for (request_index, update_request) in request.updates.into_iter().enumerate() {
         let note_id = update_request.note_id.clone();
-        match update_note(vault_root, config, update_request, Some(&note_path_index)) {
+        match update_note(
+            vault_root,
+            config,
+            write_ctx,
+            update_request,
+            Some(&note_path_index),
+        ) {
             Ok(()) => outcome.updated.push(note_id),
             Err(error) => outcome.failures.push(BatchWriteFailure {
                 request_index,
@@ -211,6 +244,85 @@ pub fn batch_write(
     }
 
     Ok(outcome)
+}
+
+fn persist_written_note(
+    write_ctx: &mut WriteContext<'_>,
+    config: &EffectiveConfig,
+    relative_path: &RelativePath,
+    frontmatter: &NoteFrontmatter,
+    rendered: &str,
+) -> Result<()> {
+    let content_hash = ContentHash::from_bytes(rendered.as_bytes());
+    let frontmatter_json = serde_json::to_string(frontmatter)
+        .map_err(|source| AppError::FrontmatterSerialization { source })?;
+    let transaction = write_ctx
+        .conn
+        .transaction()
+        .map_err(|source| app_index_sqlite_error("begin note write transaction", source))?;
+    let existing_note = NoteRepo::get_note(&transaction, &frontmatter.id)?;
+    let is_trashed = path_is_under_trash(relative_path, config);
+    let trashed_at = if is_trashed {
+        existing_note
+            .as_ref()
+            .and_then(|note| note.trashed_at.as_deref())
+    } else {
+        None
+    };
+
+    NoteRepo::upsert_note(
+        &transaction,
+        &frontmatter.id,
+        relative_path,
+        &frontmatter.title,
+        &content_hash,
+        &frontmatter_json,
+        frontmatter.created.as_deref().unwrap_or_default(),
+        frontmatter.updated.as_deref().unwrap_or_default(),
+        trashed_at,
+        is_trashed,
+    )?;
+    upsert_note_local_hash(
+        &transaction,
+        write_ctx.device_id,
+        &frontmatter.id,
+        &content_hash,
+    )?;
+    transaction
+        .commit()
+        .map_err(|source| app_index_sqlite_error("commit note write transaction", source))?;
+
+    Ok(())
+}
+
+fn upsert_note_local_hash(
+    conn: &Connection,
+    device_id: &DeviceId,
+    note_id: &NoteId,
+    content_hash: &ContentHash,
+) -> Result<()> {
+    let next_state = match SyncStateRepo::get_note_sync_state(conn, note_id)? {
+        Some(mut state) => {
+            state.device_id = device_id.clone();
+            state.last_local_hash = Some(content_hash.clone());
+            state
+        }
+        None => NoteSyncState {
+            item_id: note_id.clone(),
+            device_id: device_id.clone(),
+            last_local_hash: Some(content_hash.clone()),
+            last_synced_hash: None,
+            last_synced_path: None,
+            last_known_server_revision: None,
+            sync_status: SyncStatus::PendingUpload,
+            last_sync_attempt_at: None,
+            last_sync_error: None,
+            pending_operation: Some(PendingOperation::Create),
+        },
+    };
+    SyncStateRepo::upsert_note_sync_state(conn, &next_state)?;
+
+    Ok(())
 }
 
 fn validate_vault_root(vault_root: &Path) -> Result<()> {
@@ -276,4 +388,21 @@ fn note_not_found(note_id: &NoteId) -> AppError {
     AppError::NoteNotFound {
         note_id: note_id.clone(),
     }
+}
+
+fn path_is_under_trash(path: &RelativePath, config: &EffectiveConfig) -> bool {
+    let trash_root = config.trash_dir.as_str();
+    let candidate = path.as_str();
+
+    candidate == trash_root
+        || candidate
+            .strip_prefix(trash_root)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+fn app_index_sqlite_error(context: &str, source: rusqlite::Error) -> AppError {
+    AppError::Index(IndexError::Sqlite {
+        source,
+        context: context.to_string(),
+    })
 }

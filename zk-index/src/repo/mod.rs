@@ -9,5 +9,5 @@ pub use assets::AssetRepo;
 pub use delete_records::DeleteRecordRepo;
 pub use devices::DeviceRepo;
 pub use links::LinkRepo;
-pub use notes::NoteRepo;
+pub use notes::{NoteIndexedMetadata, NoteRepo};
 pub use sync_state::SyncStateRepo;

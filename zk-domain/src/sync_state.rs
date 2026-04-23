@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{
     id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     sync::{ItemType, PendingOperation, SyncStatus},
@@ -18,6 +20,8 @@ pub struct SyncState<Id> {
     pub last_local_hash: Option<ContentHash>,
     /// Hash from the last successful sync checkpoint, if available.
     pub last_synced_hash: Option<ContentHash>,
+    /// Path from the last successful sync checkpoint, if available.
+    pub last_synced_path: Option<RelativePath>,
     /// Latest server revision observed for this item, if known.
     pub last_known_server_revision: Option<ServerRevision>,
     /// Current high-level sync status.
@@ -64,13 +68,21 @@ pub struct DeviceRecord {
 // DeleteRecord
 // ==========================================================================
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+/// Typed identity of one delete-record target.
+pub enum DeleteRecordTarget {
+    /// Delete record tracking a note item.
+    Note(NoteId),
+    /// Delete record tracking an asset item.
+    Asset(AssetId),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 /// Trash/delete lifecycle record for retention and purge workflows.
 pub struct DeleteRecord {
-    /// Identifier of the deleted entity.
-    pub item_id: String,
-    /// Entity type for `item_id`.
-    pub item_type: ItemType,
+    /// Typed identity of the deleted entity.
+    pub target: DeleteRecordTarget,
     /// Original item path before trashing.
     pub original_path: RelativePath,
     /// Timestamp when item entered trash.
@@ -81,4 +93,24 @@ pub struct DeleteRecord {
     pub deleted_at: Option<String>,
     /// Server revision assigned to delete event, if synchronized.
     pub delete_revision: Option<ServerRevision>,
+}
+
+impl DeleteRecord {
+    /// Returns the delete target identifier as a string slice.
+    #[must_use]
+    pub fn item_id_str(&self) -> &str {
+        match &self.target {
+            DeleteRecordTarget::Note(note_id) => note_id.as_str(),
+            DeleteRecordTarget::Asset(asset_id) => asset_id.as_str(),
+        }
+    }
+
+    /// Returns the delete target kind.
+    #[must_use]
+    pub fn item_type(&self) -> ItemType {
+        match self.target {
+            DeleteRecordTarget::Note(_) => ItemType::Note,
+            DeleteRecordTarget::Asset(_) => ItemType::Asset,
+        }
+    }
 }

@@ -101,7 +101,7 @@ fn collect_trash_lifecycle_issues(
     let delete_records = DeleteRecordRepo::list_all(conn)?;
     let active_keys = delete_records
         .iter()
-        .map(|record| logical_key(Some(&record.item_id), Some(record.item_type)))
+        .map(|record| logical_key(Some(record.item_id_str()), Some(record.item_type())))
         .collect::<std::collections::HashSet<_>>();
 
     for note in &scan_outcome.scan_result.notes {
@@ -157,13 +157,13 @@ fn collect_trash_lifecycle_issues(
         }
 
         let indexed_path =
-            indexed_path_for_item(conn, &delete_record.item_id, delete_record.item_type)?;
+            indexed_path_for_item(conn, delete_record.item_id_str(), delete_record.item_type())?;
         if indexed_path.is_none() {
             issues.push(DoctorIssue {
                 rule_id: ORPHAN_DELETE_RECORD_RULE_ID.to_string(),
                 path: Some(delete_record.original_path.clone()),
-                item_id: Some(delete_record.item_id.clone()),
-                item_type: Some(delete_record.item_type),
+                item_id: Some(delete_record.item_id_str().to_string()),
+                item_type: Some(delete_record.item_type()),
                 level: DiagnosticLevel::Warning,
                 message: "delete record has no matching indexed item".to_string(),
             });
@@ -175,12 +175,12 @@ fn collect_trash_lifecycle_issues(
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     for delete_record in DeleteRecordRepo::list_expired_records(conn, &now)? {
         let indexed_path =
-            indexed_path_for_item(conn, &delete_record.item_id, delete_record.item_type)?;
+            indexed_path_for_item(conn, delete_record.item_id_str(), delete_record.item_type())?;
         issues.push(DoctorIssue {
             rule_id: RETENTION_EXPIRED_NOT_PURGED_RULE_ID.to_string(),
             path: indexed_path.or_else(|| Some(delete_record.original_path.clone())),
-            item_id: Some(delete_record.item_id.clone()),
-            item_type: Some(delete_record.item_type),
+            item_id: Some(delete_record.item_id_str().to_string()),
+            item_type: Some(delete_record.item_type()),
             level: DiagnosticLevel::Info,
             message: format!(
                 "retention expired on {}; run `zk-cli purge --expired --yes`",

@@ -159,7 +159,7 @@ fn open_index_connection_creates_parent_dirs_and_applies_schema() {
         })
         .expect("schema version query should succeed");
 
-    assert_eq!(schema_version, 1);
+    assert_eq!(schema_version, 2);
     assert!(
         database_path.exists(),
         "database file should exist after opening"

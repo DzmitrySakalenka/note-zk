@@ -5,9 +5,10 @@ mod common;
 use common::{unique_test_dir, write_text};
 use zk_app::config::ConfigPlatform;
 use zk_app::{
-    AppError, bootstrap_effective_config, detect_platform, resolve_default_global_config_path,
+    AppError, CliOverrides, EffectiveConfig, bootstrap_effective_config,
+    bootstrap_index_connection, bootstrap_preview_index_connection, detect_platform,
+    resolve_default_global_config_path,
 };
-use zk_domain::config::CliOverrides;
 
 // ==========================================================================
 // Default global config path resolution
@@ -185,4 +186,46 @@ retention_days = 0
         .expect_err("invalid retention should fail");
 
     assert!(matches!(err, AppError::ConfigValidation(_)));
+}
+
+#[test]
+fn bootstrap_index_connection_creates_parent_dirs_and_applies_schema() {
+    let root = unique_test_dir("bootstrap-index-connection");
+    let vault_root = root.join("vault");
+    let database_path = vault_root.join(".zk").join("nested").join("index.sqlite");
+    let config = EffectiveConfig {
+        vault_path: vault_root.clone(),
+        local_db_path: PathBuf::from(".zk/nested/index.sqlite"),
+        ..EffectiveConfig::default()
+    };
+
+    let connection =
+        bootstrap_index_connection(&config).expect("index connection helper should succeed");
+    let schema_version: i64 = connection
+        .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .expect("schema version query should succeed");
+
+    assert_eq!(schema_version, 2);
+    assert!(database_path.exists());
+    assert!(
+        database_path
+            .parent()
+            .expect("database path should have parent")
+            .is_dir()
+    );
+}
+
+#[test]
+fn bootstrap_preview_index_connection_applies_schema_to_memory_database() {
+    let connection = bootstrap_preview_index_connection()
+        .expect("preview index connection helper should succeed");
+    let schema_version: i64 = connection
+        .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .expect("schema version query should succeed");
+
+    assert_eq!(schema_version, 2);
 }

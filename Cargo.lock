@@ -83,10 +83,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-trait"
+version = "0.1.89"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+
+[[package]]
+name = "base64"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bitflags"
@@ -446,6 +463,7 @@ checksum = "7b4a6248eb93a4401ed2f37dfe8ea592d3cf05b7cf4f8efa867b6895af7e094e"
 dependencies = [
  "console",
  "once_cell",
+ "serde",
  "similar",
  "tempfile",
 ]
@@ -581,6 +599,12 @@ name = "pkg-config"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
+
+[[package]]
+name = "pollster"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
 name = "powerfmt"
@@ -1465,7 +1489,9 @@ dependencies = [
 name = "zk-app"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
+ "pollster",
  "rusqlite",
  "serde",
  "serde_json",
@@ -1477,6 +1503,7 @@ dependencies = [
  "tracing-subscriber",
  "zk-domain",
  "zk-index",
+ "zk-sync",
  "zk-vault",
 ]
 
@@ -1538,7 +1565,21 @@ dependencies = [
 name = "zk-sync"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "base64",
+ "chrono",
+ "insta",
+ "pollster",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "zk-app",
  "zk-domain",
+ "zk-index",
+ "zk-vault",
 ]
 
 [[package]]

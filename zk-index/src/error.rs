@@ -42,4 +42,14 @@ pub enum IndexError {
         /// Highest schema version this build can open safely.
         max_supported: u32,
     },
+    /// Stored data violates a schema-level invariant expected by the repository.
+    #[error("schema corruption in {table}.{column}: invalid value {value:?}")]
+    SchemaCorruption {
+        /// Table containing the invalid persisted value.
+        table: &'static str,
+        /// Column containing the invalid persisted value.
+        column: &'static str,
+        /// Invalid raw value read from storage.
+        value: String,
+    },
 }

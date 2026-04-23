@@ -3,8 +3,7 @@
 use std::io;
 
 use anyhow::Context;
-use zk_app::{SystemClock, purge_expired, purge_item};
-use zk_domain::{PurgeRequest, PurgeScope};
+use zk_app::{PurgeRequest, PurgeScope, SystemClock, purge_expired, purge_item};
 
 use crate::{
     bootstrap::{load_effective_config, open_index_connection, resolve_vault_root},

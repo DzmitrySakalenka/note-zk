@@ -11,7 +11,8 @@ use zk_app::{
     restore_asset, restore_note, trash_asset, trash_note,
 };
 use zk_domain::{
-    ItemKind, PurgeRequest, PurgeScope, RestoreRequest, TargetSelector, TrashRequest,
+    DeleteRecordTarget, ItemKind, PurgeRequest, PurgeScope, RestoreRequest, TargetSelector,
+    TrashRequest,
     config::{EffectiveConfig, FolderPolicy},
     id::{NoteId, RelativePath},
 };
@@ -62,13 +63,8 @@ fn trash_note_by_id_moves_file_updates_index_and_creates_delete_record() {
         Some(trashed.trashed_at.as_str())
     );
 
-    let delete_record = DeleteRecordRepo::get_delete_record(
-        &conn,
-        note_id.as_str(),
-        zk_domain::sync::ItemType::Note,
-    )
-    .expect("delete-record query should succeed")
-    .expect("delete record should exist");
+    let delete_record =
+        fetch_delete_record(&conn, note_id.as_str(), zk_domain::sync::ItemType::Note);
     assert_eq!(
         delete_record.original_path,
         RelativePath::new("notes/alpha.md")
@@ -106,13 +102,7 @@ fn preview_trash_note_returns_planned_path_without_mutating_disk_or_db() {
     assert!(vault_root.join(note_relative_path.as_str()).exists());
     assert!(!vault_root.join(preview.new_path.as_str()).exists());
     assert!(
-        DeleteRecordRepo::get_delete_record(
-            &conn,
-            note_id.as_str(),
-            zk_domain::sync::ItemType::Note
-        )
-        .expect("delete-record query should succeed")
-        .is_none()
+        lookup_delete_record(&conn, note_id.as_str(), zk_domain::sync::ItemType::Note).is_none()
     );
 
     let actual = trash_note(
@@ -169,13 +159,8 @@ fn trash_asset_by_path_moves_file_updates_index_and_creates_delete_record() {
         Some(trashed.trashed_at.as_str())
     );
 
-    let delete_record = DeleteRecordRepo::get_delete_record(
-        &conn,
-        &trashed.item_id,
-        zk_domain::sync::ItemType::Asset,
-    )
-    .expect("delete-record query should succeed")
-    .expect("delete record should exist");
+    let delete_record =
+        fetch_delete_record(&conn, &trashed.item_id, zk_domain::sync::ItemType::Asset);
     assert_eq!(
         delete_record.original_path,
         RelativePath::new("assets/diagram.png")
@@ -207,13 +192,7 @@ fn preview_trash_asset_returns_planned_path_without_mutating_disk_or_db() {
     assert!(vault_root.join(asset_relative_path.as_str()).exists());
     assert!(!vault_root.join(preview.new_path.as_str()).exists());
     assert!(
-        DeleteRecordRepo::get_delete_record(
-            &conn,
-            &preview.item_id,
-            zk_domain::sync::ItemType::Asset
-        )
-        .expect("delete-record query should succeed")
-        .is_none()
+        lookup_delete_record(&conn, &preview.item_id, zk_domain::sync::ItemType::Asset).is_none()
     );
 
     let actual = trash_asset(
@@ -228,6 +207,59 @@ fn preview_trash_asset_returns_planned_path_without_mutating_disk_or_db() {
     )
     .expect("real trash asset should succeed");
     assert_eq!(actual.new_path, preview.new_path);
+}
+
+#[test]
+fn trash_note_reports_invariant_violation_when_delete_record_disappears_after_write() {
+    let root = unique_test_dir("trash-note-delete-record-invariant");
+    let vault_root = root.join("vault");
+    let note_id = NoteId::new("01TRASHINVARIANTNOTE00000001");
+    write_note(
+        &vault_root.join("notes").join("alpha.md"),
+        note_id.as_str(),
+        "Alpha",
+    );
+
+    let config = base_config(&vault_root);
+    let mut conn = seeded_connection(
+        &vault_root,
+        &config,
+        "trash-note-delete-record-invariant.sqlite",
+    );
+    conn.execute_batch(
+        r"
+CREATE TRIGGER delete_records_drop_after_insert
+AFTER INSERT ON delete_records
+BEGIN
+    DELETE FROM delete_records
+    WHERE item_id = NEW.item_id AND item_type = NEW.item_type;
+END;
+",
+    )
+    .expect("trigger creation should succeed");
+
+    let err = trash_note(
+        &vault_root,
+        &config,
+        &mut conn,
+        &TrashRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            reason: None,
+        },
+    )
+    .expect_err("missing post-write delete record should fail");
+
+    assert!(matches!(
+        &err,
+        AppError::InvariantViolation { context }
+            if context
+                == &format!("delete record for note {} should exist after trash", note_id.as_str())
+    ));
+    assert!(vault_root.join("notes").join("alpha.md").exists());
+    assert!(
+        lookup_delete_record(&conn, note_id.as_str(), zk_domain::sync::ItemType::Note).is_none()
+    );
 }
 
 #[test]
@@ -279,13 +311,7 @@ fn restore_note_uses_original_path_by_default() {
     assert!(!indexed.is_trashed);
     assert_eq!(indexed.trashed_at, None);
     assert!(
-        DeleteRecordRepo::get_delete_record(
-            &conn,
-            note_id.as_str(),
-            zk_domain::sync::ItemType::Note
-        )
-        .expect("delete-record query should succeed")
-        .is_none()
+        lookup_delete_record(&conn, note_id.as_str(), zk_domain::sync::ItemType::Note).is_none()
     );
 }
 
@@ -331,13 +357,7 @@ fn preview_restore_note_returns_destination_without_mutating_disk_or_db() {
     assert!(vault_root.join(trashed.new_path.as_str()).exists());
     assert!(!vault_root.join(original_relative_path.as_str()).exists());
     assert!(
-        DeleteRecordRepo::get_delete_record(
-            &conn,
-            note_id.as_str(),
-            zk_domain::sync::ItemType::Note
-        )
-        .expect("delete-record query should succeed")
-        .is_some()
+        lookup_delete_record(&conn, note_id.as_str(), zk_domain::sync::ItemType::Note).is_some()
     );
 
     let actual = restore_note(
@@ -457,12 +477,11 @@ fn restore_asset_uses_original_path_by_default() {
     assert!(!indexed.is_trashed);
     assert_eq!(indexed.trashed_at, None);
     assert!(
-        DeleteRecordRepo::get_delete_record(
+        lookup_delete_record(
             &conn,
             indexed.asset_id.as_str(),
-            zk_domain::sync::ItemType::Asset
+            zk_domain::sync::ItemType::Asset,
         )
-        .expect("delete-record query should succeed")
         .is_none()
     );
 }
@@ -507,13 +526,7 @@ fn preview_restore_asset_returns_destination_without_mutating_disk_or_db() {
     assert!(vault_root.join(trashed.new_path.as_str()).exists());
     assert!(!vault_root.join(original_relative_path.as_str()).exists());
     assert!(
-        DeleteRecordRepo::get_delete_record(
-            &conn,
-            &trashed.item_id,
-            zk_domain::sync::ItemType::Asset
-        )
-        .expect("delete-record query should succeed")
-        .is_some()
+        lookup_delete_record(&conn, &trashed.item_id, zk_domain::sync::ItemType::Asset).is_some()
     );
 
     let actual = restore_asset(
@@ -580,13 +593,7 @@ fn restore_note_to_alternate_path_when_original_is_occupied() {
     assert_eq!(indexed.current_path, restored.restored_to);
     assert!(!indexed.is_trashed);
     assert!(
-        DeleteRecordRepo::get_delete_record(
-            &conn,
-            note_id.as_str(),
-            zk_domain::sync::ItemType::Note
-        )
-        .expect("delete-record query should succeed")
-        .is_none()
+        lookup_delete_record(&conn, note_id.as_str(), zk_domain::sync::ItemType::Note).is_none()
     );
 }
 
@@ -639,13 +646,7 @@ fn restore_note_to_occupied_original_without_alternate_fails() {
     assert_eq!(indexed.current_path, trashed.new_path);
     assert!(indexed.is_trashed);
     assert!(
-        DeleteRecordRepo::get_delete_record(
-            &conn,
-            note_id.as_str(),
-            zk_domain::sync::ItemType::Note
-        )
-        .expect("delete-record query should succeed")
-        .is_some()
+        lookup_delete_record(&conn, note_id.as_str(), zk_domain::sync::ItemType::Note).is_some()
     );
 }
 
@@ -709,13 +710,7 @@ fn restore_note_rejects_immutable_destination_without_touching_file_or_db() {
     assert_eq!(indexed.current_path, trashed.new_path);
     assert!(indexed.is_trashed);
     assert!(
-        DeleteRecordRepo::get_delete_record(
-            &conn,
-            note_id.as_str(),
-            zk_domain::sync::ItemType::Note
-        )
-        .expect("delete-record query should succeed")
-        .is_some()
+        lookup_delete_record(&conn, note_id.as_str(), zk_domain::sync::ItemType::Note).is_some()
     );
 }
 
@@ -952,14 +947,12 @@ fn purge_expired_confirm_deletes_files_and_marks_tombstones() {
         note_id.as_str(),
         zk_domain::sync::ItemType::Note,
         "2026-05-01T00:00:00Z",
-        1,
     );
     assert_deleted_delete_record(
         &conn,
         &trashed_asset.item_id,
         zk_domain::sync::ItemType::Asset,
         "2026-05-01T00:00:00Z",
-        2,
     );
 }
 
@@ -1227,13 +1220,7 @@ fn trash_note_rejects_immutable_folder_without_touching_file_or_db() {
     assert!(!indexed.is_trashed);
     assert!(indexed.trashed_at.is_none());
     assert!(
-        DeleteRecordRepo::get_delete_record(
-            &conn,
-            note_id.as_str(),
-            zk_domain::sync::ItemType::Note
-        )
-        .expect("delete-record query should succeed")
-        .is_none()
+        lookup_delete_record(&conn, note_id.as_str(), zk_domain::sync::ItemType::Note).is_none()
     );
 }
 
@@ -1528,18 +1515,10 @@ fn assert_deleted_delete_record(
     item_id: &str,
     item_type: zk_domain::sync::ItemType,
     deleted_at: &str,
-    delete_revision: i64,
 ) {
     let delete_record = fetch_delete_record(conn, item_id, item_type);
     assert_eq!(delete_record.deleted_at.as_deref(), Some(deleted_at));
-    assert_eq!(
-        delete_record
-            .delete_revision
-            .as_ref()
-            .expect("revision should be assigned")
-            .value(),
-        delete_revision
-    );
+    assert_eq!(delete_record.delete_revision, None);
 }
 
 struct FixedClock {
@@ -1579,9 +1558,25 @@ fn fetch_delete_record(
     item_id: &str,
     item_type: zk_domain::sync::ItemType,
 ) -> zk_domain::sync_state::DeleteRecord {
-    DeleteRecordRepo::get_delete_record(conn, item_id, item_type)
+    lookup_delete_record(conn, item_id, item_type).expect("delete record should exist")
+}
+
+fn lookup_delete_record(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+    item_type: zk_domain::sync::ItemType,
+) -> Option<zk_domain::sync_state::DeleteRecord> {
+    DeleteRecordRepo::get_delete_record(conn, &delete_record_target(item_id, item_type))
         .expect("delete-record query should succeed")
-        .expect("delete record should exist")
+}
+
+fn delete_record_target(item_id: &str, item_type: zk_domain::sync::ItemType) -> DeleteRecordTarget {
+    match item_type {
+        zk_domain::sync::ItemType::Note => DeleteRecordTarget::Note(NoteId::new(item_id)),
+        zk_domain::sync::ItemType::Asset => {
+            DeleteRecordTarget::Asset(zk_domain::id::AssetId::new(item_id))
+        }
+    }
 }
 
 fn tree_contains_files(path: &Path) -> bool {

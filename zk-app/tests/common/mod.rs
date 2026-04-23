@@ -4,6 +4,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use rusqlite::Connection;
+use zk_index::{ensure_schema, open_memory};
+
 pub fn unique_test_dir(prefix: &str) -> PathBuf {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -23,4 +26,14 @@ pub fn write_text(path: &Path, text: &str) {
         fs::create_dir_all(parent).expect("create parent directories");
     }
     fs::write(path, text).expect("write test file");
+}
+
+#[allow(
+    dead_code,
+    reason = "integration test crates do not all use every shared helper"
+)]
+pub fn open_index_connection() -> Connection {
+    let connection = open_memory().expect("open in-memory sqlite");
+    ensure_schema(&connection).expect("initialize sqlite schema");
+    connection
 }

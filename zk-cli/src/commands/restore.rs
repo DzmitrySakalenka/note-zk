@@ -3,8 +3,10 @@
 use std::io;
 
 use anyhow::Context;
-use zk_app::{preview_restore_asset, preview_restore_note, restore_asset, restore_note};
-use zk_domain::{RestoreRequest, id::RelativePath};
+use zk_app::{
+    ItemKind, RelativePath, RestoreRequest, preview_restore_asset, preview_restore_note,
+    restore_asset, restore_note,
+};
 
 use crate::{
     bootstrap::{load_effective_config, open_index_connection, resolve_vault_root},
@@ -31,21 +33,13 @@ pub fn run(args: &RestoreArgs, shared: &SharedFlags) -> Result<i32, CliError> {
     };
     let restored_item = if args.dry_run {
         match kind {
-            zk_domain::ItemKind::Note => {
-                preview_restore_note(&vault_root, &config, &connection, &request)
-            }
-            zk_domain::ItemKind::Asset => {
-                preview_restore_asset(&vault_root, &config, &connection, &request)
-            }
+            ItemKind::Note => preview_restore_note(&vault_root, &config, &connection, &request),
+            ItemKind::Asset => preview_restore_asset(&vault_root, &config, &connection, &request),
         }
     } else {
         match kind {
-            zk_domain::ItemKind::Note => {
-                restore_note(&vault_root, &config, &mut connection, &request)
-            }
-            zk_domain::ItemKind::Asset => {
-                restore_asset(&vault_root, &config, &mut connection, &request)
-            }
+            ItemKind::Note => restore_note(&vault_root, &config, &mut connection, &request),
+            ItemKind::Asset => restore_asset(&vault_root, &config, &mut connection, &request),
         }
     }
     .map_err(super::map_lifecycle_error)?;

@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction};
 use zk_domain::config::EffectiveConfig;
-use zk_index::{IndexError, RebuildStats};
+use zk_index::{IndexError, NoteInput, RebuildStats, SyncStateRepo};
 use zk_vault::NormalizationSummary;
 
 use crate::{
@@ -74,6 +74,7 @@ pub fn rebuild_index(
     })?;
     let index_stats =
         zk_index::rebuild_index_in_transaction(&transaction, &note_inputs, &asset_inputs)?;
+    refresh_note_sync_hashes(&transaction, &note_inputs)?;
     let reconciliation = reconcile_delete_records(
         &transaction,
         &note_inputs,
@@ -101,4 +102,20 @@ pub fn rebuild_index(
             reconciliation,
         }),
     }
+}
+
+fn refresh_note_sync_hashes(
+    transaction: &Transaction<'_>,
+    note_inputs: &[NoteInput],
+) -> Result<(), AppError> {
+    for note in note_inputs {
+        let Some(mut state) = SyncStateRepo::get_note_sync_state(transaction, &note.note_id)?
+        else {
+            continue;
+        };
+        state.last_local_hash = Some(note.content_hash.clone());
+        SyncStateRepo::upsert_note_sync_state(transaction, &state)?;
+    }
+
+    Ok(())
 }

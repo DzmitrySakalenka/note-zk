@@ -1,9 +1,8 @@
-use rusqlite::{Connection, OptionalExtension, types::Type};
-use serde_json::Value;
+use rusqlite::{Connection, OptionalExtension};
 use zk_domain::{
     id::{RelativePath, ServerRevision},
     sync::ItemType,
-    sync_state::DeleteRecord,
+    sync_state::{DeleteRecord, DeleteRecordTarget},
 };
 
 use crate::error::IndexError;
@@ -81,7 +80,7 @@ impl DeleteRecordRepo {
         conn: &Connection,
         record: &DeleteRecord,
     ) -> Result<(), IndexError> {
-        let item_type = encode_item_type(record.item_type)?;
+        let item_type = encode_item_type(record.item_type());
 
         with_savepoint(
             conn,
@@ -90,7 +89,7 @@ impl DeleteRecordRepo {
             |conn| {
                 conn.execute(
                     DELETE_LOGICAL_DELETE_RECORD,
-                    rusqlite::params![record.item_id, item_type],
+                    rusqlite::params![record.item_id_str(), item_type],
                 )
                 .map_err(|source| IndexError::Sqlite {
                     source,
@@ -100,7 +99,7 @@ impl DeleteRecordRepo {
                 conn.execute(
                     INSERT_DELETE_RECORD,
                     rusqlite::params![
-                        record.item_id,
+                        record.item_id_str(),
                         item_type,
                         record.original_path.as_str(),
                         record.trashed_at,
@@ -125,21 +124,30 @@ impl DeleteRecordRepo {
     /// Returns [`IndexError`] if enum conversion, query execution, or row decoding fails.
     pub fn get_delete_record(
         conn: &Connection,
-        item_id: &str,
-        item_type: ItemType,
+        target: &DeleteRecordTarget,
     ) -> Result<Option<DeleteRecord>, IndexError> {
-        let item_type = encode_item_type(item_type)?;
+        let item_type = encode_item_type(match target {
+            DeleteRecordTarget::Note(_) => ItemType::Note,
+            DeleteRecordTarget::Asset(_) => ItemType::Asset,
+        });
+        let item_id = match target {
+            DeleteRecordTarget::Note(note_id) => note_id.as_str(),
+            DeleteRecordTarget::Asset(asset_id) => asset_id.as_str(),
+        };
 
-        conn.query_row(
-            SELECT_DELETE_RECORD,
-            rusqlite::params![item_id, item_type],
-            decode_delete_record,
-        )
-        .optional()
-        .map_err(|source| IndexError::Sqlite {
-            source,
-            context: "get delete record".to_string(),
-        })
+        let raw_row = conn
+            .query_row(
+                SELECT_DELETE_RECORD,
+                rusqlite::params![item_id, item_type],
+                decode_raw_delete_record,
+            )
+            .optional()
+            .map_err(|source| IndexError::Sqlite {
+                source,
+                context: "get delete record".to_string(),
+            })?;
+
+        raw_row.map(raw_delete_record_into_domain).transpose()
     }
 
     /// Deletes one delete record by logical key `(item_id, item_type)`.
@@ -149,10 +157,16 @@ impl DeleteRecordRepo {
     /// Returns [`IndexError`] if enum conversion or delete execution fails.
     pub fn delete_delete_record(
         conn: &Connection,
-        item_id: &str,
-        item_type: ItemType,
+        target: &DeleteRecordTarget,
     ) -> Result<(), IndexError> {
-        let item_type = encode_item_type(item_type)?;
+        let item_type = encode_item_type(match target {
+            DeleteRecordTarget::Note(_) => ItemType::Note,
+            DeleteRecordTarget::Asset(_) => ItemType::Asset,
+        });
+        let item_id = match target {
+            DeleteRecordTarget::Note(note_id) => note_id.as_str(),
+            DeleteRecordTarget::Asset(asset_id) => asset_id.as_str(),
+        };
 
         conn.execute(
             DELETE_LOGICAL_DELETE_RECORD,
@@ -181,7 +195,7 @@ impl DeleteRecordRepo {
                 context: "prepare list expired delete records query".to_string(),
             })?;
         let rows = statement
-            .query_map([now], decode_delete_record)
+            .query_map([now], decode_raw_delete_record)
             .map_err(|source| IndexError::Sqlite {
                 source,
                 context: "list expired delete records".to_string(),
@@ -191,7 +205,10 @@ impl DeleteRecordRepo {
             .map_err(|source| IndexError::Sqlite {
                 source,
                 context: "decode expired delete records".to_string(),
-            })
+            })?
+            .into_iter()
+            .map(raw_delete_record_into_domain)
+            .collect()
     }
 
     /// Marks one delete record as hard-deleted and updates its optional delete revision.
@@ -206,7 +223,7 @@ impl DeleteRecordRepo {
         deleted_at: &str,
         revision: Option<&ServerRevision>,
     ) -> Result<(), IndexError> {
-        let item_type = encode_item_type(item_type)?;
+        let item_type = encode_item_type(item_type);
 
         conn.execute(
             MARK_DELETE_RECORD_DELETED,
@@ -237,7 +254,7 @@ impl DeleteRecordRepo {
                     context: "prepare list all delete records query".to_string(),
                 })?;
         let rows = statement
-            .query_map([], decode_delete_record)
+            .query_map([], decode_raw_delete_record)
             .map_err(|source| IndexError::Sqlite {
                 source,
                 context: "list all delete records".to_string(),
@@ -247,7 +264,10 @@ impl DeleteRecordRepo {
             .map_err(|source| IndexError::Sqlite {
                 source,
                 context: "decode all delete records".to_string(),
-            })
+            })?
+            .into_iter()
+            .map(raw_delete_record_into_domain)
+            .collect()
     }
 
     /// Returns the next local delete revision for a newly purged item.
@@ -265,41 +285,56 @@ impl DeleteRecordRepo {
     }
 }
 
-fn decode_delete_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeleteRecord> {
-    let item_type = row.get::<_, String>(1)?;
-    let original_path = row.get::<_, String>(2)?;
+struct RawDeleteRecord {
+    item_id: String,
+    item_type: String,
+    original_path: String,
+    trashed_at: String,
+    retention_until: String,
+    deleted_at: Option<String>,
+    delete_revision: Option<i64>,
+}
 
-    Ok(DeleteRecord {
+fn decode_raw_delete_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawDeleteRecord> {
+    Ok(RawDeleteRecord {
         item_id: row.get(0)?,
-        item_type: decode_item_type(&item_type, 1)?,
-        original_path: RelativePath::new(&original_path),
+        item_type: row.get(1)?,
+        original_path: row.get(2)?,
         trashed_at: row.get(3)?,
         retention_until: row.get(4)?,
         deleted_at: row.get(5)?,
-        delete_revision: row.get::<_, Option<i64>>(6)?.map(ServerRevision::new),
+        delete_revision: row.get(6)?,
     })
 }
 
-fn encode_item_type(item_type: ItemType) -> Result<String, IndexError> {
-    match serde_json::to_value(item_type) {
-        Ok(Value::String(text)) => Ok(text),
-        Ok(_) => Err(IndexError::Sqlite {
-            source: rusqlite::Error::ToSqlConversionFailure(
-                "encode item type produced non-string JSON value".into(),
-            ),
-            context: "encode item type".to_string(),
-        }),
-        Err(source) => Err(IndexError::Sqlite {
-            source: rusqlite::Error::ToSqlConversionFailure(Box::new(source)),
-            context: "encode item type".to_string(),
-        }),
+fn raw_delete_record_into_domain(raw: RawDeleteRecord) -> Result<DeleteRecord, IndexError> {
+    Ok(DeleteRecord {
+        target: decode_target(&raw.item_id, &raw.item_type)?,
+        original_path: RelativePath::new(&raw.original_path),
+        trashed_at: raw.trashed_at,
+        retention_until: raw.retention_until,
+        deleted_at: raw.deleted_at,
+        delete_revision: raw.delete_revision.map(ServerRevision::new),
+    })
+}
+
+fn encode_item_type(item_type: ItemType) -> &'static str {
+    match item_type {
+        ItemType::Note => "note",
+        ItemType::Asset => "asset",
     }
 }
 
-fn decode_item_type(value: &str, column: usize) -> rusqlite::Result<ItemType> {
-    serde_json::from_value(Value::String(value.to_string())).map_err(|source| {
-        rusqlite::Error::FromSqlConversionFailure(column, Type::Text, Box::new(source))
-    })
+fn decode_target(item_id: &str, item_type: &str) -> Result<DeleteRecordTarget, IndexError> {
+    match item_type {
+        "note" => Ok(DeleteRecordTarget::Note(item_id.to_string().into())),
+        "asset" => Ok(DeleteRecordTarget::Asset(item_id.to_string().into())),
+        _ => Err(IndexError::SchemaCorruption {
+            table: "delete_records",
+            column: "item_type",
+            value: item_type.to_string(),
+        }),
+    }
 }
 
 fn with_savepoint<T, F>(

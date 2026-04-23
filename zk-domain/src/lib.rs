@@ -17,11 +17,21 @@ pub mod note;
 pub mod sync;
 /// Per-item sync-state records and device/delete tracking models.
 pub mod sync_state;
+/// Sync wire DTOs shared by client and server sync APIs.
+pub mod sync_wire;
 /// Write-request models for create/update/batch note operations.
 pub mod write;
 /// Write-request models for trash, restore, and purge operations.
 pub mod write_request;
 
+pub use sync::ItemType;
+pub use sync_state::{DeleteRecord, DeleteRecordTarget};
+pub use sync_wire::{
+    PushAssetItem, PushItemResult, PushNoteItem, RegisterDeviceRequest, RegisterDeviceResponse,
+    ResolveConflictRequest, ResolveConflictResponse, SyncChange, SyncPullRequest, SyncPullResponse,
+    SyncPushRequest, SyncPushResponse, WireConflictResolution, WireEventType, WireItemType,
+    WireOperation,
+};
 pub use write_request::{
     ItemKind, PurgeRequest, PurgeScope, RestoreRequest, TargetSelector, TrashRequest,
 };

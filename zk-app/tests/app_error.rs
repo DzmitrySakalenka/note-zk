@@ -4,6 +4,7 @@ use zk_app::AppError;
 use zk_app::config::{ConfigValidationError, GlobalConfigError, VaultConfigError};
 use zk_domain::id::{NoteId, RelativePath};
 use zk_index::IndexError;
+use zk_sync::SyncError;
 use zk_vault::error::VaultError;
 
 #[test]
@@ -58,6 +59,13 @@ fn converts_config_validation_error_via_from() {
 }
 
 #[test]
+fn converts_sync_error_via_from() {
+    let source = SyncError::AmbiguousBootstrap;
+
+    assert!(matches!(AppError::from(source), AppError::Sync(_)));
+}
+
+#[test]
 fn preserves_app_owned_payloads() {
     let immutable = AppError::ImmutableFolder {
         path: RelativePath::new("raw/source.md"),
@@ -67,6 +75,10 @@ fn preserves_app_owned_payloads() {
     };
     let item_not_found = AppError::ItemNotFound {
         target: "assets/missing.png".to_string(),
+    };
+    let invariant_violation = AppError::InvariantViolation {
+        context: "delete record for note 01TESTNOTEID00000000000000 should exist after trash"
+            .to_string(),
     };
     let path_exists = AppError::NotePathExists {
         path: RelativePath::new("notes/existing.md"),
@@ -87,6 +99,11 @@ fn preserves_app_owned_payloads() {
     assert!(matches!(
         item_not_found,
         AppError::ItemNotFound { target } if target == "assets/missing.png"
+    ));
+    assert!(matches!(
+        invariant_violation,
+        AppError::InvariantViolation { context }
+            if context == "delete record for note 01TESTNOTEID00000000000000 should exist after trash"
     ));
     assert!(matches!(
         path_exists,
@@ -114,9 +131,16 @@ fn preserves_trash_lifecycle_error_payloads() {
     let restore_target_exists = AppError::RestoreTargetExists {
         path: RelativePath::new("notes/existing.md"),
     };
+    let status_count_overflow = AppError::StatusCountOverflow {
+        field: "duplicate_id_count",
+    };
     let retention_not_expired = AppError::RetentionNotExpired {
         target: "notes/fresh.md".to_string(),
         retention_until: "2026-05-01T00:00:00Z".to_string(),
+    };
+    let retention_overflow = AppError::RetentionArithmeticOverflow {
+        base: "9999-12-31T00:00:00Z".to_string(),
+        days: 3650,
     };
     let trashed_item_missing_id = AppError::TrashedItemMissingId {
         path: RelativePath::new("99_trash/lost.md"),
@@ -139,11 +163,20 @@ fn preserves_trash_lifecycle_error_payloads() {
         AppError::RestoreTargetExists { path } if path.as_str() == "notes/existing.md"
     ));
     assert!(matches!(
+        status_count_overflow,
+        AppError::StatusCountOverflow { field } if field == "duplicate_id_count"
+    ));
+    assert!(matches!(
         retention_not_expired,
         AppError::RetentionNotExpired {
             target,
             retention_until
         } if target == "notes/fresh.md" && retention_until == "2026-05-01T00:00:00Z"
+    ));
+    assert!(matches!(
+        retention_overflow,
+        AppError::RetentionArithmeticOverflow { base, days }
+            if base == "9999-12-31T00:00:00Z" && days == 3650
     ));
     assert!(matches!(
         trashed_item_missing_id,

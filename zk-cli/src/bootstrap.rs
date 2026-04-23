@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::Context;
 use rusqlite::Connection;
-use zk_domain::config::{CliOverrides, EffectiveConfig};
+use zk_app::{CliOverrides, EffectiveConfig};
 
 use crate::{cli::SharedFlags, error::CliError};
 
@@ -78,44 +78,7 @@ pub fn load_effective_config(
 /// Returns [`CliError::Bootstrap`] when the database path cannot be prepared,
 /// opened, or migrated.
 pub fn open_index_connection(config: &EffectiveConfig) -> Result<Connection, CliError> {
-    let database_path = resolve_database_path(config);
-
-    if let Some(parent_dir) = database_path.parent() {
-        fs::create_dir_all(parent_dir)
-            .with_context(|| {
-                format!(
-                    "while attempting to create index database parent directory '{}'",
-                    parent_dir.display()
-                )
-            })
-            .map_err(CliError::Bootstrap)?;
-    }
-
-    let connection = Connection::open(&database_path)
-        .with_context(|| {
-            format!(
-                "while attempting to open index database '{}'",
-                database_path.display()
-            )
-        })
-        .map_err(CliError::Bootstrap)?;
-
-    zk_index::ensure_schema(&connection)
-        .with_context(|| {
-            format!(
-                "while attempting to ensure index schema for '{}'",
-                database_path.display()
-            )
-        })
-        .map_err(CliError::Bootstrap)?;
-
-    Ok(connection)
-}
-
-fn resolve_database_path(config: &EffectiveConfig) -> PathBuf {
-    if config.local_db_path.is_absolute() {
-        config.local_db_path.clone()
-    } else {
-        config.vault_path.join(&config.local_db_path)
-    }
+    zk_app::bootstrap_index_connection(config)
+        .context("while attempting to open local index connection")
+        .map_err(CliError::Bootstrap)
 }

@@ -1,6 +1,6 @@
 use zk_domain::id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision};
-use zk_domain::sync::{ItemType, PendingOperation, SyncStatus};
-use zk_domain::sync_state::{AssetSyncState, DeleteRecord, DeviceRecord, NoteSyncState};
+use zk_domain::sync::{PendingOperation, SyncStatus};
+use zk_domain::sync_state::{AssetSyncState, DeviceRecord, NoteSyncState};
 
 // ==========================================================================
 // NoteSyncState -- construction and field access
@@ -12,6 +12,7 @@ fn sample_note_sync_state() -> NoteSyncState {
         device_id: DeviceId::new("device-alpha"),
         last_local_hash: Some(ContentHash::from_bytes(b"local content")),
         last_synced_hash: Some(ContentHash::from_bytes(b"synced content")),
+        last_synced_path: Some(RelativePath::new("notes/alpha.md")),
         last_known_server_revision: Some(ServerRevision::new(5)),
         sync_status: SyncStatus::Synced,
         last_sync_attempt_at: Some("2026-04-10T12:00:00Z".to_string()),
@@ -27,6 +28,10 @@ fn note_sync_state_construction() {
     assert_eq!(s.device_id.to_string(), "device-alpha");
     assert!(s.last_local_hash.is_some());
     assert!(s.last_synced_hash.is_some());
+    assert_eq!(
+        s.last_synced_path,
+        Some(RelativePath::new("notes/alpha.md"))
+    );
     assert_eq!(
         s.last_known_server_revision
             .as_ref()
@@ -47,6 +52,7 @@ fn note_sync_state_fresh_unsynced() {
     let s = NoteSyncState {
         last_local_hash: Some(ContentHash::from_bytes(b"new note")),
         last_synced_hash: None,
+        last_synced_path: None,
         last_known_server_revision: None,
         sync_status: SyncStatus::PendingUpload,
         last_sync_attempt_at: None,
@@ -128,6 +134,7 @@ fn sample_asset_sync_state() -> AssetSyncState {
         device_id: DeviceId::new("device-beta"),
         last_local_hash: Some(ContentHash::from_bytes(b"asset bytes")),
         last_synced_hash: Some(ContentHash::from_bytes(b"asset bytes")),
+        last_synced_path: Some(RelativePath::new("assets/diagram.png")),
         last_known_server_revision: Some(ServerRevision::new(3)),
         sync_status: SyncStatus::Synced,
         last_sync_attempt_at: Some("2026-04-10T09:00:00Z".to_string()),
@@ -143,6 +150,10 @@ fn asset_sync_state_construction() {
     assert_eq!(s.device_id.to_string(), "device-beta");
     assert!(s.last_local_hash.is_some());
     assert!(s.last_synced_hash.is_some());
+    assert_eq!(
+        s.last_synced_path,
+        Some(RelativePath::new("assets/diagram.png"))
+    );
     assert_eq!(
         s.last_known_server_revision
             .as_ref()
@@ -305,101 +316,14 @@ fn device_record_capabilities_order_matters() {
     assert_ne!(a, b);
 }
 
-// ==========================================================================
-// DeleteRecord -- construction and field access
-// ==========================================================================
-
-fn sample_delete_record() -> DeleteRecord {
-    DeleteRecord {
-        item_id: "01HZ3NOTE000000000000000A".to_string(),
-        item_type: ItemType::Note,
-        original_path: RelativePath::new("notes/archived.md"),
-        trashed_at: "2026-04-05T08:00:00Z".to_string(),
-        retention_until: "2026-05-05T08:00:00Z".to_string(),
-        deleted_at: None,
-        delete_revision: None,
-    }
-}
-
-#[test]
-fn delete_record_construction_trashed_note() {
-    let r = sample_delete_record();
-    assert_eq!(r.item_id, "01HZ3NOTE000000000000000A");
-    assert_eq!(r.item_type, ItemType::Note);
-    assert_eq!(r.original_path.as_str(), "notes/archived.md");
-    assert_eq!(r.trashed_at, "2026-04-05T08:00:00Z");
-    assert_eq!(r.retention_until, "2026-05-05T08:00:00Z");
-    assert!(r.deleted_at.is_none());
-    assert!(r.delete_revision.is_none());
-}
-
-#[test]
-fn delete_record_hard_deleted() {
-    let r = DeleteRecord {
-        deleted_at: Some("2026-05-06T00:00:00Z".to_string()),
-        delete_revision: Some(ServerRevision::new(99)),
-        ..sample_delete_record()
-    };
-    assert_eq!(r.deleted_at.as_deref(), Some("2026-05-06T00:00:00Z"));
-    assert_eq!(
-        r.delete_revision.as_ref().map(ServerRevision::value),
-        Some(99)
-    );
-}
-
-#[test]
-fn delete_record_asset_type() {
-    let r = DeleteRecord {
-        item_id: "01HZ3ASSET00000000000000A".to_string(),
-        item_type: ItemType::Asset,
-        original_path: RelativePath::new("assets/old-diagram.png"),
-        ..sample_delete_record()
-    };
-    assert_eq!(r.item_type, ItemType::Asset);
-    assert_eq!(r.original_path.as_str(), "assets/old-diagram.png");
-}
-
-#[test]
-fn delete_record_path_normalization() {
-    // original_path is a RelativePath, so backslashes get normalized.
-    let r = DeleteRecord {
-        original_path: RelativePath::new(r"notes\subfolder\deleted.md"),
-        ..sample_delete_record()
-    };
-    assert_eq!(r.original_path.as_str(), "notes/subfolder/deleted.md");
-}
-
-#[test]
-fn delete_record_clone_and_eq() {
-    let a = sample_delete_record();
-    let b = a.clone();
-    assert_eq!(a, b);
-}
-
-#[test]
-fn delete_record_different_item_type_not_equal() {
-    let a = sample_delete_record();
-    let b = DeleteRecord {
-        item_type: ItemType::Asset,
-        ..sample_delete_record()
-    };
-    assert_ne!(a, b);
-}
-
-// ==========================================================================
-// Debug formatting
-// ==========================================================================
-
 #[test]
 fn all_types_implement_debug() {
     let note_sync = sample_note_sync_state();
     let asset_sync = sample_asset_sync_state();
     let device = sample_device_record();
-    let delete = sample_delete_record();
 
     // format! with {:?} will fail to compile if Debug is not implemented.
     let _ = format!("{note_sync:?}");
     let _ = format!("{asset_sync:?}");
     let _ = format!("{device:?}");
-    let _ = format!("{delete:?}");
 }

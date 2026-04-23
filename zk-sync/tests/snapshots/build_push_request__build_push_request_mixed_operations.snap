@@ -1,0 +1,96 @@
+---
+source: zk-sync/tests/build_push_request.rs
+expression: request
+---
+{
+  "device_id": "device-alpha",
+  "notes": [
+    {
+      "note_id": "01TG11005NOTECREATE0000000001",
+      "path": "notes/create.md",
+      "content": "# Create\n",
+      "content_hash": "dd1d6cdd3fc2436f7837e1c3db816eca7e75add87ca12b399d34b1f93fa647bb",
+      "operation": "create"
+    },
+    {
+      "note_id": "01TG11005NOTEDELETE0000000001",
+      "path": "notes/delete.md",
+      "content_hash": "1f7e3dfb5bb1f4c28f6595ecc230aac3abbffcb1abcec1005bdb35add0d518e7",
+      "base_server_revision": 33,
+      "operation": "delete"
+    },
+    {
+      "note_id": "01TG11005NOTEMOVE000000000001",
+      "path": "notes/moved.md",
+      "content": "# Move\n",
+      "content_hash": "f519a73dcac8dddef678ef45fa6f7510eae69bdc0516b8068005234ea2aeae7e",
+      "base_server_revision": 13,
+      "operation": "move"
+    },
+    {
+      "note_id": "01TG11005NOTERESTORE000000000",
+      "path": "notes/restore.md",
+      "content_hash": "0da8336e4d7163be21266ef6e3b3246f37dd1194df29fc0f1566f399dafe3f84",
+      "base_server_revision": 15,
+      "operation": "restore"
+    },
+    {
+      "note_id": "01TG11005NOTETRASH00000000001",
+      "path": "99_trash/2026-04-03/trash.md",
+      "content_hash": "e9bfa20665f3cd8a4ec83dd44fd452cbd0624799dea09edd905a776c22134cdc",
+      "base_server_revision": 14,
+      "operation": "trash"
+    },
+    {
+      "note_id": "01TG11005NOTEUPDATE0000000001",
+      "path": "notes/update.md",
+      "content": "# Update\n",
+      "content_hash": "e40e1fbbadc73adb14146a6e4ca2fd492142fbd77303b95a677b2772cd41b650",
+      "base_server_revision": 12,
+      "operation": "update"
+    }
+  ],
+  "assets": [
+    {
+      "asset_id": "01TG11005ASSETCREATE000000000",
+      "path": "assets/create.bin",
+      "content_hash": "feed2787b804a17fd5c9daef830e5cfc3e9dec1b2046ca7cd9963e5665bb6b8f",
+      "operation": "create"
+    },
+    {
+      "asset_id": "01TG11005ASSETDELETE000000000",
+      "path": "assets/delete.bin",
+      "content_hash": "1f7e3dfb5bb1f4c28f6595ecc230aac3abbffcb1abcec1005bdb35add0d518e7",
+      "base_server_revision": 25,
+      "operation": "delete"
+    },
+    {
+      "asset_id": "01TG11005ASSETMOVE000000000001",
+      "path": "assets/moved.bin",
+      "content_hash": "9a7777b041e0664d554a14e741c791640b576c399e948d443856b719af3ce1f2",
+      "base_server_revision": 22,
+      "operation": "move"
+    },
+    {
+      "asset_id": "01TG11005ASSETRESTORE00000001",
+      "path": "assets/restore.bin",
+      "content_hash": "0da8336e4d7163be21266ef6e3b3246f37dd1194df29fc0f1566f399dafe3f84",
+      "base_server_revision": 23,
+      "operation": "restore"
+    },
+    {
+      "asset_id": "01TG11005ASSETTRASH0000000001",
+      "path": "99_trash/2026-04-03/trash.bin",
+      "content_hash": "e9bfa20665f3cd8a4ec83dd44fd452cbd0624799dea09edd905a776c22134cdc",
+      "base_server_revision": 24,
+      "operation": "trash"
+    },
+    {
+      "asset_id": "01TG11005ASSETUPDATE000000000",
+      "path": "assets/update.bin",
+      "content_hash": "274ad95436eee28181b0866531547ac89af30b2ebd3036141c884c4ea20087d0",
+      "base_server_revision": 21,
+      "operation": "update"
+    }
+  ]
+}

@@ -50,7 +50,8 @@ pub struct StatusSummary {
 ///
 /// # Errors
 ///
-/// Returns [`AppError`] when vault scan or index count reads fail.
+/// Returns [`AppError`] when vault scan or index count reads fail, or when
+/// a computed count exceeds the public `u32` status-output contract.
 pub fn status_summary(
     vault_root: &Path,
     config: &EffectiveConfig,
@@ -70,25 +71,34 @@ pub fn status_summary(
     )?;
     let purged_notes = count_rows(conn, COUNT_PURGED_NOTES_SQL, [], "count purged notes")?;
     let purged_assets = count_rows(conn, COUNT_PURGED_ASSETS_SQL, [], "count purged assets")?;
-    let notes_with_errors = distinct_finding_path_count(
-        &scan_outcome.validation_report.findings,
-        &DiagnosticLevel::Error,
-    ) as u32;
-    let notes_with_warnings = distinct_finding_path_count(
-        &scan_outcome.validation_report.findings,
-        &DiagnosticLevel::Warning,
-    ) as u32;
-    let unresolved_link_count = scan_outcome
-        .parsed_indexes
-        .iter()
-        .map(|parsed_index| {
-            parsed_index
-                .outbound_note_links
-                .iter()
-                .filter(|link| link.target_note_id.is_none())
-                .count()
-        })
-        .sum::<usize>() as u32;
+    let notes_with_errors = checked_status_count(
+        "notes_with_errors",
+        distinct_finding_path_count(
+            &scan_outcome.validation_report.findings,
+            &DiagnosticLevel::Error,
+        ),
+    )?;
+    let notes_with_warnings = checked_status_count(
+        "notes_with_warnings",
+        distinct_finding_path_count(
+            &scan_outcome.validation_report.findings,
+            &DiagnosticLevel::Warning,
+        ),
+    )?;
+    let unresolved_link_count = checked_status_count(
+        "unresolved_link_count",
+        scan_outcome
+            .parsed_indexes
+            .iter()
+            .map(|parsed_index| {
+                parsed_index
+                    .outbound_note_links
+                    .iter()
+                    .filter(|link| link.target_note_id.is_none())
+                    .count()
+            })
+            .sum::<usize>(),
+    )?;
 
     #[allow(deprecated)]
     Ok(StatusSummary {
@@ -97,7 +107,10 @@ pub fn status_summary(
         notes_with_errors,
         notes_with_warnings,
         unresolved_link_count,
-        duplicate_id_count: scan_outcome.scan_result.duplicate_ids.len() as u32,
+        duplicate_id_count: checked_status_count(
+            "duplicate_id_count",
+            scan_outcome.scan_result.duplicate_ids.len(),
+        )?,
         trashed_notes,
         trashed_assets,
         pending_purge,
@@ -134,4 +147,25 @@ fn distinct_finding_path_count(
         .map(|finding| &finding.path)
         .collect::<HashSet<_>>()
         .len()
+}
+
+fn checked_status_count(field: &'static str, count: usize) -> Result<u32, AppError> {
+    u32::try_from(count).map_err(|_| AppError::StatusCountOverflow { field })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::checked_status_count;
+    use crate::AppError;
+
+    #[test]
+    fn checked_status_count_returns_overflow_error_for_large_usize() {
+        let err = checked_status_count("notes_with_errors", usize::MAX)
+            .expect_err("overflowing status count should return an error");
+
+        assert!(matches!(
+            err,
+            AppError::StatusCountOverflow { field } if field == "notes_with_errors"
+        ));
+    }
 }

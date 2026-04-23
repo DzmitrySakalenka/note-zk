@@ -5,9 +5,9 @@ use std::io;
 use anyhow::Context;
 use rusqlite::Connection;
 use zk_app::{
-    RebuildOptions, preview_trash_asset, preview_trash_note, rebuild_index, trash_asset, trash_note,
+    EffectiveConfig, ItemKind, RebuildOptions, TrashRequest, bootstrap_preview_index_connection,
+    preview_trash_asset, preview_trash_note, rebuild_index, trash_asset, trash_note,
 };
-use zk_domain::TrashRequest;
 
 use crate::{
     bootstrap::{load_effective_config, open_index_connection, resolve_vault_root},
@@ -34,12 +34,8 @@ pub fn run(args: &TrashArgs, shared: &SharedFlags) -> Result<i32, CliError> {
     let trashed_item = if args.dry_run {
         let connection = open_preview_connection(&vault_root, &config)?;
         match kind {
-            zk_domain::ItemKind::Note => {
-                preview_trash_note(&vault_root, &config, &connection, &request)
-            }
-            zk_domain::ItemKind::Asset => {
-                preview_trash_asset(&vault_root, &config, &connection, &request)
-            }
+            ItemKind::Note => preview_trash_note(&vault_root, &config, &connection, &request),
+            ItemKind::Asset => preview_trash_asset(&vault_root, &config, &connection, &request),
         }
     } else {
         let mut connection = open_index_connection(&config)?;
@@ -71,13 +67,10 @@ pub fn run(args: &TrashArgs, shared: &SharedFlags) -> Result<i32, CliError> {
 
 fn open_preview_connection(
     vault_root: &std::path::Path,
-    config: &zk_domain::config::EffectiveConfig,
+    config: &EffectiveConfig,
 ) -> Result<Connection, CliError> {
-    let mut connection = zk_index::open_memory()
+    let mut connection = bootstrap_preview_index_connection()
         .context("while attempting to open preview index")
-        .map_err(CliError::Internal)?;
-    zk_index::ensure_schema(&connection)
-        .context("while attempting to initialize preview index")
         .map_err(CliError::Internal)?;
     refresh_index(vault_root, config, &mut connection)?;
     Ok(connection)
@@ -85,19 +78,19 @@ fn open_preview_connection(
 
 fn run_live_trash(
     vault_root: &std::path::Path,
-    config: &zk_domain::config::EffectiveConfig,
+    config: &EffectiveConfig,
     connection: &mut Connection,
     request: &TrashRequest,
 ) -> zk_app::Result<zk_app::TrashedItem> {
     match request.kind {
-        zk_domain::ItemKind::Note => trash_note(vault_root, config, connection, request),
-        zk_domain::ItemKind::Asset => trash_asset(vault_root, config, connection, request),
+        ItemKind::Note => trash_note(vault_root, config, connection, request),
+        ItemKind::Asset => trash_asset(vault_root, config, connection, request),
     }
 }
 
 fn refresh_index(
     vault_root: &std::path::Path,
-    config: &zk_domain::config::EffectiveConfig,
+    config: &EffectiveConfig,
     connection: &mut Connection,
 ) -> Result<(), CliError> {
     rebuild_index(vault_root, config, connection, RebuildOptions::default())

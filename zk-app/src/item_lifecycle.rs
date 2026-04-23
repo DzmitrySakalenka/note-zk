@@ -9,7 +9,7 @@ use zk_domain::{
     TargetSelector,
     id::{AssetId, ContentHash, NoteId, RelativePath, ServerRevision},
     sync::ItemType,
-    sync_state::DeleteRecord,
+    sync_state::{DeleteRecord, DeleteRecordTarget},
 };
 use zk_index::{AssetRepo, DeleteRecordRepo, IndexError, NoteRepo};
 
@@ -199,17 +199,42 @@ pub(crate) fn get_delete_record_with_context(
     item_type: ItemType,
     operation: &str,
 ) -> Result<Option<DeleteRecord>> {
-    DeleteRecordRepo::get_delete_record(conn, item_id, item_type).map_err(|source| {
-        AppError::IndexContext {
+    let target = delete_record_target(item_id, item_type);
+
+    DeleteRecordRepo::get_delete_record(conn, &target).map_err(|source| AppError::IndexContext {
+        context: format!(
+            "while fetching delete record for {} {} {}",
+            item_type_label(item_type),
+            item_id,
+            operation
+        ),
+        source,
+    })
+}
+
+pub(crate) fn require_delete_record_with_context(
+    conn: &Connection,
+    item_id: &str,
+    item_type: ItemType,
+    operation: &str,
+) -> Result<DeleteRecord> {
+    get_delete_record_with_context(conn, item_id, item_type, operation)?.ok_or_else(|| {
+        AppError::InvariantViolation {
             context: format!(
-                "while fetching delete record for {} {} {}",
+                "delete record for {} {} should exist {}",
                 item_type_label(item_type),
                 item_id,
                 operation
             ),
-            source,
         }
     })
+}
+
+pub(crate) fn delete_record_target(item_id: &str, item_type: ItemType) -> DeleteRecordTarget {
+    match item_type {
+        ItemType::Note => DeleteRecordTarget::Note(NoteId::new(item_id)),
+        ItemType::Asset => DeleteRecordTarget::Asset(AssetId::new(item_id)),
+    }
 }
 
 fn item_type_label(item_type: ItemType) -> &'static str {
@@ -250,8 +275,7 @@ pub(crate) fn persist_delete_record_original_path(
     DeleteRecordRepo::insert_delete_record(
         conn,
         &zk_domain::sync_state::DeleteRecord {
-            item_id: delete_record.item_id,
-            item_type: delete_record.item_type,
+            target: delete_record.target,
             original_path: original_path.clone(),
             trashed_at: delete_record.trashed_at,
             retention_until: delete_record.retention_until,
