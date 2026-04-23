@@ -1,5 +1,6 @@
 //! Shared error types returned by server bootstrap and HTTP workflows.
 
+use crate::config::ConfigError;
 use thiserror::Error;
 
 /// Result alias used by `zk-server` public APIs.
@@ -10,7 +11,7 @@ pub type ServerResult<T> = Result<T, ServerError>;
 pub enum ServerError {
     /// Server configuration failed to load or validate.
     #[error("config error")]
-    Config(#[source] ConfigError),
+    Config(#[from] ConfigError),
     /// `SQLite` returned an error while serving a request or bootstrapping.
     #[error("database error")]
     Database(#[source] rusqlite::Error),
@@ -33,8 +34,3 @@ pub enum ServerError {
     #[error("internal error")]
     Internal(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
-
-/// Placeholder configuration error until TG12-002 defines the real config model.
-#[derive(Debug, Error)]
-#[error("config error")]
-pub struct ConfigError;
