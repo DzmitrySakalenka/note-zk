@@ -31,11 +31,23 @@ pub mod config;
 pub mod sync;
 
 pub use bootstrap::{
-    bootstrap_effective_config, bootstrap_effective_config_from_env, detect_platform,
-    resolve_default_global_config_path,
+    bootstrap_effective_config, bootstrap_effective_config_from_env, bootstrap_index_connection,
+    bootstrap_preview_index_connection, detect_platform, resolve_default_global_config_path,
 };
 pub use bridge::{build_asset_inputs, build_note_inputs};
 pub use error::{AppError, Result};
+/// Transparent re-exports of CLI-facing config types from `zk-domain`.
+pub use zk_domain::config::{CliOverrides, EffectiveConfig};
+/// Transparent re-export of the CLI-facing relative path type from `zk-domain`.
+pub use zk_domain::id::RelativePath;
+/// Transparent re-exports of CLI-facing identifier and request types from `zk-domain`.
+pub use zk_domain::{
+    ItemKind, PurgeRequest, PurgeScope, RestoreRequest, TargetSelector, TrashRequest,
+};
+/// Transparent re-exports of validation and sync enums used in CLI output.
+pub use zk_domain::{ItemType, note::DiagnosticLevel, note::ValidationFinding};
+/// Transparent re-export of the scan normalization summary from `zk-vault`.
+pub use zk_vault::NormalizationSummary;
 // Keep the high-level facade exports grouped by topic for rustdoc readability.
 #[rustfmt::skip]
 pub use scan::{ScanOutcome, scan_vault};

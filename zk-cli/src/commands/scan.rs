@@ -3,7 +3,7 @@
 use std::io;
 
 use anyhow::Context;
-use zk_app::{RebuildOptions, RebuildOutcome, rebuild_index, scan_vault};
+use zk_app::{EffectiveConfig, RebuildOptions, RebuildOutcome, rebuild_index, scan_vault};
 
 use crate::{
     bootstrap::{load_effective_config, open_index_connection, resolve_vault_root},
@@ -45,7 +45,7 @@ pub fn run(args: &ScanArgs, shared: &SharedFlags) -> Result<i32, CliError> {
 
 fn run_check(
     vault_root: &std::path::Path,
-    config: &zk_domain::config::EffectiveConfig,
+    config: &EffectiveConfig,
     output_mode: OutputMode,
 ) -> Result<i32, CliError> {
     let scan_outcome = scan_vault(vault_root, config)
@@ -74,7 +74,7 @@ fn run_check(
 
 fn run_write(
     vault_root: &std::path::Path,
-    config: &zk_domain::config::EffectiveConfig,
+    config: &EffectiveConfig,
     output_mode: OutputMode,
 ) -> Result<i32, CliError> {
     let mut connection = open_index_connection(config)?;

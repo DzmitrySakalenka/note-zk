@@ -4,10 +4,9 @@ use std::io::{self, Write};
 
 use serde::Serialize;
 use zk_app::{
-    DoctorIssue, DoctorReport, PurgeOutcome, RestoredItem, ScanOutcome, StatusSummary, TrashedItem,
+    DiagnosticLevel, DoctorIssue, DoctorReport, ItemKind, ItemType, NormalizationSummary,
+    PurgeOutcome, RestoredItem, ScanOutcome, StatusSummary, TrashedItem, ValidationFinding,
 };
-use zk_domain::{note::DiagnosticLevel, sync::ItemType};
-use zk_vault::NormalizationSummary;
 
 /// Aggregate counters rendered by the `scan` command.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -313,7 +312,7 @@ pub fn write_purge_human(
     Ok(())
 }
 
-fn count_findings(findings: &[zk_domain::note::ValidationFinding], level: &DiagnosticLevel) -> u32 {
+fn count_findings(findings: &[ValidationFinding], level: &DiagnosticLevel) -> u32 {
     findings
         .iter()
         .filter(|finding| &finding.level == level)
@@ -450,9 +449,9 @@ fn item_type_label(item_type: ItemType) -> &'static str {
     }
 }
 
-fn item_kind_label(kind: &zk_domain::ItemKind) -> &'static str {
+fn item_kind_label(kind: &ItemKind) -> &'static str {
     match kind {
-        zk_domain::ItemKind::Note => "note",
-        zk_domain::ItemKind::Asset => "asset",
+        ItemKind::Note => "note",
+        ItemKind::Asset => "asset",
     }
 }

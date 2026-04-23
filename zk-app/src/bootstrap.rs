@@ -1,9 +1,12 @@
 use std::{
+    fs,
     io::{self, ErrorKind},
     path::{Path, PathBuf},
 };
 
+use rusqlite::Connection;
 use zk_domain::config::{CliOverrides, EffectiveConfig};
+use zk_index::IndexError;
 
 use crate::{
     AppError, Result,
@@ -88,10 +91,63 @@ pub fn bootstrap_effective_config_from_env(
     bootstrap_effective_config(vault_root, cli, &|name| std::env::var(name).ok())
 }
 
+/// Opens the configured local index database and ensures the schema is current.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when the database parent directory cannot be prepared,
+/// the `SQLite` connection cannot be opened, or schema initialization fails.
+pub fn bootstrap_index_connection(config: &EffectiveConfig) -> Result<Connection> {
+    let database_path = resolve_database_path(config);
+
+    if let Some(parent_dir) = database_path.parent() {
+        fs::create_dir_all(parent_dir).map_err(|source| AppError::Io {
+            path: parent_dir.to_path_buf(),
+            source,
+        })?;
+    }
+
+    let connection = Connection::open(&database_path).map_err(|source| {
+        AppError::Index(IndexError::Sqlite {
+            source,
+            context: format!("open index database '{}'", database_path.display()),
+        })
+    })?;
+    zk_index::ensure_schema(&connection)?;
+
+    Ok(connection)
+}
+
+/// Opens an in-memory preview index and ensures the schema is current.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when the in-memory `SQLite` connection cannot be
+/// opened or schema initialization fails.
+pub fn bootstrap_preview_index_connection() -> Result<Connection> {
+    let connection = Connection::open_in_memory().map_err(|source| {
+        AppError::Index(IndexError::Sqlite {
+            source,
+            context: "open preview index".to_string(),
+        })
+    })?;
+    zk_index::ensure_schema(&connection)?;
+
+    Ok(connection)
+}
+
 fn detect_platform_for_os(os_name: &str) -> ConfigPlatform {
     match os_name {
         "macos" => ConfigPlatform::MacOs,
         "windows" => ConfigPlatform::Windows,
         _ => ConfigPlatform::Linux,
+    }
+}
+
+fn resolve_database_path(config: &EffectiveConfig) -> PathBuf {
+    if config.local_db_path.is_absolute() {
+        config.local_db_path.clone()
+    } else {
+        config.vault_path.join(&config.local_db_path)
     }
 }
