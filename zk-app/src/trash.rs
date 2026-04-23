@@ -17,8 +17,8 @@ use crate::{
     item_lifecycle::{
         ResolvedAssetTarget, ResolvedNoteTarget, begin_item_lifecycle_transaction,
         commit_item_lifecycle_transaction, ensure_not_purged, format_timestamp,
-        get_delete_record_with_context, persist_delete_record_original_path,
-        preserve_existing_original_path, render_target, resolve_asset_target, resolve_note_target,
+        persist_delete_record_original_path, preserve_existing_original_path, render_target,
+        require_delete_record_with_context, resolve_asset_target, resolve_note_target,
         rollback_file_move,
     },
     reconcile_delete_records,
@@ -252,13 +252,8 @@ fn build_trashed_item(
         ItemKind::Note => ItemType::Note,
         ItemKind::Asset => ItemType::Asset,
     };
-    let delete_record = get_delete_record_with_context(conn, item_id, item_type, "after trash")?
-        .ok_or_else(|| {
-            AppError::Index(zk_index::IndexError::Sqlite {
-                source: rusqlite::Error::QueryReturnedNoRows,
-                context: "get delete record after trash".to_string(),
-            })
-        })?;
+    let delete_record =
+        require_delete_record_with_context(conn, item_id, item_type, "after trash")?;
 
     Ok(TrashedItem {
         item_id: item_id.to_string(),

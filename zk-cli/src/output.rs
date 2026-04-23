@@ -33,10 +33,15 @@ pub struct ScanSummary {
 #[serde(tag = "mode", rename_all = "lowercase")]
 pub enum ScanCommandPayload {
     /// Dry-run scan counters.
-    Check { summary: ScanSummary },
+    Check {
+        /// Aggregate counters derived from the scan result.
+        summary: ScanSummary,
+    },
     /// Write-mode scan counters and normalization summary.
     Write {
+        /// Aggregate counters derived from the post-write scan result.
         summary: ScanSummary,
+        /// File-level normalization write counts from the same command run.
         normalization: NormalizationSummary,
     },
 }

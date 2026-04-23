@@ -210,6 +210,59 @@ fn preview_trash_asset_returns_planned_path_without_mutating_disk_or_db() {
 }
 
 #[test]
+fn trash_note_reports_invariant_violation_when_delete_record_disappears_after_write() {
+    let root = unique_test_dir("trash-note-delete-record-invariant");
+    let vault_root = root.join("vault");
+    let note_id = NoteId::new("01TRASHINVARIANTNOTE00000001");
+    write_note(
+        &vault_root.join("notes").join("alpha.md"),
+        note_id.as_str(),
+        "Alpha",
+    );
+
+    let config = base_config(&vault_root);
+    let mut conn = seeded_connection(
+        &vault_root,
+        &config,
+        "trash-note-delete-record-invariant.sqlite",
+    );
+    conn.execute_batch(
+        r"
+CREATE TRIGGER delete_records_drop_after_insert
+AFTER INSERT ON delete_records
+BEGIN
+    DELETE FROM delete_records
+    WHERE item_id = NEW.item_id AND item_type = NEW.item_type;
+END;
+",
+    )
+    .expect("trigger creation should succeed");
+
+    let err = trash_note(
+        &vault_root,
+        &config,
+        &mut conn,
+        &TrashRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            reason: None,
+        },
+    )
+    .expect_err("missing post-write delete record should fail");
+
+    assert!(matches!(
+        &err,
+        AppError::InvariantViolation { context }
+            if context
+                == &format!("delete record for note {} should exist after trash", note_id.as_str())
+    ));
+    assert!(vault_root.join("notes").join("alpha.md").exists());
+    assert!(
+        lookup_delete_record(&conn, note_id.as_str(), zk_domain::sync::ItemType::Note).is_none()
+    );
+}
+
+#[test]
 fn restore_note_uses_original_path_by_default() {
     let root = unique_test_dir("restore-note-default");
     let vault_root = root.join("vault");

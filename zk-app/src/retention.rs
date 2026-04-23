@@ -5,7 +5,11 @@ use rusqlite::Connection;
 use zk_domain::{id::RelativePath, sync::ItemType, sync_state::DeleteRecord};
 use zk_index::{AssetInput, AssetRepo, DeleteRecordRepo, IndexError, NoteInput, NoteRepo};
 
-use crate::{AppError, config::ConfigValidationError, item_lifecycle::delete_record_target};
+use crate::{
+    AppError,
+    config::ConfigValidationError,
+    item_lifecycle::{delete_record_target, get_delete_record_with_context},
+};
 
 /// Summary counts for one delete-record reconciliation pass.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -187,7 +191,8 @@ fn upsert_delete_record_if_needed(
     let retention_until =
         compute_retention_until(Some(&effective_trashed_at), retention_days, clock)?;
     let target = delete_record_target(item_id, item_type);
-    let existing_record = DeleteRecordRepo::get_delete_record(conn, &target)?;
+    let existing_record =
+        get_delete_record_with_context(conn, item_id, item_type, "during rebuild reconciliation")?;
     let preserved_original_path = existing_record.as_ref().map_or_else(
         || original_path.clone(),
         |record| record.original_path.clone(),
@@ -223,7 +228,9 @@ fn clear_delete_record_if_present(
     stats: &mut ReconciliationStats,
 ) -> Result<(), AppError> {
     let target = delete_record_target(item_id, item_type);
-    if DeleteRecordRepo::get_delete_record(conn, &target)?.is_some() {
+    if get_delete_record_with_context(conn, item_id, item_type, "during rebuild reconciliation")?
+        .is_some()
+    {
         DeleteRecordRepo::delete_delete_record(conn, &target)?;
         stats.cleared += 1;
     }

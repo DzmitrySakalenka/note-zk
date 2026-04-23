@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! Command-line shell for the local Phase 1 workflows.
 
 /// CLI bootstrap helpers for config loading and index setup.

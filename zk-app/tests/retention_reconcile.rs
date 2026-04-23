@@ -11,8 +11,8 @@ use tracing::{
 };
 use tracing_subscriber::{Layer, layer::Context, prelude::*};
 use zk_app::{
-    Clock, RebuildOptions, RebuildOutcome, ReconciliationStats, rebuild_index as app_rebuild_index,
-    reconcile_delete_records, trash_note,
+    AppError, Clock, RebuildOptions, RebuildOutcome, ReconciliationStats,
+    rebuild_index as app_rebuild_index, reconcile_delete_records, trash_note,
 };
 use zk_domain::{
     DeleteRecord, DeleteRecordTarget, ItemKind, TargetSelector, TrashRequest,
@@ -261,6 +261,56 @@ fn reconcile_delete_records_refreshes_rows_when_retention_days_change() {
         .retention_until,
         "2026-05-20T10:00:00Z"
     );
+}
+
+#[test]
+fn reconcile_delete_records_reports_item_context_when_lookup_fails() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    let note_id = "01TRASHRECONCILELOOKUP000001";
+    let note_inputs = vec![note_input(
+        note_id,
+        "99_trash/context.md",
+        true,
+        Some("2026-04-20T10:00:00Z"),
+    )];
+
+    connection
+        .authorizer(Some(|ctx: rusqlite::hooks::AuthContext<'_>| {
+            match ctx.action {
+                rusqlite::hooks::AuthAction::Read {
+                    table_name: "delete_records",
+                    ..
+                } => rusqlite::hooks::Authorization::Deny,
+                _ => rusqlite::hooks::Authorization::Allow,
+            }
+        }))
+        .expect("install authorizer");
+
+    let err = reconcile_delete_records(
+        &connection,
+        &note_inputs,
+        &[],
+        14,
+        &fixed_clock("2026-04-20T12:00:00Z"),
+    )
+    .expect_err("delete-record lookup failure should surface as an error");
+
+    assert!(matches!(
+        &err,
+        AppError::IndexContext {
+            context,
+            source: zk_index::IndexError::Sqlite {
+                context: source_context,
+                ..
+            }
+        } if context
+            == &format!(
+                "while fetching delete record for note {note_id} during rebuild reconciliation"
+            ) && source_context == "get delete record"
+    ));
+    assert!(err.to_string().contains(note_id));
+    assert!(err.to_string().contains("during rebuild reconciliation"));
 }
 
 #[test]

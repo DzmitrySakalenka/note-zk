@@ -212,6 +212,24 @@ pub(crate) fn get_delete_record_with_context(
     })
 }
 
+pub(crate) fn require_delete_record_with_context(
+    conn: &Connection,
+    item_id: &str,
+    item_type: ItemType,
+    operation: &str,
+) -> Result<DeleteRecord> {
+    get_delete_record_with_context(conn, item_id, item_type, operation)?.ok_or_else(|| {
+        AppError::InvariantViolation {
+            context: format!(
+                "delete record for {} {} should exist {}",
+                item_type_label(item_type),
+                item_id,
+                operation
+            ),
+        }
+    })
+}
+
 pub(crate) fn delete_record_target(item_id: &str, item_type: ItemType) -> DeleteRecordTarget {
     match item_type {
         ItemType::Note => DeleteRecordTarget::Note(NoteId::new(item_id)),

@@ -116,7 +116,11 @@ Body
 
     let err = rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
         .expect_err("reconciliation failure should abort rebuild");
-    assert!(matches!(err, AppError::Index(_)));
+    assert!(matches!(
+        &err,
+        AppError::IndexContext { context, .. }
+            if context.contains("during rebuild reconciliation")
+    ));
     assert!(err.to_string().contains("get delete record"));
 
     drop(conn);

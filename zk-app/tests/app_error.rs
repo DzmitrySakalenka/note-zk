@@ -76,6 +76,10 @@ fn preserves_app_owned_payloads() {
     let item_not_found = AppError::ItemNotFound {
         target: "assets/missing.png".to_string(),
     };
+    let invariant_violation = AppError::InvariantViolation {
+        context: "delete record for note 01TESTNOTEID00000000000000 should exist after trash"
+            .to_string(),
+    };
     let path_exists = AppError::NotePathExists {
         path: RelativePath::new("notes/existing.md"),
     };
@@ -95,6 +99,11 @@ fn preserves_app_owned_payloads() {
     assert!(matches!(
         item_not_found,
         AppError::ItemNotFound { target } if target == "assets/missing.png"
+    ));
+    assert!(matches!(
+        invariant_violation,
+        AppError::InvariantViolation { context }
+            if context == "delete record for note 01TESTNOTEID00000000000000 should exist after trash"
     ));
     assert!(matches!(
         path_exists,

@@ -50,6 +50,12 @@ pub enum AppError {
         #[source]
         source: io::Error,
     },
+    /// App-layer invariant was violated after a local lifecycle write.
+    #[error("while attempting to maintain local lifecycle invariants: {context}")]
+    InvariantViolation {
+        /// Human-readable description of the violated local invariant.
+        context: String,
+    },
     /// Write blocked by immutable folder policy.
     #[error("while attempting to write item at {path}: folder is immutable")]
     ImmutableFolder {
