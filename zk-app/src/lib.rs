@@ -21,6 +21,7 @@ mod retention;
 mod scan;
 mod status;
 mod trash;
+mod trash_path;
 mod write;
 mod write_policy;
 
