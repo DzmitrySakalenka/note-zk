@@ -20,6 +20,15 @@ Everything else is derived or coordinated around it:
 - chat memory
 - sync metadata
 
+## Sync (local core)
+
+The local half of the sync protocol:
+- change planning,
+- push payload building,
+- pull apply with `event_seq`-ordered cursors,
+- conflict detection,
+- conflict-copy writes.
+
 ## Build and Test
 
 Use the workspace-level cargo commands from the repository root:
