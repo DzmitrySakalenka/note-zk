@@ -6,12 +6,17 @@ use tokio::signal::unix::{SignalKind, signal};
 use tower::ServiceBuilder;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 
-use crate::{ServerError, ServerResult, http::health::health, state::ServerState};
+use crate::{
+    ServerError, ServerResult,
+    http::{ApiError, health::health},
+    state::ServerState,
+};
 
 /// Builds the top-level HTTP router for the server.
 pub fn build_router(state: ServerState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .fallback(not_found)
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
@@ -21,6 +26,10 @@ pub fn build_router(state: ServerState) -> Router {
                 )),
         )
         .with_state(state)
+}
+
+async fn not_found() -> ApiError {
+    ApiError::from(ServerError::NotFound("not found".to_string()))
 }
 
 /// Binds the HTTP listener and serves requests until a shutdown signal arrives.

@@ -4,10 +4,10 @@ use chrono::{DateTime, Utc};
 use crate::{ServerError, http::ApiError, state::ServerState};
 
 /// Response payload returned by the `/health` endpoint.
-#[derive(serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct HealthResponse {
     /// Stable health status marker for load balancers and operators.
-    pub status: &'static str,
+    pub status: String,
     /// Whether the lightweight database probe succeeded.
     pub db_ok: bool,
     /// Current server wall-clock time in UTC.
@@ -41,7 +41,7 @@ pub async fn health(State(state): State<ServerState>) -> Result<Json<HealthRespo
     let uptime_seconds = (now - state.started_at()).num_seconds().max(0);
 
     Ok(Json(HealthResponse {
-        status: "ok",
+        status: "ok".to_string(),
         db_ok,
         server_time: now,
         schema_version,
