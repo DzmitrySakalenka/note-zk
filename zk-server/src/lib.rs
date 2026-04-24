@@ -12,7 +12,13 @@ mod schema;
 pub mod service;
 pub mod state;
 
+pub use config::{ConfigError, ConfigResult, ServerConfig};
+pub use db::ServerDb;
 pub use error::{ServerError, ServerResult};
+#[rustfmt::skip]
+pub use http::{build_router, serve, HealthResponse, ApiError};
+#[rustfmt::skip]
+pub use state::{bootstrap, bootstrap_with_config, ServerState};
 
 /// Loads config, initializes tracing, bootstraps state, and runs the server.
 ///

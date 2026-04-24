@@ -29,6 +29,15 @@ The local half of the sync protocol:
 - conflict detection,
 - conflict-copy writes.
 
+## Server foundation:
+
+- axum + tokio bootstrap,
+- server-side SQLite schema with `sync_events` + `device_sync_cursors` +
+authoritative note / asset rows,
+- repositories over each table,
+- service-layer conflict predicates and event recording, structured `ApiError` / JSON envelopes,
+- stub bearer-token auth middleware, and a `/health` endpoint.
+
 ## Build and Test
 
 Use the workspace-level cargo commands from the repository root:
