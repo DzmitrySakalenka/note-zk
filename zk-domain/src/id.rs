@@ -4,8 +4,11 @@ use std::{
     fmt,
     io::{self, Read},
 };
+use thiserror::Error;
 
 const CONTENT_HASH_CHUNK_SIZE: usize = 64 * 1024;
+const STRICT_ID_EXPECTED: &str = "a 26-character ULID or 36-character hyphenated UUID";
+const STRICT_CONTENT_HASH_EXPECTED: &str = "exactly 64 lowercase hexadecimal characters";
 
 macro_rules! impl_string_newtype {
     ($name:ident) => {
@@ -88,11 +91,44 @@ macro_rules! impl_from_string_via_new_and_display {
 // NoteId
 // ==========================================================================
 
+/// Strict identifier parsing failure for server-facing boundaries.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum IdFormatError {
+    /// The input string is empty.
+    #[error("value must not be empty")]
+    Empty,
+    /// The input does not match the expected overall format.
+    #[error("value must match {expected}")]
+    InvalidShape {
+        /// Human-readable description of the accepted format.
+        expected: &'static str,
+    },
+    /// The input shape is plausible but contains invalid characters.
+    #[error("value contains invalid characters")]
+    InvalidChars,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 /// Stable identifier for notes across rename and move operations.
 pub struct NoteId(String);
 
 impl_generated_string_newtype!(NoteId);
+
+impl NoteId {
+    /// Strictly parses a note identifier for untrusted boundary inputs.
+    ///
+    /// Lenient construction remains available through [`NoteId::new`] and
+    /// [`From<String>`] for legacy round-trip scenarios inside the vault.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IdFormatError`] when the value is empty or is neither a
+    /// canonical ULID nor a hyphenated UUID string.
+    pub fn try_from_strict(value: &str) -> Result<Self, IdFormatError> {
+        validate_generated_id(value)?;
+        Ok(Self::new(value))
+    }
+}
 
 // ==========================================================================
 // AssetId
@@ -103,6 +139,22 @@ impl_generated_string_newtype!(NoteId);
 pub struct AssetId(String);
 
 impl_generated_string_newtype!(AssetId);
+
+impl AssetId {
+    /// Strictly parses an asset identifier for untrusted boundary inputs.
+    ///
+    /// Lenient construction remains available through [`AssetId::new`] and
+    /// [`From<String>`] for legacy round-trip scenarios inside the vault.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IdFormatError`] when the value is empty or is neither a
+    /// canonical ULID nor a hyphenated UUID string.
+    pub fn try_from_strict(value: &str) -> Result<Self, IdFormatError> {
+        validate_generated_id(value)?;
+        Ok(Self::new(value))
+    }
+}
 
 // ==========================================================================
 // DeviceId
@@ -162,6 +214,38 @@ impl ContentHash {
 }
 
 impl_string_newtype!(ContentHash);
+
+impl ContentHash {
+    /// Strictly parses a content hash for untrusted boundary inputs.
+    ///
+    /// Lenient construction remains available through [`ContentHash::new`] and
+    /// [`From<String>`] for legacy round-trip scenarios inside the vault.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IdFormatError`] when the value is empty, has the wrong
+    /// length, or contains characters outside lowercase hexadecimal.
+    pub fn try_from_strict(value: &str) -> Result<Self, IdFormatError> {
+        if value.is_empty() {
+            return Err(IdFormatError::Empty);
+        }
+
+        if value.len() != 64 {
+            return Err(IdFormatError::InvalidShape {
+                expected: STRICT_CONTENT_HASH_EXPECTED,
+            });
+        }
+
+        if !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        {
+            return Err(IdFormatError::InvalidChars);
+        }
+
+        Ok(Self::new(value))
+    }
+}
 
 // ==========================================================================
 // ServerRevision
@@ -238,3 +322,59 @@ impl RelativePath {
 }
 
 impl_from_string_via_new_and_display!(RelativePath);
+
+fn validate_generated_id(value: &str) -> Result<(), IdFormatError> {
+    if value.is_empty() {
+        return Err(IdFormatError::Empty);
+    }
+
+    match value.len() {
+        26 => validate_ulid(value),
+        36 => validate_uuid(value),
+        _ => Err(IdFormatError::InvalidShape {
+            expected: STRICT_ID_EXPECTED,
+        }),
+    }
+}
+
+fn validate_ulid(value: &str) -> Result<(), IdFormatError> {
+    if !value.bytes().all(is_valid_ulid_byte) {
+        return Err(IdFormatError::InvalidChars);
+    }
+
+    ulid::Ulid::from_string(value)
+        .map(|_| ())
+        .map_err(|_| IdFormatError::InvalidShape {
+            expected: STRICT_ID_EXPECTED,
+        })
+}
+
+fn validate_uuid(value: &str) -> Result<(), IdFormatError> {
+    for (index, byte) in value.bytes().enumerate() {
+        let is_dash_position = matches!(index, 8 | 13 | 18 | 23);
+
+        if is_dash_position {
+            if byte != b'-' {
+                return Err(IdFormatError::InvalidShape {
+                    expected: STRICT_ID_EXPECTED,
+                });
+            }
+
+            continue;
+        }
+
+        if !byte.is_ascii_hexdigit() {
+            return Err(IdFormatError::InvalidChars);
+        }
+    }
+
+    Ok(())
+}
+
+fn is_valid_ulid_byte(byte: u8) -> bool {
+    byte.is_ascii_digit()
+        || matches!(
+            byte,
+            b'A'..=b'H' | b'J'..=b'K' | b'M'..=b'N' | b'P'..=b'T' | b'V'..=b'Z'
+        )
+}

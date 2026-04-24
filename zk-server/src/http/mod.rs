@@ -1,6 +1,7 @@
 //! HTTP router, handlers, and response mapping.
 
 mod error;
+pub mod extract;
 mod health;
 mod router;
 

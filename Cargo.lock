@@ -2085,6 +2085,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zk-app",
+ "zk-domain",
 ]
 
 [[package]]
