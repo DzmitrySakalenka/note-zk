@@ -1,2 +1,7 @@
 //! HTTP router, handlers, and response mapping.
-// TODO: TG12-016 and TG12-018 implement API errors, handlers, and router assembly.
+
+mod error;
+
+pub use error::ApiError;
+
+// TODO: TG12-018 implement handlers and router assembly.
