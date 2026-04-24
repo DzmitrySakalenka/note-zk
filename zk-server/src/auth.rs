@@ -11,7 +11,7 @@ use rusqlite::OptionalExtension;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
-use crate::{ServerError, http::ApiError, repo::DeviceTokenRepo, state::ServerState};
+use crate::{ServerError, ServerResult, http::ApiError, repo::DeviceTokenRepo, state::ServerState};
 
 const DEVICE_TOKENS_EXIST_SQL: &str = "SELECT 1 FROM device_tokens LIMIT 1";
 
@@ -37,7 +37,7 @@ pub async fn require_auth_layer(
 ) -> Result<Response, ApiError> {
     let config_hash = state.config().stub_auth_token_sha256_hex.as_deref();
 
-    if config_hash.is_none() && !device_tokens_exist(&state)? {
+    if config_hash.is_none() && !device_tokens_exist(&state).map_err(ApiError::from)? {
         attach_authenticated_device(
             &mut req,
             AuthenticatedDevice {
@@ -103,17 +103,14 @@ where
     }
 }
 
-fn device_tokens_exist(state: &ServerState) -> Result<bool, ApiError> {
-    state
-        .db()
-        .with_conn(|connection| {
-            connection
-                .query_row(DEVICE_TOKENS_EXIST_SQL, [], |_| Ok(()))
-                .optional()
-                .map(|row| row.is_some())
-                .map_err(ServerError::Database)
-        })
-        .map_err(ApiError::from)
+pub(crate) fn device_tokens_exist(state: &ServerState) -> ServerResult<bool> {
+    state.db().with_conn(|connection| {
+        connection
+            .query_row(DEVICE_TOKENS_EXIST_SQL, [], |_| Ok(()))
+            .optional()
+            .map(|row| row.is_some())
+            .map_err(ServerError::Database)
+    })
 }
 
 fn bearer_token_from_headers(headers: &axum::http::HeaderMap) -> Result<&str, ApiError> {
