@@ -2040,6 +2040,7 @@ dependencies = [
 name = "zk-domain"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "hex",
  "serde",
  "serde_json",
@@ -2084,7 +2085,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "zk-app",
  "zk-domain",
 ]
 

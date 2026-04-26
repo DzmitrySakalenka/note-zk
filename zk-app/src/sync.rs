@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use zk_domain::{
     RegisterDeviceRequest, RegisterDeviceResponse, SyncPushRequest, WireOperation,
@@ -21,7 +20,7 @@ use zk_sync::{
 };
 use zk_vault::VaultRoot;
 
-use crate::{AppError, Result, retention::Clock as AppClock};
+use crate::{AppError, Clock, Result};
 
 /// Summary returned from the bootstrap facade entry point.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,7 +42,7 @@ pub struct SyncContext<'a> {
     /// Local device identifier being synchronized.
     pub device_id: &'a DeviceId,
     /// Clock used for deterministic timestamps in sync-state updates.
-    pub clock: &'a dyn AppClock,
+    pub clock: &'a dyn Clock,
     /// Vault-relative trash directory used to distinguish move from restore.
     pub trash_dir: &'a RelativePath,
 }
@@ -96,12 +95,11 @@ pub async fn plan_and_push(
         clock,
         trash_dir,
     } = ctx;
-    let sync_clock = SyncClockAdapter { inner: clock };
     let planned = {
         let planner = PlannerContext {
             conn: &*conn,
             device_id,
-            clock: &sync_clock,
+            clock,
             trash_dir,
         };
         zk_sync::plan::plan_local_changes(&planner)?
@@ -110,11 +108,7 @@ pub async fn plan_and_push(
     let response = transport.push(&request).await?;
 
     Ok(apply_push_response(
-        conn,
-        device_id,
-        &planned,
-        &response,
-        &sync_clock,
+        conn, device_id, &planned, &response, clock,
     )?)
 }
 
@@ -135,7 +129,6 @@ pub async fn pull_and_apply(
         clock,
         trash_dir,
     } = ctx;
-    let sync_clock = SyncClockAdapter { inner: clock };
     let mut aggregate = PullApplyOutcome::default();
 
     loop {
@@ -146,7 +139,7 @@ pub async fn pull_and_apply(
         let pull_ctx = PullApplyContext {
             vault,
             device_id,
-            clock: &sync_clock,
+            clock,
             trash_dir,
         };
         let batch = apply_pull_response(conn, &pull_ctx, &response)?;
@@ -199,33 +192,22 @@ pub async fn bootstrap(
             .await?,
         )),
         InitialSyncMode::EmptyRemote => {
-            let sync_clock = SyncClockAdapter { inner: clock };
             let request = {
                 let planner = PlannerContext {
                     conn: &*conn,
                     device_id,
-                    clock: &sync_clock,
+                    clock,
                     trash_dir,
                 };
                 plan_empty_remote_bootstrap(&planner, vault)?
             };
             let planned = bootstrap_planned_operations(&request);
             let response = transport.push(&request).await?;
-            let outcome = apply_push_response(conn, device_id, &planned, &response, &sync_clock)?;
+            let outcome = apply_push_response(conn, device_id, &planned, &response, clock)?;
 
             Ok(BootstrapOutcome::Pushed(outcome))
         }
         InitialSyncMode::Both => unreachable!("validated bootstrap mode should be unambiguous"),
-    }
-}
-
-struct SyncClockAdapter<'a> {
-    inner: &'a dyn AppClock,
-}
-
-impl zk_sync::plan::Clock for SyncClockAdapter<'_> {
-    fn now(&self) -> DateTime<Utc> {
-        self.inner.now()
     }
 }
 

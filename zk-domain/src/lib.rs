@@ -3,6 +3,8 @@
 
 /// Asset metadata and index-facing asset record models.
 pub mod asset;
+/// Shared UTC clock abstraction for deterministic tests and production time.
+pub mod clock;
 /// Global, vault, and effective runtime configuration models.
 pub mod config;
 /// Derived index and link-resolution result models.
@@ -24,6 +26,7 @@ pub mod write;
 /// Write-request models for trash, restore, and purge operations.
 pub mod write_request;
 
+pub use clock::{Clock, SystemClock};
 pub use sync::ItemType;
 pub use sync_state::{DeleteRecord, DeleteRecordTarget};
 pub use sync_wire::{

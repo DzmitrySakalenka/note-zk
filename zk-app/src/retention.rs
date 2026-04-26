@@ -1,7 +1,6 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use chrono::{DateTime, Days, SecondsFormat, TimeZone, Utc};
+use chrono::{DateTime, Days, SecondsFormat, Utc};
 use rusqlite::Connection;
+pub use zk_domain::clock::{Clock, SystemClock};
 use zk_domain::{id::RelativePath, sync::ItemType, sync_state::DeleteRecord};
 use zk_index::{AssetInput, AssetRepo, DeleteRecordRepo, IndexError, NoteInput, NoteRepo};
 
@@ -22,28 +21,6 @@ pub struct ReconciliationStats {
     pub cleared: u32,
     /// Number of orphaned active delete records that were only warned about.
     pub orphans_warned: u32,
-}
-
-/// Time source abstraction for retention calculations.
-pub trait Clock {
-    /// Returns the current UTC timestamp.
-    fn now(&self) -> DateTime<Utc>;
-}
-
-/// System-backed clock implementation for production callers.
-pub struct SystemClock;
-
-impl Clock for SystemClock {
-    fn now(&self) -> DateTime<Utc> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time should be after the unix epoch");
-        let seconds = i64::try_from(now.as_secs()).expect("unix seconds should fit in i64");
-
-        Utc.timestamp_opt(seconds, now.subsec_nanos())
-            .single()
-            .expect("system time should convert into a single UTC timestamp")
-    }
 }
 
 /// Computes the retention-expiry timestamp for one trashed item.
