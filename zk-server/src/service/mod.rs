@@ -7,6 +7,7 @@ mod events;
 pub use conflict::{
     AcceptOutcome, accept_or_conflict, is_fresh_create, is_stale_revision, next_server_revision,
 };
+pub(crate) use devices::validate_device_id;
 pub use devices::{RegisterDeviceInput, RegisterDeviceOutcome, register_device};
 pub use events::{
     FetchChangesOutcome, RecordAssetChange, RecordNoteChange, RecordedEvent, SyncChangeRow,
