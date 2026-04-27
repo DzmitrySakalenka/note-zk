@@ -16,6 +16,9 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 rust-version = "1.85"
 
+[workspace.lints.rust]
+unused_crate_dependencies = "warn"
+
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
