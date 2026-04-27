@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 pub use zk_vault::resolve_vault_links;
 pub use zk_vault::{NormalizationResult, TitleSource, VaultScanResult, analyze_body};
 

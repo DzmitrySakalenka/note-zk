@@ -1,4 +1,6 @@
 #![warn(missing_docs)]
+// Test targets inherit dev-dependencies used by integration tests.
+#![cfg_attr(test, allow(unused_crate_dependencies))]
 //! Command-line shell for the local Phase 1 workflows.
 
 /// CLI bootstrap helpers for config loading and index setup.
@@ -11,6 +13,10 @@ pub mod commands;
 pub mod error;
 /// Shared human-readable and JSON output helpers.
 pub mod output;
+
+// The package binary initializes tracing; this library target keeps the
+// package-scoped dependency visible to `unused_crate_dependencies`.
+use tracing_subscriber as _;
 
 use cli::{Cli, Command};
 use error::CliError;

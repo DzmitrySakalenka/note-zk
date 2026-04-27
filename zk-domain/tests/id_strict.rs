@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use zk_domain::id::{AssetId, ContentHash, IdFormatError, NoteId};
 
 const VALID_ULID: &str = "01HZ3KQBFG9T2R5XJ4N8VW6YMP";

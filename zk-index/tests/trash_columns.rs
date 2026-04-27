@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 //! Dedicated trash-column write-path tests split out by TG10-022.
 
 use zk_domain::{

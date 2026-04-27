@@ -1,4 +1,6 @@
 #![warn(missing_docs)]
+// Test targets inherit dev-dependencies used by integration tests.
+#![cfg_attr(test, allow(unused_crate_dependencies))]
 #![doc = "Sync core: local change planning and remote change application for the filesystem-first knowledge system."]
 
 pub mod bootstrap;

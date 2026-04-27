@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use rusqlite::Connection;
 use zk_server::{ServerError, migration::ensure_schema};
 

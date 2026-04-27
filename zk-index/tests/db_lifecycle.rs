@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use tempfile::TempDir;
 use zk_index::{ensure_schema, open_memory, open_or_create};
 

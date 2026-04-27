@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use zk_server::service::{
     AcceptOutcome, accept_or_conflict, is_fresh_create, is_stale_revision, next_server_revision,
 };

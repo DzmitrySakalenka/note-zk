@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use std::collections::BTreeMap;
 
 pub use zk_vault::resolve_vault_links;

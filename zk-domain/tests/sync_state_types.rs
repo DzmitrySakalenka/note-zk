@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use zk_domain::id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision};
 use zk_domain::sync::{PendingOperation, SyncStatus};
 use zk_domain::sync_state::{AssetSyncState, DeviceRecord, NoteSyncState};

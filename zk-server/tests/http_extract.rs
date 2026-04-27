@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use axum::{body, response::IntoResponse};
 use serde_json::Value;
 use zk_server::http::extract::{parse_asset_id, parse_content_hash, parse_note_id};

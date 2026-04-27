@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension};
 use zk_server::{

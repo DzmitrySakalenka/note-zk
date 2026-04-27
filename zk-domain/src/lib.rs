@@ -1,4 +1,6 @@
 #![warn(missing_docs)]
+// Test targets inherit dev-dependencies used by integration tests.
+#![cfg_attr(test, allow(unused_crate_dependencies))]
 //! Core domain models shared across vault, app, sync, and CLI layers.
 
 /// Asset metadata and index-facing asset record models.

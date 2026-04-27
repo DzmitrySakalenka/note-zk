@@ -1,4 +1,6 @@
 #![warn(missing_docs)]
+// Test targets inherit dev-dependencies used by integration tests.
+#![cfg_attr(test, allow(unused_crate_dependencies))]
 #![doc = "HTTP server for the filesystem-first knowledge system. Hosts sync endpoints and supporting services."]
 
 pub mod auth;

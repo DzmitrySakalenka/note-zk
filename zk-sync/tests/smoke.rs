@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use std::{error::Error as _, io, path::PathBuf};
 
 use zk_index::IndexError;

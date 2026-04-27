@@ -10,7 +10,6 @@ workspace = true
 
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
 serde_yaml = "0.9.34"
 tempfile = "3.27.0"
 thiserror = "2.0.18"
@@ -22,3 +21,4 @@ zk-domain = { path = "../zk-domain" }
 insta = "1.43.2"
 quickcheck = "1.0.3"
 quickcheck_macros = "1.1.0"
+serde_json = "1.0.149"

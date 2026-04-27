@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use chrono::{DateTime, Days, SecondsFormat, Utc};
 
 use zk_app::config::ConfigValidationError;

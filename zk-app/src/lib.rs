@@ -1,4 +1,6 @@
 #![warn(missing_docs)]
+// Test targets inherit dev-dependencies used by integration tests.
+#![cfg_attr(test, allow(unused_crate_dependencies))]
 //! Local application facade for vault, index, and lifecycle workflows.
 //!
 //! `zk-app` orchestrates vault scanning/writing (`zk-vault`) and local
