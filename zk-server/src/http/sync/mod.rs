@@ -15,7 +15,7 @@ use crate::state::ServerState;
 
 /// Returns the sync sub-router (without state binding); callers merge it into
 /// `build_router` and apply auth middleware.
-pub(crate) fn sync_routes() -> Router<ServerState> {
+pub fn sync_routes() -> Router<ServerState> {
     Router::new()
         .route(
             "/devices/register",

@@ -9,5 +9,5 @@ mod sync;
 pub use error::ApiError;
 pub use health::HealthResponse;
 pub use router::{build_router, serve};
-#[allow(unused_imports)]
-pub(super) use sync::sync_routes;
+#[doc(hidden)]
+pub use sync::sync_routes;
