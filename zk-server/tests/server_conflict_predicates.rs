@@ -20,18 +20,18 @@ fn expected_outcome(exists: bool, base: Option<i64>, current: i64) -> AcceptOutc
 
 #[test]
 fn is_stale_revision_matches_documented_rules() {
-    assert!(!is_stale_revision(None, 0));
-    assert!(!is_stale_revision(None, 5));
-    assert!(!is_stale_revision(Some(3), 3));
-    assert!(is_stale_revision(Some(3), 4));
+    assert!(!is_stale_revision(&None, 0));
+    assert!(!is_stale_revision(&None, 5));
+    assert!(!is_stale_revision(&Some(3), 3));
+    assert!(is_stale_revision(&Some(3), 4));
 }
 
 #[test]
 fn is_fresh_create_matches_documented_truth_table() {
-    assert!(is_fresh_create(false, None));
-    assert!(!is_fresh_create(false, Some(0)));
-    assert!(!is_fresh_create(true, None));
-    assert!(!is_fresh_create(true, Some(0)));
+    assert!(is_fresh_create(false, &None));
+    assert!(!is_fresh_create(false, &Some(0)));
+    assert!(!is_fresh_create(true, &None));
+    assert!(!is_fresh_create(true, &Some(0)));
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn accept_or_conflict_matches_exhaustive_truth_table() {
     for exists in exists_cases {
         for base in base_cases {
             for current in current_cases {
-                let actual = accept_or_conflict(base, current, exists);
+                let actual = accept_or_conflict(&base, current, exists);
                 let expected = expected_outcome(exists, base, current);
 
                 assert_eq!(

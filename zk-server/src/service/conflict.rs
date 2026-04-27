@@ -25,18 +25,16 @@ pub enum AcceptOutcome {
 
 /// Returns whether `base` diverges from the server's `current` revision.
 #[must_use]
-#[allow(clippy::needless_pass_by_value)]
-pub fn is_stale_revision(base: Option<i64>, current: i64) -> bool {
+pub fn is_stale_revision(base: &Option<i64>, current: i64) -> bool {
     match base {
         None => false,
-        Some(base_revision) => base_revision != current,
+        Some(base_revision) => *base_revision != current,
     }
 }
 
 /// Returns whether this is the one fresh-create case the server should accept.
 #[must_use]
-#[allow(clippy::needless_pass_by_value)]
-pub fn is_fresh_create(current_row_exists: bool, base: Option<i64>) -> bool {
+pub fn is_fresh_create(current_row_exists: bool, base: &Option<i64>) -> bool {
     !current_row_exists && base.is_none()
 }
 
@@ -49,9 +47,8 @@ pub fn next_server_revision(current: i64) -> i64 {
 
 /// Decides whether one incoming mutation is accepted or conflicts.
 #[must_use]
-#[allow(clippy::needless_pass_by_value)]
 pub fn accept_or_conflict(
-    base: Option<i64>,
+    base: &Option<i64>,
     current: i64,
     current_row_exists: bool,
 ) -> AcceptOutcome {

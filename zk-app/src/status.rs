@@ -100,7 +100,6 @@ pub fn status_summary(
             .sum::<usize>(),
     )?;
 
-    #[allow(deprecated)]
     Ok(StatusSummary {
         total_notes: NoteRepo::count(conn)?,
         total_assets: AssetRepo::count(conn)?,

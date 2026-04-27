@@ -341,17 +341,17 @@ fn conflict_predicates_integrate_with_note_updates() {
     .expect("note create should succeed");
 
     assert!(matches!(
-        accept_or_conflict(None, 1, true),
+        accept_or_conflict(&None, 1, true),
         AcceptOutcome::ConflictDuplicateCreate
     ));
     assert!(matches!(
-        accept_or_conflict(Some(0), 1, true),
+        accept_or_conflict(&Some(0), 1, true),
         AcceptOutcome::ConflictStale {
             current_revision: 1
         }
     ));
     assert!(matches!(
-        accept_or_conflict(Some(1), 1, true),
+        accept_or_conflict(&Some(1), 1, true),
         AcceptOutcome::Accept { next_revision: 2 }
     ));
 

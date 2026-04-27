@@ -69,20 +69,18 @@ pub fn local_unchanged_since_sync(snapshot: &SyncStateSnapshot) -> bool {
 
 /// Returns whether the local base revision still matches the server revision.
 #[must_use]
-#[allow(clippy::needless_pass_by_value)]
 pub fn revision_matches(
-    local_revision: Option<ServerRevision>,
-    server_revision: Option<ServerRevision>,
+    local_revision: &Option<ServerRevision>,
+    server_revision: &Option<ServerRevision>,
 ) -> bool {
     local_revision == server_revision
 }
 
 /// Returns whether one push should be treated as a revision conflict.
 #[must_use]
-#[allow(clippy::needless_pass_by_value)]
 pub fn detect_push_conflict(
-    local_revision: Option<ServerRevision>,
-    server_revision: Option<ServerRevision>,
+    local_revision: &Option<ServerRevision>,
+    server_revision: &Option<ServerRevision>,
 ) -> bool {
     !revision_matches(local_revision, server_revision)
 }

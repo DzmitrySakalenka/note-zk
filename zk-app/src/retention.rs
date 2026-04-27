@@ -23,6 +23,15 @@ pub struct ReconciliationStats {
     pub orphans_warned: u32,
 }
 
+#[derive(Clone, Copy)]
+struct DeleteRecordUpsertRequest<'a> {
+    item_id: &'a str,
+    item_type: ItemType,
+    original_path: &'a RelativePath,
+    trashed_at: Option<&'a str>,
+    retention_days: u32,
+}
+
 /// Computes the retention-expiry timestamp for one trashed item.
 ///
 /// The base timestamp is `trashed_at` when present, or `clock.now()` otherwise.
@@ -108,11 +117,13 @@ fn reconcile_note_delete_record(
     if note.is_trashed {
         upsert_delete_record_if_needed(
             conn,
-            note.note_id.as_str(),
-            ItemType::Note,
-            &note.path,
-            note.trashed_at.as_deref(),
-            retention_days,
+            DeleteRecordUpsertRequest {
+                item_id: note.note_id.as_str(),
+                item_type: ItemType::Note,
+                original_path: &note.path,
+                trashed_at: note.trashed_at.as_deref(),
+                retention_days,
+            },
             clock,
             stats,
         )?;
@@ -137,11 +148,13 @@ fn reconcile_asset_delete_record(
     if asset.is_trashed {
         upsert_delete_record_if_needed(
             conn,
-            asset_id.as_str(),
-            ItemType::Asset,
-            &asset.path,
-            asset.trashed_at.as_deref(),
-            retention_days,
+            DeleteRecordUpsertRequest {
+                item_id: asset_id.as_str(),
+                item_type: ItemType::Asset,
+                original_path: &asset.path,
+                trashed_at: asset.trashed_at.as_deref(),
+                retention_days,
+            },
             clock,
             stats,
         )?;
@@ -152,25 +165,24 @@ fn reconcile_asset_delete_record(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn upsert_delete_record_if_needed(
     conn: &Connection,
-    item_id: &str,
-    item_type: ItemType,
-    original_path: &RelativePath,
-    trashed_at: Option<&str>,
-    retention_days: u32,
+    request: DeleteRecordUpsertRequest<'_>,
     clock: &dyn Clock,
     stats: &mut ReconciliationStats,
 ) -> Result<(), AppError> {
-    let effective_trashed_at = resolve_trashed_at(trashed_at, clock)?;
+    let effective_trashed_at = resolve_trashed_at(request.trashed_at, clock)?;
     let retention_until =
-        compute_retention_until(Some(&effective_trashed_at), retention_days, clock)?;
-    let target = delete_record_target(item_id, item_type);
-    let existing_record =
-        get_delete_record_with_context(conn, item_id, item_type, "during rebuild reconciliation")?;
+        compute_retention_until(Some(&effective_trashed_at), request.retention_days, clock)?;
+    let target = delete_record_target(request.item_id, request.item_type);
+    let existing_record = get_delete_record_with_context(
+        conn,
+        request.item_id,
+        request.item_type,
+        "during rebuild reconciliation",
+    )?;
     let preserved_original_path = existing_record.as_ref().map_or_else(
-        || original_path.clone(),
+        || request.original_path.clone(),
         |record| record.original_path.clone(),
     );
     let replacement = DeleteRecord {
