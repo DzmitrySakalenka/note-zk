@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use std::collections::BTreeSet;
 
 use zk_index::{IndexError, ensure_schema, open_memory};

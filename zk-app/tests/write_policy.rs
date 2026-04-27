@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use std::collections::BTreeMap;
 
 use zk_app::{AppError, ensure_writable, is_path_immutable};

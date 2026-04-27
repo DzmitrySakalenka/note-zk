@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use std::collections::HashSet;
 
 use zk_domain::id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision};

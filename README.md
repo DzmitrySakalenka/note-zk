@@ -20,6 +20,24 @@ Everything else is derived or coordinated around it:
 - chat memory
 - sync metadata
 
+## Sync (local core)
+
+The local half of the sync protocol:
+- change planning,
+- push payload building,
+- pull apply with `event_seq`-ordered cursors,
+- conflict detection,
+- conflict-copy writes.
+
+## Server foundation:
+
+- axum + tokio bootstrap,
+- server-side SQLite schema with `sync_events` + `device_sync_cursors` +
+authoritative note / asset rows,
+- repositories over each table,
+- service-layer conflict predicates and event recording, structured `ApiError` / JSON envelopes,
+- stub bearer-token auth middleware, and a `/health` endpoint.
+
 ## Build and Test
 
 Use the workspace-level cargo commands from the repository root:

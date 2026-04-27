@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use zk_domain::{
     SyncChange, WireEventType, WireItemType,
     id::ContentHash,
@@ -54,19 +57,19 @@ fn local_unchanged_since_sync_requires_matching_synced_hash() {
 
 #[test]
 fn revision_matches_only_when_both_sides_agree() {
-    assert!(revision_matches(None, None));
-    assert!(revision_matches(Some(7.into()), Some(7.into())));
-    assert!(!revision_matches(Some(7.into()), Some(8.into())));
-    assert!(!revision_matches(None, Some(8.into())));
-    assert!(!revision_matches(Some(7.into()), None));
+    assert!(revision_matches(&None, &None));
+    assert!(revision_matches(&Some(7.into()), &Some(7.into())));
+    assert!(!revision_matches(&Some(7.into()), &Some(8.into())));
+    assert!(!revision_matches(&None, &Some(8.into())));
+    assert!(!revision_matches(&Some(7.into()), &None));
 }
 
 #[test]
 fn detect_push_conflict_is_inverse_of_revision_match() {
-    assert!(!detect_push_conflict(None, None));
-    assert!(!detect_push_conflict(Some(4.into()), Some(4.into())));
-    assert!(detect_push_conflict(Some(4.into()), Some(5.into())));
-    assert!(detect_push_conflict(None, Some(5.into())));
+    assert!(!detect_push_conflict(&None, &None));
+    assert!(!detect_push_conflict(&Some(4.into()), &Some(4.into())));
+    assert!(detect_push_conflict(&Some(4.into()), &Some(5.into())));
+    assert!(detect_push_conflict(&None, &Some(5.into())));
 }
 
 #[test]

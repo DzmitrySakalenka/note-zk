@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use serde_json::Value;
 use zk_domain::id::RelativePath;
 use zk_domain::note::{

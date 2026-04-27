@@ -1,9 +1,7 @@
 //! Local change planning for sync push preparation.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use chrono::{DateTime, TimeZone, Utc};
 use rusqlite::Connection;
+pub use zk_domain::clock::{Clock, SystemClock};
 use zk_domain::{
     asset::AssetRecord,
     id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
@@ -14,28 +12,6 @@ use zk_domain::{
 use zk_index::{AssetRepo, DeleteRecordRepo, NoteRepo, SyncStateRepo};
 
 use crate::{SyncError, SyncResult};
-
-/// Time source used by sync planning callers and tests.
-pub trait Clock {
-    /// Returns the current UTC timestamp.
-    fn now(&self) -> DateTime<Utc>;
-}
-
-/// System-backed clock implementation for production callers.
-pub struct SystemClock;
-
-impl Clock for SystemClock {
-    fn now(&self) -> DateTime<Utc> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time should be after the unix epoch");
-        let seconds = i64::try_from(now.as_secs()).expect("unix seconds should fit in i64");
-
-        Utc.timestamp_opt(seconds, now.subsec_nanos())
-            .single()
-            .expect("system time should convert into a single UTC timestamp")
-    }
-}
 
 /// Borrowed inputs required to plan local sync changes.
 pub struct PlannerContext<'a> {

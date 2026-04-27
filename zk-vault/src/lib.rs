@@ -1,4 +1,6 @@
 #![warn(missing_docs)]
+// Test targets inherit dev-dependencies used by integration tests.
+#![cfg_attr(test, allow(unused_crate_dependencies))]
 //! Vault scanning, parsing, normalization, raw byte reads, and atomic filesystem writes.
 
 /// Error types returned by vault scan, parse, and write operations.

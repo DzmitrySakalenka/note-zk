@@ -1,3 +1,6 @@
+// This thin binary delegates to the library target, where package dependencies are used.
+#![allow(unused_crate_dependencies)]
+
 use clap::{Parser, error::ErrorKind};
 use zk_cli::{cli::Cli, error};
 

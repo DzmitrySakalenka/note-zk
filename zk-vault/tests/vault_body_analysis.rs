@@ -1,3 +1,6 @@
+// Integration tests are separate crates; each uses only a subset of package dependencies.
+#![allow(unused_crate_dependencies)]
+
 use zk_vault::{BodyAnalysis, analyze_body, detect_mermaid, extract_first_h1};
 
 #[test]

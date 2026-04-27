@@ -1,7 +1,6 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use chrono::{DateTime, Days, SecondsFormat, TimeZone, Utc};
+use chrono::{DateTime, Days, SecondsFormat, Utc};
 use rusqlite::Connection;
+pub use zk_domain::clock::{Clock, SystemClock};
 use zk_domain::{id::RelativePath, sync::ItemType, sync_state::DeleteRecord};
 use zk_index::{AssetInput, AssetRepo, DeleteRecordRepo, IndexError, NoteInput, NoteRepo};
 
@@ -24,26 +23,13 @@ pub struct ReconciliationStats {
     pub orphans_warned: u32,
 }
 
-/// Time source abstraction for retention calculations.
-pub trait Clock {
-    /// Returns the current UTC timestamp.
-    fn now(&self) -> DateTime<Utc>;
-}
-
-/// System-backed clock implementation for production callers.
-pub struct SystemClock;
-
-impl Clock for SystemClock {
-    fn now(&self) -> DateTime<Utc> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time should be after the unix epoch");
-        let seconds = i64::try_from(now.as_secs()).expect("unix seconds should fit in i64");
-
-        Utc.timestamp_opt(seconds, now.subsec_nanos())
-            .single()
-            .expect("system time should convert into a single UTC timestamp")
-    }
+#[derive(Clone, Copy)]
+struct DeleteRecordUpsertRequest<'a> {
+    item_id: &'a str,
+    item_type: ItemType,
+    original_path: &'a RelativePath,
+    trashed_at: Option<&'a str>,
+    retention_days: u32,
 }
 
 /// Computes the retention-expiry timestamp for one trashed item.
@@ -131,11 +117,13 @@ fn reconcile_note_delete_record(
     if note.is_trashed {
         upsert_delete_record_if_needed(
             conn,
-            note.note_id.as_str(),
-            ItemType::Note,
-            &note.path,
-            note.trashed_at.as_deref(),
-            retention_days,
+            DeleteRecordUpsertRequest {
+                item_id: note.note_id.as_str(),
+                item_type: ItemType::Note,
+                original_path: &note.path,
+                trashed_at: note.trashed_at.as_deref(),
+                retention_days,
+            },
             clock,
             stats,
         )?;
@@ -160,11 +148,13 @@ fn reconcile_asset_delete_record(
     if asset.is_trashed {
         upsert_delete_record_if_needed(
             conn,
-            asset_id.as_str(),
-            ItemType::Asset,
-            &asset.path,
-            asset.trashed_at.as_deref(),
-            retention_days,
+            DeleteRecordUpsertRequest {
+                item_id: asset_id.as_str(),
+                item_type: ItemType::Asset,
+                original_path: &asset.path,
+                trashed_at: asset.trashed_at.as_deref(),
+                retention_days,
+            },
             clock,
             stats,
         )?;
@@ -175,25 +165,24 @@ fn reconcile_asset_delete_record(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn upsert_delete_record_if_needed(
     conn: &Connection,
-    item_id: &str,
-    item_type: ItemType,
-    original_path: &RelativePath,
-    trashed_at: Option<&str>,
-    retention_days: u32,
+    request: DeleteRecordUpsertRequest<'_>,
     clock: &dyn Clock,
     stats: &mut ReconciliationStats,
 ) -> Result<(), AppError> {
-    let effective_trashed_at = resolve_trashed_at(trashed_at, clock)?;
+    let effective_trashed_at = resolve_trashed_at(request.trashed_at, clock)?;
     let retention_until =
-        compute_retention_until(Some(&effective_trashed_at), retention_days, clock)?;
-    let target = delete_record_target(item_id, item_type);
-    let existing_record =
-        get_delete_record_with_context(conn, item_id, item_type, "during rebuild reconciliation")?;
+        compute_retention_until(Some(&effective_trashed_at), request.retention_days, clock)?;
+    let target = delete_record_target(request.item_id, request.item_type);
+    let existing_record = get_delete_record_with_context(
+        conn,
+        request.item_id,
+        request.item_type,
+        "during rebuild reconciliation",
+    )?;
     let preserved_original_path = existing_record.as_ref().map_or_else(
-        || original_path.clone(),
+        || request.original_path.clone(),
         |record| record.original_path.clone(),
     );
     let replacement = DeleteRecord {
