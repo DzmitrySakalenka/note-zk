@@ -38,6 +38,17 @@ authoritative note / asset rows,
 - service-layer conflict predicates and event recording, structured `ApiError` / JSON envelopes,
 - stub bearer-token auth middleware, and a `/health` endpoint.
 
+## Sync API (HTTP)
+
+HTTP endpoints:
+- `/devices/register`,
+- `/sync/push`, `/sync/pull`,
+- `/sync/resolve-conflict`
+(all auth-gated by the stub bearer middleware)
+
+`HttpTransport` client
+CLI `sync` / `resolve-conflict` subcommands
+
 ## Build and Test
 
 Use the workspace-level cargo commands from the repository root:
@@ -59,6 +70,10 @@ zk-cli doctor --vault <path>
 zk-cli trash --vault <path> <id-or-path>
 zk-cli restore --vault <path> <id-or-path>
 zk-cli purge --vault <path> --expired --yes
+ZK_DEVICE_TOKEN=... \
+  zk-cli sync --vault <path> --server-url https://zk.example.com --device-id devA
+ZK_DEVICE_TOKEN=... \
+  zk-cli resolve-conflict --vault <path> <id> --keep-remote
 ```
 
 Add `--json` to any subcommand for machine-readable output on stdout.
