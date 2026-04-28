@@ -6,7 +6,7 @@ use anyhow::Context;
 use zk_app::{
     DeviceId, ResolveConflictRequest, ResolveConflictResponse, WireConflictResolution, WireItemType,
 };
-use zk_sync::HttpTransport;
+use zk_sync::{HttpTransport, transport::SyncTransport};
 
 use crate::{
     bootstrap::{load_effective_config, resolve_sync_settings, resolve_vault_root},
@@ -29,9 +29,11 @@ pub fn run(args: &ResolveConflictArgs, shared: &SharedFlags) -> Result<i32, CliE
     let config = load_effective_config(&vault_root, shared)?;
     let sync_settings = resolve_sync_settings(&config)?;
     let device_id = DeviceId::new(&sync_settings.device_id);
-    let transport = HttpTransport::new(sync_settings.server_url, Some(sync_settings.bearer_token))
-        .context("while attempting to construct HTTP sync transport")
-        .map_err(CliError::Internal)?;
+    let http_transport =
+        HttpTransport::new(sync_settings.server_url, Some(sync_settings.bearer_token))
+            .context("while attempting to construct HTTP sync transport")
+            .map_err(CliError::Internal)?;
+    let transport: &dyn SyncTransport = &http_transport;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

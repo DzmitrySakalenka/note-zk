@@ -40,6 +40,13 @@ fn sync_error_variants_have_expected_display_and_sources() {
     );
     assert!(ambiguous_bootstrap.source().is_none());
 
+    let unsupported = SyncError::Unsupported("resolve_conflict");
+    assert_eq!(
+        unsupported.to_string(),
+        "unsupported sync operation: resolve_conflict"
+    );
+    assert!(unsupported.source().is_none());
+
     let vault_write = SyncError::VaultWrite(VaultError::Io {
         path: PathBuf::from("vault/alpha.md"),
         source: io::Error::other("disk failed"),

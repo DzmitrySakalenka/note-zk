@@ -4,11 +4,12 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use async_trait::async_trait;
 use zk_domain::{
-    PushItemResult, RegisterDeviceRequest, RegisterDeviceResponse, SyncPullRequest,
-    SyncPullResponse, SyncPushRequest, SyncPushResponse, id::DeviceId,
+    PushItemResult, RegisterDeviceRequest, RegisterDeviceResponse, ResolveConflictRequest,
+    ResolveConflictResponse, SyncPullRequest, SyncPullResponse, SyncPushRequest, SyncPushResponse,
+    id::DeviceId,
 };
 
-use crate::{SyncResult, bootstrap::RemoteBootstrapProbe};
+use crate::{SyncError, SyncResult, bootstrap::RemoteBootstrapProbe};
 
 const NOOP_SERVER_TIME: &str = "2026-04-22T18:07:33Z";
 const NOOP_TRASH_RETENTION_DAYS: u32 = 14;
@@ -28,6 +29,14 @@ pub trait SyncTransport: Send + Sync {
 
     /// Pulls one ordered remote event batch from the current cursor.
     async fn pull(&self, request: &SyncPullRequest) -> SyncResult<SyncPullResponse>;
+
+    /// Sends one explicit conflict-resolution request to the remote side.
+    async fn resolve_conflict(
+        &self,
+        _request: &ResolveConflictRequest,
+    ) -> SyncResult<ResolveConflictResponse> {
+        Err(SyncError::Unsupported("resolve_conflict"))
+    }
 
     /// Returns remote note and asset counts for initial-sync bootstrap detection.
     async fn probe_remote_counts(&self, device_id: &DeviceId) -> SyncResult<RemoteBootstrapProbe>;

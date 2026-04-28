@@ -198,7 +198,10 @@ async fn resolve_conflict_posts_to_resolve_conflict_path() {
         .mount(&server)
         .await;
 
-    let result = transport(&server, None)
+    let transport = transport(&server, None);
+    let transport: &dyn SyncTransport = &transport;
+
+    let result = transport
         .resolve_conflict(&request)
         .await
         .expect("resolve request should succeed");

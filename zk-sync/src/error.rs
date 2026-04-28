@@ -32,6 +32,9 @@ pub enum SyncError {
     /// Initial sync cannot proceed automatically because both sides already contain data.
     #[error("initial sync is ambiguous: both local and remote have content")]
     AmbiguousBootstrap,
+    /// The selected transport does not support this operation.
+    #[error("unsupported sync operation: {0}")]
+    Unsupported(&'static str),
     /// Writing bytes or metadata to the local vault failed.
     #[error("vault write failed")]
     VaultWrite(#[from] VaultError),

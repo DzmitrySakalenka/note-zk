@@ -44,34 +44,6 @@ impl HttpTransport {
         })
     }
 
-    /// Sends one explicit conflict-resolution request.
-    ///
-    /// This is intentionally an inherent method rather than part of
-    /// [`SyncTransport`]; the app-layer sync cycle handles normal conflict
-    /// copies locally and only the CLI escape hatch needs this call.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SyncError::Transport`] for URL, network, HTTP status, or JSON
-    /// decoding failures.
-    pub async fn resolve_conflict(
-        &self,
-        request: &ResolveConflictRequest,
-    ) -> SyncResult<ResolveConflictResponse> {
-        let response = self
-            .post(RESOLVE_CONFLICT_PATH)?
-            .json(request)
-            .send()
-            .await
-            .map_err(|error| SyncError::Transport(Box::new(error)))?;
-        let response = response_for_status(response, RESOLVE_CONFLICT_PATH).await?;
-
-        response
-            .json::<ResolveConflictResponse>()
-            .await
-            .map_err(|error| SyncError::Transport(Box::new(error)))
-    }
-
     fn post(&self, path: &'static str) -> SyncResult<RequestBuilder> {
         let url = self
             .base_url
@@ -132,6 +104,24 @@ impl SyncTransport for HttpTransport {
 
         response
             .json::<SyncPullResponse>()
+            .await
+            .map_err(|error| SyncError::Transport(Box::new(error)))
+    }
+
+    async fn resolve_conflict(
+        &self,
+        request: &ResolveConflictRequest,
+    ) -> SyncResult<ResolveConflictResponse> {
+        let response = self
+            .post(RESOLVE_CONFLICT_PATH)?
+            .json(request)
+            .send()
+            .await
+            .map_err(|error| SyncError::Transport(Box::new(error)))?;
+        let response = response_for_status(response, RESOLVE_CONFLICT_PATH).await?;
+
+        response
+            .json::<ResolveConflictResponse>()
             .await
             .map_err(|error| SyncError::Transport(Box::new(error)))
     }
