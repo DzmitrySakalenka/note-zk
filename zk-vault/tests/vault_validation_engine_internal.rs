@@ -175,7 +175,13 @@ fn disabled_rule_is_skipped_using_stub_rule() {
         note_message: "empty note body",
     })];
 
-    let report = validate_impl::validate_vault_with_rules(&scan_result, &config, rules);
+    let parsed_indexes = resolve_vault_links(&scan_result, &config);
+    let report = validate_impl::validate_vault_with_rules_and_parsed_indexes(
+        &scan_result,
+        &parsed_indexes,
+        &config,
+        rules,
+    );
 
     assert!(report.findings.is_empty());
     assert_eq!(report.summary.warning_count, 0);
@@ -201,7 +207,13 @@ fn severity_override_changes_finding_level_using_stub_rule() {
         note_message: "empty note body",
     })];
 
-    let report = validate_impl::validate_vault_with_rules(&scan_result, &config, rules);
+    let parsed_indexes = resolve_vault_links(&scan_result, &config);
+    let report = validate_impl::validate_vault_with_rules_and_parsed_indexes(
+        &scan_result,
+        &parsed_indexes,
+        &config,
+        rules,
+    );
 
     assert_eq!(report.findings.len(), 1);
     assert_eq!(report.findings[0].level, DiagnosticLevel::Error);
@@ -230,7 +242,13 @@ fn engine_runs_note_rules_per_note_and_vault_rules_once() {
         Box::new(StubVaultRule),
     ];
 
-    let report = validate_impl::validate_vault_with_rules(&scan_result, &config, rules);
+    let parsed_indexes = resolve_vault_links(&scan_result, &config);
+    let report = validate_impl::validate_vault_with_rules_and_parsed_indexes(
+        &scan_result,
+        &parsed_indexes,
+        &config,
+        rules,
+    );
 
     assert_eq!(report.findings.len(), 3);
     assert_eq!(report.summary.warning_count, 2);
@@ -296,8 +314,10 @@ fn tg8_016_rules_emit_expected_findings_for_each_new_rule() {
         trashed_note_count: 0,
     };
 
-    let report = validate_impl::validate_vault_with_rules(
+    let parsed_indexes = resolve_vault_links(&scan_result, &config);
+    let report = validate_impl::validate_vault_with_rules_and_parsed_indexes(
         &scan_result,
+        &parsed_indexes,
         &config,
         validate_impl::tg8_016_rules(),
     );
@@ -378,8 +398,10 @@ fn tg8_016_rules_respect_severity_overrides() {
         trashed_note_count: 0,
     };
 
-    let report = validate_impl::validate_vault_with_rules(
+    let parsed_indexes = resolve_vault_links(&scan_result, &config);
+    let report = validate_impl::validate_vault_with_rules_and_parsed_indexes(
         &scan_result,
+        &parsed_indexes,
         &config,
         validate_impl::tg8_016_rules(),
     );

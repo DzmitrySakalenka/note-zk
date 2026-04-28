@@ -120,7 +120,13 @@ fn summary_counts_match_manual_counting_of_findings() {
         ],
     })];
 
-    let report = validate_impl::validate_vault_with_rules(&scan_result, &config, rules);
+    let parsed_indexes = resolve_vault_links(&scan_result, &config);
+    let report = validate_impl::validate_vault_with_rules_and_parsed_indexes(
+        &scan_result,
+        &parsed_indexes,
+        &config,
+        rules,
+    );
 
     assert_eq!(report.summary.error_count, 2);
     assert_eq!(report.summary.warning_count, 2);
@@ -179,7 +185,13 @@ fn rules_triggered_vector_is_sorted_by_rule_id_for_determinism() {
         ],
     })];
 
-    let report = validate_impl::validate_vault_with_rules(&scan_result, &config, rules);
+    let parsed_indexes = resolve_vault_links(&scan_result, &config);
+    let report = validate_impl::validate_vault_with_rules_and_parsed_indexes(
+        &scan_result,
+        &parsed_indexes,
+        &config,
+        rules,
+    );
 
     assert_eq!(
         report.summary.rules_triggered,
@@ -202,7 +214,13 @@ fn empty_findings_produce_zero_counts_and_empty_rules_triggered() {
         findings: Vec::new(),
     })];
 
-    let report = validate_impl::validate_vault_with_rules(&scan_result, &config, rules);
+    let parsed_indexes = resolve_vault_links(&scan_result, &config);
+    let report = validate_impl::validate_vault_with_rules_and_parsed_indexes(
+        &scan_result,
+        &parsed_indexes,
+        &config,
+        rules,
+    );
 
     assert_eq!(report.summary.error_count, 0);
     assert_eq!(report.summary.warning_count, 0);

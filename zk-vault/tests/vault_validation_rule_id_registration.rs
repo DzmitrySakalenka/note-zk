@@ -128,7 +128,14 @@ fn disabled_rules_parse_new_rule_ids() {
         }),
     ];
 
-    let report = validate_impl::validate_vault_with_rules(&sample_scan_result(), &config, rules);
+    let scan_result = sample_scan_result();
+    let parsed_indexes = resolve_vault_links(&scan_result, &config);
+    let report = validate_impl::validate_vault_with_rules_and_parsed_indexes(
+        &scan_result,
+        &parsed_indexes,
+        &config,
+        rules,
+    );
 
     assert!(report.findings.is_empty());
     assert_eq!(report.summary.warning_count, 0);
@@ -173,7 +180,14 @@ fn severity_overrides_parse_new_rule_ids() {
         }),
     ];
 
-    let report = validate_impl::validate_vault_with_rules(&sample_scan_result(), &config, rules);
+    let scan_result = sample_scan_result();
+    let parsed_indexes = resolve_vault_links(&scan_result, &config);
+    let report = validate_impl::validate_vault_with_rules_and_parsed_indexes(
+        &scan_result,
+        &parsed_indexes,
+        &config,
+        rules,
+    );
 
     assert_eq!(report.findings.len(), 5);
     assert!(report.findings.iter().any(|finding| {
@@ -223,7 +237,14 @@ fn summary_sort_order_places_new_rule_ids_after_id_format_suspicious() {
         }),
     ];
 
-    let report = validate_impl::validate_vault_with_rules(&sample_scan_result(), &config, rules);
+    let scan_result = sample_scan_result();
+    let parsed_indexes = resolve_vault_links(&scan_result, &config);
+    let report = validate_impl::validate_vault_with_rules_and_parsed_indexes(
+        &scan_result,
+        &parsed_indexes,
+        &config,
+        rules,
+    );
 
     assert_eq!(
         report.summary.rules_triggered,

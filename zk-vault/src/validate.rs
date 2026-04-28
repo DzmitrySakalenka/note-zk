@@ -67,17 +67,7 @@ fn register_rules() -> Vec<Box<dyn ValidationRule>> {
     ]
 }
 
-#[allow(dead_code)]
-pub(crate) fn validate_vault_with_rules(
-    scan_result: &VaultScanResult,
-    config: &EffectiveConfig,
-    rules: Vec<Box<dyn ValidationRule>>,
-) -> ValidationReport {
-    let parsed_indexes = resolve_vault_links(scan_result, config);
-    validate_vault_with_rules_and_parsed_indexes(scan_result, &parsed_indexes, config, rules)
-}
-
-fn validate_vault_with_rules_and_parsed_indexes(
+pub(crate) fn validate_vault_with_rules_and_parsed_indexes(
     scan_result: &VaultScanResult,
     parsed_indexes: &[ParsedNoteIndex],
     config: &EffectiveConfig,
