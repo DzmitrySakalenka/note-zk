@@ -13,3 +13,4 @@ pub use events::{
     FetchChangesOutcome, RecordAssetChange, RecordNoteChange, RecordedEvent, SyncChangeRow,
     fetch_changes_since, record_asset_change, record_note_change,
 };
+pub(crate) use events::{record_asset_change_in_conn, record_note_change_in_conn};

@@ -2,8 +2,11 @@
 
 use std::io;
 
+use chrono::{DateTime, Utc};
 use rusqlite::Connection;
-use zk_domain::{SyncChange, WireEventType, WireItemType};
+use zk_domain::{
+    PushAssetItem, PushNoteItem, SyncChange, WireEventType, WireItemType, WireOperation,
+};
 
 use crate::{
     ServerError, ServerResult,
@@ -12,24 +15,128 @@ use crate::{
 };
 
 pub(super) fn note_row_from_push_item(
-    item: &zk_domain::PushNoteItem,
-    existing: Option<&crate::repo::NoteRow>,
+    item: &PushNoteItem,
+    existing: Option<&NoteRow>,
     server_revision: i64,
-    now: chrono::DateTime<chrono::Utc>,
+    now: DateTime<Utc>,
     last_editor_device_id: Option<&str>,
-) -> crate::ServerResult<crate::repo::NoteRow> {
-    let _ = (item, existing, server_revision, now, last_editor_device_id);
-    todo!("filled in by TG13-004")
+) -> ServerResult<NoteRow> {
+    let content = match item.operation {
+        WireOperation::Create | WireOperation::Update | WireOperation::Move => {
+            Some(item.content.as_ref().ok_or_else(|| {
+                ServerError::InvalidRequest(
+                    "note content required for create / update / move operations".to_string(),
+                )
+            })?)
+        }
+        WireOperation::Trash | WireOperation::Restore | WireOperation::Delete => None,
+    };
+    let title = existing.map_or_else(|| title_from_path(&item.path), |row| row.title.clone());
+    let frontmatter_json = existing.map_or_else(
+        || minimal_frontmatter_json(&item.note_id, &title),
+        |row| row.frontmatter_json.clone(),
+    );
+    let body_markdown = content
+        .cloned()
+        .or_else(|| existing.map(|row| row.body_markdown.clone()))
+        .ok_or_else(|| existing_note_required_error("note"))?;
+    let created_at = existing.map_or(now, |row| row.created_at);
+    let (trashed_at, deleted_at, is_trashed, is_deleted) =
+        item_state_flags(item.operation, existing.and_then(|row| row.trashed_at), now);
+
+    Ok(NoteRow {
+        note_id: item.note_id.clone(),
+        current_path: item.path.clone(),
+        title,
+        content_hash: item.content_hash.clone(),
+        body_markdown,
+        frontmatter_json,
+        created_at,
+        updated_at: now,
+        trashed_at,
+        deleted_at,
+        is_trashed,
+        is_deleted,
+        last_editor_device_id: last_editor_device_id.map(str::to_string),
+        server_revision,
+    })
 }
 
 pub(super) fn asset_row_from_push_item(
-    item: &zk_domain::PushAssetItem,
-    existing: Option<&crate::repo::AssetRow>,
+    item: &PushAssetItem,
+    existing: Option<&AssetRow>,
     server_revision: i64,
-    now: chrono::DateTime<chrono::Utc>,
-) -> crate::ServerResult<crate::repo::AssetRow> {
-    let _ = (item, existing, server_revision, now);
-    todo!("filled in by TG13-004")
+    now: DateTime<Utc>,
+) -> AssetRow {
+    let created_at = existing.map_or(now, |row| row.created_at);
+    let (trashed_at, deleted_at, is_trashed, is_deleted) =
+        item_state_flags(item.operation, existing.and_then(|row| row.trashed_at), now);
+
+    AssetRow {
+        asset_id: item.asset_id.clone(),
+        current_path: item.path.clone(),
+        content_hash: item.content_hash.clone(),
+        mime_type: existing.and_then(|row| row.mime_type.clone()),
+        size_bytes: existing.map_or(0, |row| row.size_bytes),
+        created_at,
+        updated_at: now,
+        trashed_at,
+        deleted_at,
+        is_trashed,
+        is_deleted,
+        server_revision,
+    }
+}
+
+pub(super) fn event_type_from_operation(operation: WireOperation) -> &'static str {
+    match operation {
+        WireOperation::Create => "create",
+        WireOperation::Update => "update",
+        WireOperation::Move => "move",
+        WireOperation::Trash => "trash",
+        WireOperation::Restore => "restore",
+        WireOperation::Delete => "purge",
+    }
+}
+
+fn item_state_flags(
+    operation: WireOperation,
+    existing_trashed_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> (Option<DateTime<Utc>>, Option<DateTime<Utc>>, bool, bool) {
+    match operation {
+        WireOperation::Trash => (Some(now), None, true, false),
+        WireOperation::Delete => (existing_trashed_at, Some(now), false, true),
+        WireOperation::Create
+        | WireOperation::Update
+        | WireOperation::Move
+        | WireOperation::Restore => (None, None, false, false),
+    }
+}
+
+fn title_from_path(path: &str) -> String {
+    let filename = path.rsplit('/').next().unwrap_or(path);
+    let stem = filename.rsplit_once('.').map_or(filename, |(stem, _)| stem);
+
+    if stem.is_empty() {
+        "Untitled".to_string()
+    } else {
+        stem.to_string()
+    }
+}
+
+fn minimal_frontmatter_json(note_id: &str, title: &str) -> String {
+    serde_json::json!({
+        "id": note_id,
+        "title": title,
+    })
+    .to_string()
+}
+
+fn existing_note_required_error(item_type: &str) -> ServerError {
+    ServerError::InvalidRequest(format!(
+        "existing {item_type} required for trash / restore / delete operations"
+    ))
 }
 
 pub(super) fn sync_change_from_row(
