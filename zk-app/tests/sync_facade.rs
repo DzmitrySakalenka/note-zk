@@ -8,8 +8,8 @@ use chrono::{DateTime, TimeZone, Utc};
 use pollster::block_on;
 use tempfile::TempDir;
 use zk_app::{
-    AppError, BootstrapOutcome, Clock, SyncContext, bootstrap, plan_and_push, pull_and_apply,
-    register_device,
+    AppError, BootstrapOutcome, Clock, DeviceSyncStatus, SyncContext, bootstrap,
+    get_device_sync_status, plan_and_push, pull_and_apply, register_device,
 };
 use zk_domain::{
     RegisterDeviceRequest, RegisterDeviceResponse,
@@ -133,6 +133,44 @@ fn register_device_persists_local_device_record() {
     assert_eq!(device.created_at, response.server_time);
     assert_eq!(device.last_seen_at, response.server_time);
     assert_eq!(device.last_sync_cursor, None);
+}
+
+#[test]
+fn get_device_sync_status_reports_absent_registered_and_cursor_states() {
+    let connection = open_sync_connection();
+
+    let missing = get_device_sync_status(&connection, &device_id())
+        .expect("device status query should succeed");
+    assert_eq!(
+        missing,
+        DeviceSyncStatus {
+            registered: false,
+            last_sync_cursor: None,
+        }
+    );
+
+    DeviceRepo::upsert_device(&connection, &device_record(None)).expect("device should insert");
+    let registered_without_cursor = get_device_sync_status(&connection, &device_id())
+        .expect("device status query should succeed");
+    assert_eq!(
+        registered_without_cursor,
+        DeviceSyncStatus {
+            registered: true,
+            last_sync_cursor: None,
+        }
+    );
+
+    DeviceRepo::update_sync_cursor(&connection, &device_id(), Some(42))
+        .expect("device cursor should update");
+    let registered_with_cursor = get_device_sync_status(&connection, &device_id())
+        .expect("device status query should succeed");
+    assert_eq!(
+        registered_with_cursor,
+        DeviceSyncStatus {
+            registered: true,
+            last_sync_cursor: Some(42),
+        }
+    );
 }
 
 #[test]

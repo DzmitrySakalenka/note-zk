@@ -4,7 +4,9 @@
 use insta::assert_snapshot;
 use zk_app::{DoctorIssue, DoctorReport, StatusSummary};
 use zk_cli::output::{
-    ScanCommandPayload, ScanSummary, write_doctor_human, write_scan_human, write_status_human,
+    ScanCommandPayload, ScanSummary, SyncCommandPayload, SyncPullSummary, SyncPushSummary,
+    SyncRegistrationSummary, write_doctor_human, write_scan_human, write_status_human,
+    write_sync_human,
 };
 use zk_domain::{id::RelativePath, note::DiagnosticLevel, sync::ItemType};
 use zk_vault::NormalizationSummary;
@@ -25,6 +27,12 @@ fn render_doctor(report: &DoctorReport) -> String {
     let mut output = Vec::new();
     write_doctor_human(&mut output, report).expect("doctor formatter should write");
     String::from_utf8(output).expect("doctor formatter should emit UTF-8")
+}
+
+fn render_sync(payload: &SyncCommandPayload) -> String {
+    let mut output = Vec::new();
+    write_sync_human(&mut output, payload).expect("sync formatter should write");
+    String::from_utf8(output).expect("sync formatter should emit UTF-8")
 }
 
 fn scan_check_fixture() -> ScanCommandPayload {
@@ -147,6 +155,22 @@ fn doctor_errors_and_infos_fixture() -> DoctorReport {
     }
 }
 
+fn sync_fixture() -> SyncCommandPayload {
+    SyncCommandPayload {
+        registered: SyncRegistrationSummary { first_time: true },
+        bootstrap: false,
+        pushed: Some(SyncPushSummary {
+            accepted: 4,
+            conflicts: 1,
+            errors: 2,
+        }),
+        pulled: Some(SyncPullSummary {
+            applied: 3,
+            conflicts: 1,
+        }),
+    }
+}
+
 #[test]
 fn scan_check_human_snapshot() {
     assert_snapshot!("scan_check_human", render_scan(&scan_check_fixture()));
@@ -193,4 +217,25 @@ fn doctor_human_no_issues_snapshot() {
             infos: Vec::new(),
         })
     );
+}
+
+#[test]
+fn sync_human_lists_registration_push_and_pull() {
+    assert_eq!(
+        render_sync(&sync_fixture()),
+        "registered (first time)\npushed 4 items (1 conflicts, 2 errors)\npulled 3 changes (1 conflicts)\n"
+    );
+}
+
+#[test]
+fn sync_json_envelope_contains_command_and_payload() {
+    let json = serde_json::json!({
+        "command": "sync",
+        "payload": sync_fixture(),
+    });
+
+    assert_eq!(json["command"], "sync");
+    assert_eq!(json["payload"]["registered"]["first_time"], true);
+    assert_eq!(json["payload"]["pushed"]["accepted"], 4);
+    assert_eq!(json["payload"]["pulled"]["applied"], 3);
 }

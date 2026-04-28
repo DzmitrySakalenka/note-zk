@@ -2888,11 +2888,13 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "tracing-subscriber",
  "url",
  "zk-app",
  "zk-domain",
  "zk-index",
+ "zk-sync",
  "zk-vault",
 ]
 

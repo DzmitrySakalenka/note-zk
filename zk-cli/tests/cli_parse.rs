@@ -87,6 +87,30 @@ fn optional_bool_flags_parse_bare_flag_as_true() {
 }
 
 #[test]
+fn sync_parses_mode_and_json_flags() {
+    let cli = Cli::try_parse_from(["zk-cli", "sync", "--pull-only", "--json"])
+        .expect("sync arguments should parse");
+
+    match cli.command {
+        Command::Sync(args) => {
+            assert!(!args.bootstrap);
+            assert!(!args.push_only);
+            assert!(args.pull_only);
+            assert_eq!(OutputMode::from(args.json), OutputMode::Json);
+        }
+        other => panic!("expected sync command, got {other:?}"),
+    }
+}
+
+#[test]
+fn sync_rejects_conflicting_modes() {
+    let error = Cli::try_parse_from(["zk-cli", "sync", "--push-only", "--pull-only"])
+        .expect_err("sync should reject conflicting mode flags");
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
 fn trash_parses_target_and_flags() {
     let cli = Cli::try_parse_from([
         "zk-cli",

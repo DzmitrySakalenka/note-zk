@@ -32,6 +32,8 @@ pub enum Command {
     Restore(RestoreArgs),
     /// Hard-delete expired trash items or one explicit trashed item.
     Purge(PurgeArgs),
+    /// Run one foreground sync cycle against the configured server.
+    Sync(SyncArgs),
 }
 
 /// Shared per-invocation flags that later map onto `CliOverrides`.
@@ -183,6 +185,25 @@ pub struct PurgeArgs {
     /// Preview the purge outcome without deleting files or updating `SQLite`.
     #[arg(long = "dry-run")]
     pub dry_run: bool,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for the `sync` subcommand.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("sync_mode").args(["push_only", "pull_only", "bootstrap"]).multiple(false)))]
+#[allow(clippy::struct_excessive_bools)]
+pub struct SyncArgs {
+    /// Force one initial-sync bootstrap call before push/pull.
+    #[arg(long)]
+    pub bootstrap: bool,
+    /// Run only the push half of the cycle.
+    #[arg(long = "push-only")]
+    pub push_only: bool,
+    /// Run only the pull half of the cycle.
+    #[arg(long = "pull-only")]
+    pub pull_only: bool,
     /// Render compact JSON to stdout.
     #[arg(long)]
     pub json: bool,

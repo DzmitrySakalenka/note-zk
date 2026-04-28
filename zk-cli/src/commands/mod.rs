@@ -14,6 +14,8 @@ pub mod restore;
 pub mod scan;
 /// Handles the `status` subcommand.
 pub mod status;
+/// Handles the `sync` subcommand.
+pub mod sync;
 /// Handles the `trash` subcommand.
 pub mod trash;
 
