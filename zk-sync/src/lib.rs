@@ -6,6 +6,7 @@
 pub mod bootstrap;
 pub mod conflict;
 pub mod error;
+mod http_transport;
 pub mod plan;
 pub mod pull;
 pub mod push;
@@ -19,6 +20,7 @@ pub use conflict::{
     write_conflict_copy,
 };
 pub use error::{SyncError, SyncResult};
+pub use http_transport::HttpTransport;
 #[rustfmt::skip]
 pub use plan::{PlannerContext, PlannedOp, PlannedOperation, plan_local_changes};
 #[rustfmt::skip]
