@@ -74,7 +74,7 @@ pub fn register_device(
     })
 }
 
-fn validate_device_id(device_id: &str) -> ServerResult<()> {
+pub(crate) fn validate_device_id(device_id: &str) -> ServerResult<()> {
     if device_id.is_empty() {
         return Err(ServerError::InvalidRequest(
             "device_id must not be empty".to_string(),

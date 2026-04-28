@@ -25,7 +25,7 @@ It assumes the chosen architecture:
 - each note has a stable `note_id`
 - each syncing client has a stable `device_id`
 - notes sync as full file snapshots
-- attachments sync as full file snapshots
+- attachment binary snapshots are deferred until upload transport lands
 - server owns monotonic `server_revision` per item
 - clients keep local sync tables
 - deletions are modeled as trash first, then purge later
@@ -91,7 +91,7 @@ Flow:
 
 1. client registers device
 2. client calls pull with empty cursor/state
-3. server returns all active notes, assets, and trash metadata
+3. server returns active notes and supported trash/lifecycle metadata
 4. client writes files into local mirror
 5. client updates local sync tables
 
@@ -210,8 +210,20 @@ Server returns change batches containing:
 - trashed items
 - restored items
 - purged items
-- changed attachments
+- attachment move / trash / restore / purge events
 - next cursor
+
+### V1 asset snapshot policy
+
+The HTTP V1 server does not store binary asset snapshots yet. Until the
+binary upload transport lands, `/sync/pull` omits asset `create` and
+`update` events instead of returning metadata-only rows with missing bytes.
+
+Filtered asset snapshot events still advance the pull cursor. This keeps
+clients from re-fetching unsupported rows forever while making the V1
+contract explicit: asset files do not propagate between devices until
+upload transport is implemented. Asset move, trash, restore, and purge
+events remain valid because they do not require an inline binary payload.
 
 ### Client apply rules
 

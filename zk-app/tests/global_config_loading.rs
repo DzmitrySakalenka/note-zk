@@ -68,10 +68,16 @@ fn load_global_config_valid_file() {
         r#"
 default_vault = "/Users/test/notes"
 local_db_path = "/Users/test/.local/share/note-zk/index.sqlite"
+
+[sync]
+server_url = "https://zk.example.com"
+bearer_token_env = "ZK_TEST_DEVICE_TOKEN"
+device_id = "device-global"
 "#,
     );
 
     let parsed = load_global_config(&config_path).expect("valid TOML should parse");
+    let sync = parsed.sync.expect("sync table should parse");
 
     assert_eq!(
         parsed.default_vault,
@@ -83,6 +89,18 @@ local_db_path = "/Users/test/.local/share/note-zk/index.sqlite"
             "/Users/test/.local/share/note-zk/index.sqlite"
         ))
     );
+    assert_eq!(
+        sync.server_url
+            .as_ref()
+            .expect("server URL should parse")
+            .as_str(),
+        "https://zk.example.com/"
+    );
+    assert_eq!(
+        sync.bearer_token_env.as_deref(),
+        Some("ZK_TEST_DEVICE_TOKEN")
+    );
+    assert_eq!(sync.device_id.as_deref(), Some("device-global"));
 }
 
 #[test]

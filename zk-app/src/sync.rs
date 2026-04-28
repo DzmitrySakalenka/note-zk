@@ -31,6 +31,15 @@ pub enum BootstrapOutcome {
     Pushed(PushApplyOutcome),
 }
 
+/// Local sync registration state for one device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeviceSyncStatus {
+    /// Whether the local device row already exists.
+    pub registered: bool,
+    /// Last remote event cursor applied by this device, when present.
+    pub last_sync_cursor: Option<i64>,
+}
+
 pub use zk_sync::{pull::PullApplyOutcome, push::PushApplyOutcome};
 
 /// Shared local sync inputs used by the async facade entry points.
@@ -77,6 +86,20 @@ pub async fn register_device(
 
     DeviceRepo::upsert_device(conn, &device)?;
     Ok(response)
+}
+
+/// Looks up the local registration and cursor state for one sync device.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when the local index query fails.
+pub fn get_device_sync_status(conn: &Connection, device_id: &DeviceId) -> Result<DeviceSyncStatus> {
+    let device = DeviceRepo::get_device(conn, device_id)?;
+
+    Ok(DeviceSyncStatus {
+        registered: device.is_some(),
+        last_sync_cursor: device.and_then(|record| record.last_sync_cursor),
+    })
 }
 
 /// Plans local changes, pushes them, and applies the remote push response locally.
@@ -136,6 +159,7 @@ pub async fn pull_and_apply(
         let mut request = plan_empty_local_bootstrap(device_id);
         request.cursor = cursor;
         let response = transport.pull(&request).await?;
+        let remote_exhausted = response.next_cursor.is_none();
         let pull_ctx = PullApplyContext {
             vault,
             device_id,
@@ -148,7 +172,7 @@ pub async fn pull_and_apply(
         aggregate.conflicts.extend(batch.conflicts);
         aggregate.next_cursor = batch.next_cursor;
 
-        if response.next_cursor == request.cursor {
+        if remote_exhausted || response.next_cursor == request.cursor {
             break;
         }
     }

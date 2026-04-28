@@ -14,14 +14,21 @@ clap = { version = "4.6.1", features = ["derive"] }
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+tokio = { version = "1.52.1", features = ["rt", "macros", "net", "sync", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+url = "2"
 zk-app = { path = "../zk-app" }
+zk-sync = { version = "0.1.0", path = "../zk-sync" }
 
 [dev-dependencies]
 assert_cmd = "2.2.1"
+axum = "0.8.9"
+hex = "0.4.3"
 insta = "1.47.2"
 predicates = "3.1.4"
+sha2 = "0.11.0"
 tempfile = "3.27.0"
 zk-domain = { version = "0.1.0", path = "../zk-domain" }
 zk-index = { version = "0.1.0", path = "../zk-index" }
+zk-server = { path = "../zk-server" }
 zk-vault = { version = "0.1.0", path = "../zk-vault" }

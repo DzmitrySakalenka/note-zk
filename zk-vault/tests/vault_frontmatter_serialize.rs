@@ -272,6 +272,46 @@ fn parse_normalize_serialize_parse_roundtrip_preserves_frontmatter() {
 }
 
 #[test]
+fn default_untagged_tags_roundtrip_through_parse_and_render() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let relative_path = RelativePath::new("missing-tags.md");
+    let note_path = tempdir.path().join(relative_path.as_str());
+    write_text_file(
+        &note_path,
+        concat!(
+            "---\n",
+            "id: 01DEFAULTUNTAGGED0000000001\n",
+            "title: Missing Tags\n",
+            "---\n",
+            "# Missing Tags\n",
+            "Body\n",
+        ),
+    );
+
+    let first_parsed = parse_note_file(&note_path).expect("missing-tags note should parse");
+    let first_frontmatter = first_parsed
+        .frontmatter
+        .as_ref()
+        .expect("frontmatter should exist");
+    assert_eq!(first_frontmatter.tags, vec!["untagged".to_string()]);
+
+    let normalized = parse_and_normalize(&note_path, &relative_path);
+    let rendered = render_note_file(&normalized, &first_parsed.body_markdown)
+        .expect("default-tagged note file should render");
+    assert!(rendered.contains("tags:\n  - untagged\n"));
+
+    let rendered_path = tempdir.path().join("rendered-missing-tags.md");
+    write_text_file(&rendered_path, &rendered);
+    let second_parsed =
+        parse_note_file(&rendered_path).expect("rendered missing-tags note should parse");
+    let second_frontmatter = second_parsed
+        .frontmatter
+        .as_ref()
+        .expect("rendered frontmatter should exist");
+    assert_eq!(second_frontmatter.tags, first_frontmatter.tags);
+}
+
+#[test]
 fn yaml_hostile_scalars_roundtrip_through_render_and_parse_unchanged() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let relative_path = RelativePath::new("yaml-hostile.md");

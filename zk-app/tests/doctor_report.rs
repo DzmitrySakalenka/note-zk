@@ -89,6 +89,15 @@ tags:
             .any(|issue| issue.rule_id == "duplicate-id"),
         "duplicate-id should be present in error bucket"
     );
+    assert_eq!(
+        report
+            .errors
+            .iter()
+            .filter(|issue| issue.rule_id == "duplicate-id")
+            .count(),
+        2,
+        "duplicate-id should be reported once per duplicate path"
+    );
     assert!(
         report
             .warnings

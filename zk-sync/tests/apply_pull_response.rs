@@ -4,12 +4,14 @@
 use std::{fs, io::ErrorKind, path::Path};
 
 use chrono::{DateTime, TimeZone, Utc};
+use rusqlite::types::ValueRef;
 use tempfile::TempDir;
 use zk_domain::{
     SyncChange, SyncPullResponse, WireEventType, WireItemType,
+    asset::AssetRecord,
     id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     sync::{PendingOperation, SyncStatus},
-    sync_state::{DeleteRecord, DeleteRecordTarget, DeviceRecord, NoteSyncState},
+    sync_state::{AssetSyncState, DeleteRecord, DeleteRecordTarget, DeviceRecord, NoteSyncState},
 };
 use zk_index::{
     AssetRepo, DeleteRecordRepo, DeviceRepo, NoteRepo, SyncStateRepo, ensure_schema, open_memory,
@@ -23,6 +25,17 @@ use zk_sync::{
 #[derive(Debug, Clone, Copy)]
 struct FixedClock {
     now: DateTime<Utc>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PullStateSnapshot {
+    files: Vec<(String, Vec<u8>)>,
+    notes_index: Vec<Vec<String>>,
+    assets_index: Vec<Vec<String>>,
+    note_sync_state: Vec<Vec<String>>,
+    asset_sync_state: Vec<Vec<String>>,
+    delete_records: Vec<Vec<String>>,
+    devices: Vec<Vec<String>>,
 }
 
 impl Clock for FixedClock {
@@ -76,6 +89,110 @@ fn write_vault_file(vault_root: &Path, path: &RelativePath, bytes: &[u8]) {
     )
     .expect("vault parent directory should create");
     fs::write(absolute_path, bytes).expect("vault file should write");
+}
+
+fn snapshot_pull_state(connection: &rusqlite::Connection, vault: &TempDir) -> PullStateSnapshot {
+    PullStateSnapshot {
+        files: snapshot_files(vault.path()),
+        notes_index: query_rows(
+            connection,
+            "SELECT note_id, current_path, title, content_hash, frontmatter_json, created_at, \
+             updated_at, trashed_at, deleted_at, is_trashed, is_deleted, server_revision \
+             FROM notes_index ORDER BY note_id",
+            12,
+        ),
+        assets_index: query_rows(
+            connection,
+            "SELECT asset_id, current_path, content_hash, mime_type, size_bytes, created_at, \
+             updated_at, trashed_at, deleted_at, is_trashed, is_deleted, server_revision \
+             FROM assets_index ORDER BY asset_id",
+            12,
+        ),
+        note_sync_state: query_rows(
+            connection,
+            "SELECT note_id, device_id, last_local_hash, last_synced_hash, last_synced_path, \
+             last_known_server_revision, sync_status, last_sync_attempt_at, last_sync_error, \
+             pending_operation FROM note_sync_state ORDER BY note_id",
+            10,
+        ),
+        asset_sync_state: query_rows(
+            connection,
+            "SELECT asset_id, device_id, last_local_hash, last_synced_hash, last_synced_path, \
+             last_known_server_revision, sync_status, last_sync_attempt_at, last_sync_error, \
+             pending_operation FROM asset_sync_state ORDER BY asset_id",
+            10,
+        ),
+        delete_records: query_rows(
+            connection,
+            "SELECT item_id, item_type, original_path, trashed_at, retention_until, deleted_at, \
+             delete_revision FROM delete_records ORDER BY item_type, item_id",
+            7,
+        ),
+        devices: query_rows(
+            connection,
+            "SELECT device_id, device_name, platform, app_version, capabilities_json, created_at, \
+             last_seen_at, last_sync_cursor FROM devices ORDER BY device_id",
+            8,
+        ),
+    }
+}
+
+fn snapshot_files(root: &Path) -> Vec<(String, Vec<u8>)> {
+    let mut files = Vec::new();
+    collect_files(root, root, &mut files);
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    files
+}
+
+fn collect_files(root: &Path, directory: &Path, files: &mut Vec<(String, Vec<u8>)>) {
+    let mut entries = fs::read_dir(directory)
+        .expect("snapshot directory should read")
+        .map(|entry| entry.expect("snapshot directory entry should read").path())
+        .collect::<Vec<_>>();
+    entries.sort();
+
+    for path in entries {
+        if path.is_dir() {
+            collect_files(root, &path, files);
+        } else if path.is_file() {
+            let relative_path = path
+                .strip_prefix(root)
+                .expect("snapshot path should be under vault root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let bytes = fs::read(&path).expect("snapshot file should read");
+            files.push((relative_path, bytes));
+        }
+    }
+}
+
+fn query_rows(
+    connection: &rusqlite::Connection,
+    sql: &str,
+    column_count: usize,
+) -> Vec<Vec<String>> {
+    let mut statement = connection
+        .prepare(sql)
+        .expect("snapshot query should prepare");
+    statement
+        .query_map([], |row| {
+            (0..column_count)
+                .map(|column| row.get_ref(column).map(|value| value_ref_to_string(value)))
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .expect("snapshot query should execute")
+        .map(|row| row.expect("snapshot row should decode"))
+        .collect()
+}
+
+fn value_ref_to_string(value: ValueRef<'_>) -> String {
+    match value {
+        ValueRef::Null => "<NULL>".to_string(),
+        ValueRef::Integer(value) => value.to_string(),
+        ValueRef::Real(value) => value.to_string(),
+        ValueRef::Text(value) => String::from_utf8_lossy(value).into_owned(),
+        ValueRef::Blob(value) => format!("{value:?}"),
+    }
 }
 
 fn note_body(note_id: &str, title: &str, updated: &str, body: &str) -> String {
@@ -171,6 +288,54 @@ fn upsert_note_state(
     .expect("note sync-state should upsert");
 }
 
+fn seed_asset_for_move(
+    connection: &rusqlite::Connection,
+    vault: &TempDir,
+    asset_id: &str,
+) -> ContentHash {
+    let asset_path = RelativePath::new("assets/diagram.bin");
+    let bytes = b"diagram-v1";
+    let server_revision = 6;
+    let asset_hash = ContentHash::from_bytes(bytes);
+    write_vault_file(vault.path(), &asset_path, bytes);
+    AssetRepo::upsert_asset(
+        connection,
+        &AssetRecord {
+            asset_id: AssetId::new(asset_id),
+            current_path: asset_path.clone(),
+            content_hash: asset_hash.clone(),
+            mime_type: None,
+            size_bytes: u64::try_from(bytes.len()).expect("asset byte length should fit in u64"),
+            created_at: "2026-04-01T00:00:00Z".to_string(),
+            updated_at: "2026-04-20T08:00:00Z".to_string(),
+            trashed_at: None,
+            deleted_at: None,
+            is_trashed: false,
+            is_deleted: false,
+            server_revision: ServerRevision::new(server_revision),
+        },
+    )
+    .expect("asset should seed");
+    SyncStateRepo::upsert_asset_sync_state(
+        connection,
+        &AssetSyncState {
+            item_id: AssetId::new(asset_id),
+            device_id: device_id(),
+            last_local_hash: Some(asset_hash.clone()),
+            last_synced_hash: Some(asset_hash.clone()),
+            last_synced_path: Some(asset_path),
+            last_known_server_revision: Some(ServerRevision::new(server_revision)),
+            sync_status: SyncStatus::Synced,
+            last_sync_attempt_at: None,
+            last_sync_error: None,
+            pending_operation: None,
+        },
+    )
+    .expect("asset sync-state should seed");
+
+    asset_hash
+}
+
 fn apply(
     connection: &mut rusqlite::Connection,
     vault: &TempDir,
@@ -193,25 +358,37 @@ fn apply(
 fn apply_pull_response_rejects_out_of_order_batches_without_advancing_cursor() {
     let vault = TempDir::new().expect("temp vault should create");
     let mut connection = open_sync_connection();
-    DeviceRepo::upsert_device(&connection, &device_record(Some(12))).expect("device should insert");
+    DeviceRepo::upsert_device(&connection, &device_record(Some(10))).expect("device should insert");
 
     let response = SyncPullResponse {
-        changes: vec![note_change(
-            12,
-            "01TG11007NOTEORDER00000001",
-            WireEventType::Update,
-            Some("notes/alpha.md"),
-            "Alpha",
-            "2026-04-22T18:00:00Z",
-            "# Alpha",
-            4,
-        )],
+        changes: vec![
+            note_change(
+                13,
+                "01TG11007NOTEORDER00000001",
+                WireEventType::Update,
+                Some("notes/alpha.md"),
+                "Alpha",
+                "2026-04-22T18:00:00Z",
+                "# Alpha",
+                4,
+            ),
+            note_change(
+                12,
+                "01TG11007NOTEORDER00000002",
+                WireEventType::Update,
+                Some("notes/beta.md"),
+                "Beta",
+                "2026-04-22T18:00:00Z",
+                "# Beta",
+                5,
+            ),
+        ],
         next_cursor: Some(12),
     };
 
     match apply(&mut connection, &vault, &response) {
         Err(SyncError::OutOfOrderEvent { last, next }) => {
-            assert_eq!(last, 12);
+            assert_eq!(last, 13);
             assert_eq!(next, 12);
         }
         other => panic!("expected out-of-order error, got {other:?}"),
@@ -220,7 +397,179 @@ fn apply_pull_response_rejects_out_of_order_batches_without_advancing_cursor() {
     let actual_device = DeviceRepo::get_device(&connection, &device_id())
         .expect("device query should succeed")
         .expect("device should exist");
-    assert_eq!(actual_device.last_sync_cursor, Some(12));
+    assert_eq!(actual_device.last_sync_cursor, Some(10));
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn apply_pull_response_is_idempotent_on_same_batch() {
+    let vault = TempDir::new().expect("temp vault should create");
+    let mut connection = open_sync_connection();
+    DeviceRepo::upsert_device(&connection, &device_record(None)).expect("device should insert");
+    DeviceRepo::update_sync_cursor(&connection, &device_id(), Some(10))
+        .expect("device cursor should advance");
+
+    let trash_note_id = "01TG13016NOTETRASH0000001";
+    let trash_note_path = RelativePath::new("notes/trash-me.md");
+    let trash_body = note_body(
+        trash_note_id,
+        "Trash Me",
+        "2026-04-20T08:00:00Z",
+        "# Trash Me",
+    );
+    let trash_hash = ContentHash::from_bytes(trash_body.as_bytes());
+    write_vault_file(vault.path(), &trash_note_path, trash_body.as_bytes());
+    NoteRepo::upsert_note(
+        &connection,
+        &NoteId::new(trash_note_id),
+        &trash_note_path,
+        "Trash Me",
+        &trash_hash,
+        &serde_json::json!({
+            "id": trash_note_id,
+            "title": "Trash Me",
+            "created": "2026-04-01T00:00:00Z",
+            "updated": "2026-04-20T08:00:00Z"
+        })
+        .to_string(),
+        "2026-04-01T00:00:00Z",
+        "2026-04-20T08:00:00Z",
+        None,
+        false,
+    )
+    .expect("note should seed");
+    upsert_note_state(
+        &connection,
+        trash_note_id,
+        Some(&trash_hash),
+        Some(&trash_hash),
+        Some(&trash_note_path),
+        Some(8),
+        None,
+    );
+
+    let asset_id = "01TG13016ASSETMOVE0000001";
+    let asset_hash = seed_asset_for_move(&connection, &vault, asset_id);
+
+    let create_note_id = "01TG13016NOTECREATE000001";
+    let response = SyncPullResponse {
+        changes: vec![
+            note_change(
+                11,
+                create_note_id,
+                WireEventType::Create,
+                Some("notes/idempotent.md"),
+                "Idempotent",
+                "2026-04-22T18:00:00Z",
+                "# Created",
+                1,
+            ),
+            note_change(
+                12,
+                create_note_id,
+                WireEventType::Update,
+                Some("notes/idempotent.md"),
+                "Idempotent",
+                "2026-04-22T18:01:00Z",
+                "# Updated",
+                2,
+            ),
+            asset_change(
+                13,
+                asset_id,
+                WireEventType::Move,
+                Some("assets/archive/diagram.bin"),
+                None,
+                Some(&asset_hash),
+                7,
+            ),
+            SyncChange {
+                event_seq: 20,
+                item_id: trash_note_id.to_string(),
+                item_type: WireItemType::Note,
+                event_type: WireEventType::Trash,
+                path: Some(trash_note_path.to_string()),
+                content: None,
+                asset_bytes_base64: None,
+                content_hash: None,
+                server_revision: Some(9),
+                trashed_at: Some("2026-04-22T18:07:33Z".to_string()),
+                retention_until: Some("2026-05-22T18:07:33Z".to_string()),
+                deleted_at: None,
+            },
+        ],
+        next_cursor: Some(20),
+    };
+
+    let first_outcome =
+        apply(&mut connection, &vault, &response).expect("first pull apply should succeed");
+    assert_eq!(first_outcome.applied, 4);
+    assert_eq!(first_outcome.next_cursor, Some(20));
+    let first_snapshot = snapshot_pull_state(&connection, &vault);
+
+    let second_outcome =
+        apply(&mut connection, &vault, &response).expect("second pull apply should succeed");
+    assert_eq!(second_outcome.applied, 0);
+    assert_eq!(second_outcome.next_cursor, Some(20));
+    assert_eq!(snapshot_pull_state(&connection, &vault), first_snapshot);
+    assert_eq!(
+        DeviceRepo::get_device(&connection, &device_id())
+            .expect("device query should succeed")
+            .expect("device should exist")
+            .last_sync_cursor,
+        Some(20)
+    );
+}
+
+#[test]
+fn apply_pull_response_advances_to_last_change_when_next_cursor_is_absent() {
+    let vault = TempDir::new().expect("temp vault should create");
+    let mut connection = open_sync_connection();
+    DeviceRepo::upsert_device(&connection, &device_record(None)).expect("device should insert");
+
+    let note_id = "01TG13012FINALPAGE00000001";
+    let response = SyncPullResponse {
+        changes: vec![note_change(
+            7,
+            note_id,
+            WireEventType::Create,
+            Some("notes/final-page.md"),
+            "Final Page",
+            "2026-04-22T18:00:00Z",
+            "# Final Page",
+            3,
+        )],
+        next_cursor: None,
+    };
+
+    let outcome = apply(&mut connection, &vault, &response).expect("pull apply should succeed");
+
+    assert_eq!(outcome.applied, 1);
+    assert_eq!(outcome.next_cursor, Some(7));
+    let actual_device = DeviceRepo::get_device(&connection, &device_id())
+        .expect("device query should succeed")
+        .expect("device should exist");
+    assert_eq!(actual_device.last_sync_cursor, Some(7));
+}
+
+#[test]
+fn apply_pull_response_preserves_cursor_when_empty_final_page_has_no_next_cursor() {
+    let vault = TempDir::new().expect("temp vault should create");
+    let mut connection = open_sync_connection();
+    DeviceRepo::upsert_device(&connection, &device_record(Some(11))).expect("device should insert");
+    let response = SyncPullResponse {
+        changes: Vec::new(),
+        next_cursor: None,
+    };
+
+    let outcome = apply(&mut connection, &vault, &response).expect("pull apply should succeed");
+
+    assert_eq!(outcome.applied, 0);
+    assert_eq!(outcome.next_cursor, Some(11));
+    let actual_device = DeviceRepo::get_device(&connection, &device_id())
+        .expect("device query should succeed")
+        .expect("device should exist");
+    assert_eq!(actual_device.last_sync_cursor, Some(11));
 }
 
 #[test]

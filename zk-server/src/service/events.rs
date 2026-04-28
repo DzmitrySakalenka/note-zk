@@ -3,6 +3,7 @@
 use std::io;
 
 use chrono::{DateTime, Utc};
+use rusqlite::Connection;
 
 use crate::{
     ServerError, ServerResult,
@@ -78,33 +79,7 @@ pub fn record_note_change(
     input: RecordNoteChange<'_>,
     now: DateTime<Utc>,
 ) -> ServerResult<RecordedEvent> {
-    validate_event_type(input.event_type)?;
-
-    db.with_tx(|transaction| {
-        let existing_note = NotesRepo::get(transaction, &input.note.note_id)?;
-        if existing_note.is_some() {
-            NotesRepo::update(transaction, input.note)?;
-        } else {
-            NotesRepo::create(transaction, input.note)?;
-        }
-
-        let event_seq = SyncEventsRepo::record(
-            transaction,
-            &NewSyncEvent {
-                item_id: &input.note.note_id,
-                item_type: "note",
-                event_type: input.event_type,
-                server_revision: Some(input.note.server_revision),
-                device_id: input.device_id,
-                created_at: now,
-            },
-        )?;
-
-        Ok(RecordedEvent {
-            event_seq,
-            server_revision: input.note.server_revision,
-        })
-    })
+    db.with_tx(|transaction| record_note_change_in_conn(transaction, input, now))
 }
 
 /// Persists one asset row and appends its matching sync event atomically.
@@ -118,32 +93,70 @@ pub fn record_asset_change(
     input: RecordAssetChange<'_>,
     now: DateTime<Utc>,
 ) -> ServerResult<RecordedEvent> {
+    db.with_tx(|transaction| record_asset_change_in_conn(transaction, input, now))
+}
+
+pub(crate) fn record_note_change_in_conn(
+    conn: &Connection,
+    input: RecordNoteChange<'_>,
+    now: DateTime<Utc>,
+) -> ServerResult<RecordedEvent> {
     validate_event_type(input.event_type)?;
 
-    db.with_tx(|transaction| {
-        let existing_asset = AssetsRepo::get(transaction, &input.asset.asset_id)?;
-        if existing_asset.is_some() {
-            AssetsRepo::update(transaction, input.asset)?;
-        } else {
-            AssetsRepo::create(transaction, input.asset)?;
-        }
+    let existing_note = NotesRepo::get(conn, &input.note.note_id)?;
+    if existing_note.is_some() {
+        NotesRepo::update(conn, input.note)?;
+    } else {
+        NotesRepo::create(conn, input.note)?;
+    }
 
-        let event_seq = SyncEventsRepo::record(
-            transaction,
-            &NewSyncEvent {
-                item_id: &input.asset.asset_id,
-                item_type: "asset",
-                event_type: input.event_type,
-                server_revision: Some(input.asset.server_revision),
-                device_id: input.device_id,
-                created_at: now,
-            },
-        )?;
+    let event_seq = SyncEventsRepo::record(
+        conn,
+        &NewSyncEvent {
+            item_id: &input.note.note_id,
+            item_type: "note",
+            event_type: input.event_type,
+            server_revision: Some(input.note.server_revision),
+            device_id: input.device_id,
+            created_at: now,
+        },
+    )?;
 
-        Ok(RecordedEvent {
-            event_seq,
-            server_revision: input.asset.server_revision,
-        })
+    Ok(RecordedEvent {
+        event_seq,
+        server_revision: input.note.server_revision,
+    })
+}
+
+pub(crate) fn record_asset_change_in_conn(
+    conn: &Connection,
+    input: RecordAssetChange<'_>,
+    now: DateTime<Utc>,
+) -> ServerResult<RecordedEvent> {
+    validate_event_type(input.event_type)?;
+
+    let existing_asset = AssetsRepo::get(conn, &input.asset.asset_id)?;
+    if existing_asset.is_some() {
+        AssetsRepo::update(conn, input.asset)?;
+    } else {
+        AssetsRepo::create(conn, input.asset)?;
+    }
+
+    let event_seq = SyncEventsRepo::record(
+        conn,
+        &NewSyncEvent {
+            item_id: &input.asset.asset_id,
+            item_type: "asset",
+            event_type: input.event_type,
+            server_revision: Some(input.asset.server_revision),
+            device_id: input.device_id,
+            created_at: now,
+        },
+    )?;
+
+    Ok(RecordedEvent {
+        event_seq,
+        server_revision: input.asset.server_revision,
     })
 }
 

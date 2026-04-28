@@ -47,6 +47,11 @@ allowed_note_extensions = ["md", "markdown"]
 allow_insert_frontmatter = true
 derive_title_from_h1 = false
 
+[sync]
+server_url = "https://vault-zk.example.com"
+bearer_token_env = "ZK_VAULT_DEVICE_TOKEN"
+device_id = "device-vault"
+
 [folders."raw"]
 immutable = true
 
@@ -69,6 +74,20 @@ immutable = false
         .expect("normalization table should deserialize");
     assert_eq!(normalization.allow_insert_frontmatter, Some(true));
     assert_eq!(normalization.derive_title_from_h1, Some(false));
+
+    let sync = parsed.sync.expect("sync table should deserialize");
+    assert_eq!(
+        sync.server_url
+            .as_ref()
+            .expect("server URL should parse")
+            .as_str(),
+        "https://vault-zk.example.com/"
+    );
+    assert_eq!(
+        sync.bearer_token_env.as_deref(),
+        Some("ZK_VAULT_DEVICE_TOKEN")
+    );
+    assert_eq!(sync.device_id.as_deref(), Some("device-vault"));
 
     let raw_policy = parsed
         .folders

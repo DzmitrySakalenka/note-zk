@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, builder::BoolishValueParser};
+use url::Url;
 
 /// Top-level command-line parser for the `zk-cli` binary.
 #[derive(Debug, Clone, Parser)]
@@ -31,6 +32,10 @@ pub enum Command {
     Restore(RestoreArgs),
     /// Hard-delete expired trash items or one explicit trashed item.
     Purge(PurgeArgs),
+    /// Run one foreground sync cycle against the configured server.
+    Sync(SyncArgs),
+    /// Resolve one server-side sync conflict explicitly.
+    ResolveConflict(ResolveConflictArgs),
 }
 
 /// Shared per-invocation flags that later map onto `CliOverrides`.
@@ -71,6 +76,12 @@ pub struct SharedFlags {
     /// Explicit allowed extension override.
     #[arg(long = "allowed-extensions", global = true, value_delimiter = ',')]
     pub allowed_extensions: Option<Vec<String>>,
+    /// Remote sync server base URL.
+    #[arg(long = "server-url", global = true)]
+    pub server_url: Option<Url>,
+    /// Stable sync device identifier for this installation.
+    #[arg(long = "device-id", global = true)]
+    pub device_id: Option<String>,
 }
 
 /// Shared output rendering modes for all subcommands.
@@ -176,6 +187,46 @@ pub struct PurgeArgs {
     /// Preview the purge outcome without deleting files or updating `SQLite`.
     #[arg(long = "dry-run")]
     pub dry_run: bool,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for the `sync` subcommand.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("sync_mode").args(["push_only", "pull_only", "bootstrap"]).multiple(false)))]
+#[allow(clippy::struct_excessive_bools)]
+pub struct SyncArgs {
+    /// Force one initial-sync bootstrap call before push/pull.
+    #[arg(long)]
+    pub bootstrap: bool,
+    /// Run only the push half of the cycle.
+    #[arg(long = "push-only")]
+    pub push_only: bool,
+    /// Run only the pull half of the cycle.
+    #[arg(long = "pull-only")]
+    pub pull_only: bool,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for the `resolve-conflict` subcommand.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("resolve_kind").args(["keep_local", "keep_remote"]).required(true).multiple(false)))]
+#[allow(clippy::struct_excessive_bools)]
+pub struct ResolveConflictArgs {
+    /// Identifier of the conflicting note or asset.
+    pub target: String,
+    /// Treat target as an asset id rather than a note id.
+    #[arg(long = "as-asset")]
+    pub as_asset: bool,
+    /// Resolve by keeping the local version.
+    #[arg(long = "keep-local")]
+    pub keep_local: bool,
+    /// Resolve by keeping the remote version.
+    #[arg(long = "keep-remote")]
+    pub keep_remote: bool,
     /// Render compact JSON to stdout.
     #[arg(long)]
     pub json: bool,

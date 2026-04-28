@@ -20,6 +20,8 @@ fn load_defaults_when_no_file_and_no_env_are_present() {
     env.remove("ZK_SERVER_LISTEN_ADDR");
     env.remove("ZK_SERVER_LOG_FILTER");
     env.remove("ZK_SERVER_TOKEN_SHA256");
+    env.remove("ZK_SERVER_TRASH_RETENTION_DAYS");
+    env.remove("ZK_SERVER_MAX_BATCH_SIZE");
     env.remove("XDG_CONFIG_HOME");
 
     let root = unique_test_dir("server-config-defaults");
@@ -36,6 +38,8 @@ fn load_defaults_when_no_file_and_no_env_are_present() {
     );
     assert_eq!(config.log_filter, "info,zk_server=debug");
     assert_eq!(config.stub_auth_token_sha256_hex, None);
+    assert_eq!(config.trash_retention_days, 14);
+    assert_eq!(config.max_batch_size, 1000);
 }
 
 #[test]
@@ -45,6 +49,8 @@ fn load_uses_explicit_config_path_and_expands_tilde_database_path() {
     env.remove("ZK_SERVER_LISTEN_ADDR");
     env.remove("ZK_SERVER_LOG_FILTER");
     env.remove("ZK_SERVER_TOKEN_SHA256");
+    env.remove("ZK_SERVER_TRASH_RETENTION_DAYS");
+    env.remove("ZK_SERVER_MAX_BATCH_SIZE");
     env.remove("XDG_CONFIG_HOME");
 
     let root = unique_test_dir("server-config-explicit-path");
@@ -59,6 +65,8 @@ database_path = "~/server-data/zk-server.sqlite"
 listen_addr = "127.0.0.1:9000"
 log_filter = "debug,zk_server=trace"
 stub_auth_token_sha256_hex = "{hash}"
+trash_retention_days = 21
+max_batch_size = 500
 "#,
             hash = sample_token_hash()
         ),
@@ -82,6 +90,8 @@ stub_auth_token_sha256_hex = "{hash}"
         config.stub_auth_token_sha256_hex.as_deref(),
         Some(sample_token_hash())
     );
+    assert_eq!(config.trash_retention_days, 21);
+    assert_eq!(config.max_batch_size, 500);
 }
 
 #[test]
@@ -103,6 +113,8 @@ database_path = "./from-file.sqlite"
 listen_addr = "127.0.0.1:9000"
 log_filter = "info,from_file=debug"
 stub_auth_token_sha256_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+trash_retention_days = 21
+max_batch_size = 500
 "#,
     );
 
@@ -118,6 +130,8 @@ stub_auth_token_sha256_hex = "0123456789abcdef0123456789abcdef0123456789abcdef01
         "ZK_SERVER_TOKEN_SHA256",
         "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
     );
+    env.set("ZK_SERVER_TRASH_RETENTION_DAYS", "30");
+    env.set("ZK_SERVER_MAX_BATCH_SIZE", "2000");
 
     let config = ServerConfig::load().expect("env overrides should load");
 
@@ -134,6 +148,8 @@ stub_auth_token_sha256_hex = "0123456789abcdef0123456789abcdef0123456789abcdef01
         config.stub_auth_token_sha256_hex.as_deref(),
         Some("abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd")
     );
+    assert_eq!(config.trash_retention_days, 30);
+    assert_eq!(config.max_batch_size, 2000);
 }
 
 #[test]
@@ -144,6 +160,8 @@ fn load_uses_xdg_search_path_when_explicit_path_is_unset() {
     env.remove("ZK_SERVER_LISTEN_ADDR");
     env.remove("ZK_SERVER_LOG_FILTER");
     env.remove("ZK_SERVER_TOKEN_SHA256");
+    env.remove("ZK_SERVER_TRASH_RETENTION_DAYS");
+    env.remove("ZK_SERVER_MAX_BATCH_SIZE");
 
     let root = unique_test_dir("server-config-xdg-path");
     let home_dir = root.join("home");
@@ -183,6 +201,8 @@ fn load_rejects_invalid_listen_addr() {
     env.remove("ZK_SERVER_DATABASE_PATH");
     env.remove("ZK_SERVER_LOG_FILTER");
     env.remove("ZK_SERVER_TOKEN_SHA256");
+    env.remove("ZK_SERVER_TRASH_RETENTION_DAYS");
+    env.remove("ZK_SERVER_MAX_BATCH_SIZE");
     env.remove("XDG_CONFIG_HOME");
 
     let root = unique_test_dir("server-config-invalid-listen");
@@ -266,5 +286,51 @@ fn validate_rejects_malformed_non_empty_token_hash() {
             );
         }
         other => panic!("expected InvalidTokenHash, got {other:?}"),
+    }
+}
+
+#[test]
+fn validate_rejects_zero_trash_retention_days() {
+    let root = unique_test_dir("server-config-zero-trash-retention");
+    std::fs::create_dir_all(root.join("db")).expect("create db dir");
+
+    let config = ServerConfig {
+        database_path: root.join("db").join("server.sqlite"),
+        trash_retention_days: 0,
+        ..ServerConfig::default()
+    };
+
+    let err = config
+        .validate()
+        .expect_err("zero trash retention days should fail validation");
+
+    match err {
+        ConfigError::InvalidTrashRetentionDays { value } => assert_eq!(value, 0),
+        other => panic!("expected InvalidTrashRetentionDays, got {other:?}"),
+    }
+}
+
+#[test]
+fn validate_rejects_out_of_range_max_batch_size() {
+    let root = unique_test_dir("server-config-invalid-max-batch-size");
+    std::fs::create_dir_all(root.join("db")).expect("create db dir");
+
+    let cases = [0, 100_001];
+
+    for value in cases {
+        let config = ServerConfig {
+            database_path: root.join("db").join(format!("server-{value}.sqlite")),
+            max_batch_size: value,
+            ..ServerConfig::default()
+        };
+
+        let err = config
+            .validate()
+            .expect_err("out-of-range max batch size should fail validation");
+
+        match err {
+            ConfigError::InvalidMaxBatchSize { value: actual } => assert_eq!(actual, value),
+            other => panic!("expected InvalidMaxBatchSize, got {other:?}"),
+        }
     }
 }

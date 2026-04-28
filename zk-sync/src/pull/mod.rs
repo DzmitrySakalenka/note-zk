@@ -67,9 +67,10 @@ pub fn apply_pull_response(
 ) -> SyncResult<PullApplyOutcome> {
     let device = DeviceRepo::get_device(conn, ctx.device_id)?
         .ok_or_else(|| SyncError::ItemMissing(ctx.device_id.to_string()))?;
-    validate_event_order(device.last_sync_cursor, &response.changes)?;
+    let last_cursor = device.last_sync_cursor;
+    validate_event_order(&response.changes)?;
+    let next_cursor = next_cursor_after_apply(last_cursor, response);
 
-    let next_cursor = response.next_cursor;
     let transaction = conn.transaction().map_err(|source| {
         SyncError::Index(IndexError::Sqlite {
             source,
@@ -93,6 +94,10 @@ pub fn apply_pull_response(
         };
 
         for change in &response.changes {
+            if !event_is_after_cursor(last_cursor, change.event_seq) {
+                continue;
+            }
+
             match change.item_type {
                 WireItemType::Note => note::apply_note_change(&mut workspace, change)?,
                 WireItemType::Asset => asset::apply_asset_change(&mut workspace, change)?,
@@ -111,8 +116,8 @@ pub fn apply_pull_response(
     Ok(outcome)
 }
 
-fn validate_event_order(last_cursor: Option<i64>, changes: &[SyncChange]) -> SyncResult<()> {
-    let mut last_seen = last_cursor;
+fn validate_event_order(changes: &[SyncChange]) -> SyncResult<()> {
+    let mut last_seen = None;
 
     for change in changes {
         if let Some(previous) = last_seen
@@ -127,4 +132,21 @@ fn validate_event_order(last_cursor: Option<i64>, changes: &[SyncChange]) -> Syn
     }
 
     Ok(())
+}
+
+fn next_cursor_after_apply(last_cursor: Option<i64>, response: &SyncPullResponse) -> Option<i64> {
+    let response_cursor = response
+        .next_cursor
+        .or_else(|| response.changes.last().map(|change| change.event_seq));
+
+    match (last_cursor, response_cursor) {
+        (Some(last_cursor), Some(response_cursor)) => Some(last_cursor.max(response_cursor)),
+        (Some(last_cursor), None) => Some(last_cursor),
+        (None, Some(response_cursor)) => Some(response_cursor),
+        (None, None) => None,
+    }
+}
+
+fn event_is_after_cursor(last_cursor: Option<i64>, event_seq: i64) -> bool {
+    last_cursor.is_none_or(|cursor| event_seq > cursor)
 }

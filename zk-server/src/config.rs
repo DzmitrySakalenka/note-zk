@@ -13,11 +13,16 @@ use thiserror::Error;
 const DEFAULT_DATABASE_PATH: &str = "./zk-server.db";
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:7878";
 const DEFAULT_LOG_FILTER: &str = "info,zk_server=debug";
+const DEFAULT_TRASH_RETENTION_DAYS: u32 = 14;
+const DEFAULT_MAX_BATCH_SIZE: u32 = 1000;
+const MAX_BATCH_SIZE_LIMIT: u32 = 100_000;
 const ENV_CONFIG_PATH: &str = "ZK_SERVER_CONFIG";
 const ENV_DATABASE_PATH: &str = "ZK_SERVER_DATABASE_PATH";
 const ENV_LISTEN_ADDR: &str = "ZK_SERVER_LISTEN_ADDR";
 const ENV_LOG_FILTER: &str = "ZK_SERVER_LOG_FILTER";
 const ENV_TOKEN_SHA256: &str = "ZK_SERVER_TOKEN_SHA256";
+const ENV_TRASH_RETENTION_DAYS: &str = "ZK_SERVER_TRASH_RETENTION_DAYS";
+const ENV_MAX_BATCH_SIZE: &str = "ZK_SERVER_MAX_BATCH_SIZE";
 
 /// Result alias used by server configuration APIs.
 pub type ConfigResult<T> = Result<T, ConfigError>;
@@ -67,6 +72,18 @@ pub enum ConfigError {
         /// Raw token-hash value that failed validation.
         value: String,
     },
+    /// The configured trash retention window was zero days.
+    #[error("invalid trash retention days '{value}': expected a non-zero value")]
+    InvalidTrashRetentionDays {
+        /// Raw retention-day value that failed validation.
+        value: u32,
+    },
+    /// The configured maximum sync batch size was outside the accepted range.
+    #[error("invalid max batch size '{value}': expected a value from 1 to 100000")]
+    InvalidMaxBatchSize {
+        /// Raw max-batch-size value that failed validation.
+        value: u32,
+    },
 }
 
 /// Runtime-ready server configuration.
@@ -87,6 +104,10 @@ pub struct ServerConfig {
     pub log_filter: String,
     /// Optional lowercase `SHA-256` bearer-token hash for stub auth.
     pub stub_auth_token_sha256_hex: Option<String>,
+    /// Server trash retention window advertised to sync clients.
+    pub trash_retention_days: u32,
+    /// Maximum sync item count accepted per client batch.
+    pub max_batch_size: u32,
 }
 
 impl Default for ServerConfig {
@@ -98,6 +119,8 @@ impl Default for ServerConfig {
                 .expect("default listen addr should parse"),
             log_filter: DEFAULT_LOG_FILTER.to_string(),
             stub_auth_token_sha256_hex: None,
+            trash_retention_days: DEFAULT_TRASH_RETENTION_DAYS,
+            max_batch_size: DEFAULT_MAX_BATCH_SIZE,
         }
     }
 }
@@ -139,6 +162,8 @@ impl ServerConfig {
     pub fn validate(&self) -> ConfigResult<()> {
         validate_database_parent(&self.database_path)?;
         validate_token_hash(self.stub_auth_token_sha256_hex.as_deref())?;
+        validate_trash_retention_days(self.trash_retention_days)?;
+        validate_max_batch_size(self.max_batch_size)?;
         Ok(())
     }
 
@@ -154,6 +179,12 @@ impl ServerConfig {
         }
         if let Some(token_hash) = raw_config.stub_auth_token_sha256_hex {
             self.stub_auth_token_sha256_hex = Some(token_hash);
+        }
+        if let Some(trash_retention_days) = raw_config.trash_retention_days {
+            self.trash_retention_days = trash_retention_days;
+        }
+        if let Some(max_batch_size) = raw_config.max_batch_size {
+            self.max_batch_size = max_batch_size;
         }
 
         Ok(())
@@ -172,6 +203,12 @@ impl ServerConfig {
         if let Ok(token_hash) = std::env::var(ENV_TOKEN_SHA256) {
             self.stub_auth_token_sha256_hex = Some(token_hash);
         }
+        if let Ok(trash_retention_days) = std::env::var(ENV_TRASH_RETENTION_DAYS) {
+            self.trash_retention_days = parse_trash_retention_days(&trash_retention_days)?;
+        }
+        if let Ok(max_batch_size) = std::env::var(ENV_MAX_BATCH_SIZE) {
+            self.max_batch_size = parse_max_batch_size(&max_batch_size)?;
+        }
 
         Ok(())
     }
@@ -183,6 +220,8 @@ struct RawServerConfig {
     listen_addr: Option<String>,
     log_filter: Option<String>,
     stub_auth_token_sha256_hex: Option<String>,
+    trash_retention_days: Option<u32>,
+    max_batch_size: Option<u32>,
 }
 
 fn resolve_config_path() -> Option<PathBuf> {
@@ -225,6 +264,18 @@ fn parse_listen_addr(value: &str) -> ConfigResult<SocketAddr> {
             value: value.to_string(),
             source,
         })
+}
+
+fn parse_trash_retention_days(value: &str) -> ConfigResult<u32> {
+    value
+        .parse::<u32>()
+        .map_err(|_| ConfigError::InvalidTrashRetentionDays { value: 0 })
+}
+
+fn parse_max_batch_size(value: &str) -> ConfigResult<u32> {
+    value
+        .parse::<u32>()
+        .map_err(|_| ConfigError::InvalidMaxBatchSize { value: 0 })
 }
 
 fn expand_tilde(path: PathBuf) -> PathBuf {
@@ -303,6 +354,22 @@ fn validate_token_hash(token_hash: Option<&str>) -> ConfigResult<()> {
         return Err(ConfigError::InvalidTokenHash {
             value: token_hash.to_string(),
         });
+    }
+
+    Ok(())
+}
+
+fn validate_trash_retention_days(value: u32) -> ConfigResult<()> {
+    if value == 0 {
+        return Err(ConfigError::InvalidTrashRetentionDays { value });
+    }
+
+    Ok(())
+}
+
+fn validate_max_batch_size(value: u32) -> ConfigResult<()> {
+    if value == 0 || value > MAX_BATCH_SIZE_LIMIT {
+        return Err(ConfigError::InvalidMaxBatchSize { value });
     }
 
     Ok(())

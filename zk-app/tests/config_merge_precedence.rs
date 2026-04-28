@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use zk_app::config::{merge_effective_config, resolve_folder_policy};
 use zk_domain::config::{
-    CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, NormalizationConfig,
+    CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, NormalizationConfig, SyncConfig,
     ValidationConfig, VaultConfig,
 };
 
@@ -28,6 +28,7 @@ fn merge_uses_global_for_vault_and_db_paths_when_higher_layers_missing() {
     let global = GlobalConfig {
         default_vault: Some(PathBuf::from("/global/default-vault")),
         local_db_path: Some(PathBuf::from("/global/index.sqlite")),
+        ..GlobalConfig::default()
     };
 
     let merged = merge_effective_config(&global, &VaultConfig::default(), &CliOverrides::default());
@@ -47,6 +48,7 @@ fn merge_uses_vault_for_vault_scoped_fields_when_cli_missing() {
             derive_title_from_h1: Some(false),
         }),
         validation: None,
+        sync: None,
         folders: BTreeMap::from([
             (
                 "raw".to_string(),
@@ -81,6 +83,7 @@ fn merge_cli_overrides_vault_and_global() {
     let global = GlobalConfig {
         default_vault: Some(PathBuf::from("/global/vault")),
         local_db_path: Some(PathBuf::from("/global/db.sqlite")),
+        ..GlobalConfig::default()
     };
     let vault = VaultConfig {
         trash_dir: Some("vault_trash".to_string()),
@@ -91,6 +94,7 @@ fn merge_cli_overrides_vault_and_global() {
             derive_title_from_h1: Some(true),
         }),
         validation: None,
+        sync: None,
         folders: BTreeMap::from([(
             "raw".to_string(),
             FolderPolicy {
@@ -106,6 +110,8 @@ fn merge_cli_overrides_vault_and_global() {
         allow_insert_frontmatter: Some(false),
         derive_title_from_h1: Some(false),
         allowed_note_extensions: Some(vec!["md".to_string(), "txt".to_string()]),
+        server_url: None,
+        device_id: None,
     };
 
     let merged = merge_effective_config(&global, &vault, &cli);
@@ -127,6 +133,7 @@ fn merge_is_deterministic_for_identical_inputs() {
     let global = GlobalConfig {
         default_vault: Some(PathBuf::from("/global/vault")),
         local_db_path: Some(PathBuf::from("/global/db.sqlite")),
+        ..GlobalConfig::default()
     };
     let vault = VaultConfig {
         trash_dir: Some("vault_trash".to_string()),
@@ -137,6 +144,7 @@ fn merge_is_deterministic_for_identical_inputs() {
             derive_title_from_h1: Some(true),
         }),
         validation: None,
+        sync: None,
         folders: BTreeMap::from([(
             "raw".to_string(),
             FolderPolicy {
@@ -152,6 +160,8 @@ fn merge_is_deterministic_for_identical_inputs() {
         allow_insert_frontmatter: Some(false),
         derive_title_from_h1: Some(false),
         allowed_note_extensions: Some(vec!["md".to_string(), "markdown".to_string()]),
+        server_url: None,
+        device_id: None,
     };
 
     let first = merge_effective_config(&global, &vault, &cli);
@@ -190,6 +200,57 @@ fn merge_uses_vault_validation_config_when_present() {
             .get("MermaidBlockDetected"),
         Some(&"warning".to_string())
     );
+}
+
+#[test]
+fn merge_sync_config_uses_cli_vault_global_default_precedence() {
+    let global = GlobalConfig {
+        sync: Some(SyncConfig {
+            server_url: Some(
+                "https://global-zk.example.com"
+                    .parse()
+                    .expect("URL should parse"),
+            ),
+            bearer_token_env: Some("ZK_GLOBAL_DEVICE_TOKEN".to_string()),
+            device_id: Some("device-global".to_string()),
+        }),
+        ..GlobalConfig::default()
+    };
+    let vault = VaultConfig {
+        sync: Some(SyncConfig {
+            server_url: Some(
+                "https://vault-zk.example.com"
+                    .parse()
+                    .expect("URL should parse"),
+            ),
+            bearer_token_env: Some("ZK_VAULT_DEVICE_TOKEN".to_string()),
+            device_id: Some("device-vault".to_string()),
+        }),
+        ..VaultConfig::default()
+    };
+    let cli = CliOverrides {
+        server_url: Some(
+            "https://cli-zk.example.com"
+                .parse()
+                .expect("URL should parse"),
+        ),
+        device_id: Some("device-cli".to_string()),
+        ..CliOverrides::default()
+    };
+
+    let merged = merge_effective_config(&global, &vault, &cli);
+
+    assert_eq!(
+        merged
+            .sync
+            .server_url
+            .as_ref()
+            .expect("server URL should be present")
+            .as_str(),
+        "https://cli-zk.example.com/"
+    );
+    assert_eq!(merged.sync.bearer_token_env, "ZK_VAULT_DEVICE_TOKEN");
+    assert_eq!(merged.sync.device_id.as_deref(), Some("device-cli"));
 }
 
 #[test]

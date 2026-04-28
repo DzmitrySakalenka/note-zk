@@ -65,6 +65,75 @@ pub struct LifecycleJsonOutput<T> {
     pub payload: T,
 }
 
+/// Registration summary emitted by the `sync` command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SyncRegistrationSummary {
+    /// Whether this invocation created the local device row for the first time.
+    pub first_time: bool,
+}
+
+/// Push summary emitted by the `sync` command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SyncPushSummary {
+    /// Count of items accepted by the server.
+    pub accepted: u32,
+    /// Count of items rejected as conflicts.
+    pub conflicts: u32,
+    /// Count of non-conflict item errors.
+    pub errors: u32,
+}
+
+/// Pull summary emitted by the `sync` command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SyncPullSummary {
+    /// Count of remote changes applied locally.
+    pub applied: u32,
+    /// Count of conflicts detected while applying remote changes.
+    pub conflicts: u32,
+}
+
+/// Top-level payload emitted by the `sync` command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SyncCommandPayload {
+    /// Device registration status for this invocation.
+    pub registered: SyncRegistrationSummary,
+    /// Whether push or pull was produced by the bootstrap path.
+    pub bootstrap: bool,
+    /// Push half summary, when this invocation pushed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pushed: Option<SyncPushSummary>,
+    /// Pull half summary, when this invocation pulled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pulled: Option<SyncPullSummary>,
+}
+
+/// Top-level JSON object emitted by `sync --json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SyncJsonOutput {
+    /// Stable command identifier for script consumers.
+    pub command: &'static str,
+    /// Sync command payload.
+    pub payload: SyncCommandPayload,
+}
+
+/// Payload emitted by the `resolve-conflict` command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResolveConflictCommandPayload {
+    /// Whether the server accepted the requested resolution.
+    pub accepted: bool,
+    /// Server revision returned by the server, when one exists.
+    pub new_server_revision: Option<i64>,
+}
+
+/// Top-level JSON object emitted by `resolve-conflict --json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResolveConflictJsonOutput {
+    /// Stable command identifier for script consumers.
+    pub command: &'static str,
+    /// Resolve-conflict command payload.
+    pub payload: ResolveConflictCommandPayload,
+}
+
 /// Derives the user-facing `scan` counters from a full `ScanOutcome`.
 #[must_use]
 pub fn build_scan_summary(scan_outcome: &ScanOutcome) -> ScanSummary {
@@ -310,6 +379,64 @@ pub fn write_purge_human(
     }
 
     Ok(())
+}
+
+/// Writes human-readable `sync` output to the provided writer.
+///
+/// # Errors
+///
+/// Returns an `io::Error` when writing to the provided output fails.
+pub fn write_sync_human(out: &mut dyn io::Write, payload: &SyncCommandPayload) -> io::Result<()> {
+    let registration = if payload.registered.first_time {
+        "first time"
+    } else {
+        "refreshed"
+    };
+    writeln!(out, "registered ({registration})")?;
+
+    if let Some(pushed) = &payload.pushed {
+        let prefix = if payload.bootstrap {
+            "bootstrap pushed"
+        } else {
+            "pushed"
+        };
+        writeln!(
+            out,
+            "{prefix} {} items ({} conflicts, {} errors)",
+            pushed.accepted, pushed.conflicts, pushed.errors
+        )?;
+    }
+
+    if let Some(pulled) = &payload.pulled {
+        let prefix = if payload.bootstrap {
+            "bootstrap pulled"
+        } else {
+            "pulled"
+        };
+        writeln!(
+            out,
+            "{prefix} {} changes ({} conflicts)",
+            pulled.applied, pulled.conflicts
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Writes human-readable `resolve-conflict` output to the provided writer.
+///
+/// # Errors
+///
+/// Returns an `io::Error` when writing to the provided output fails.
+pub fn write_resolve_conflict_human(
+    out: &mut dyn io::Write,
+    payload: &ResolveConflictCommandPayload,
+) -> io::Result<()> {
+    writeln!(out, "Accepted: {}", payload.accepted)?;
+    match payload.new_server_revision {
+        Some(revision) => writeln!(out, "New server revision: {revision}"),
+        None => writeln!(out, "New server revision: none"),
+    }
 }
 
 fn count_findings(findings: &[ValidationFinding], level: &DiagnosticLevel) -> u32 {

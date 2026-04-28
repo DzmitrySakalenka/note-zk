@@ -45,6 +45,8 @@ fn test_config(database_path: PathBuf, stub_hash: Option<String>) -> ServerConfi
             .expect("test listen addr should parse"),
         log_filter: "info,zk_server=debug".to_string(),
         stub_auth_token_sha256_hex: stub_hash,
+        trash_retention_days: 14,
+        max_batch_size: 1000,
     }
 }
 

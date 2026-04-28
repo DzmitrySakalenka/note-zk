@@ -19,15 +19,18 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
-            bin: zk-cli
+            cli_bin: zk-cli
+            server_bin: zk-server
           - os: macos-latest
             target: aarch64-apple-darwin
             archive: tar.gz
-            bin: zk-cli
+            cli_bin: zk-cli
+            server_bin: zk-server
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             archive: zip
-            bin: zk-cli.exe
+            cli_bin: zk-cli.exe
+            server_bin: zk-server.exe
     steps:
       - uses: actions/checkout@v4
 
@@ -39,16 +42,17 @@ jobs:
           key: release-${{ matrix.target }}
 
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }} -p zk-cli
+        run: cargo build --release --locked --target ${{ matrix.target }} -p zk-cli -p zk-server
 
       - name: Stage archive
         shell: bash
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          stage="zk-cli-${version}-${{ matrix.target }}"
+          stage="note-zk-${version}-${{ matrix.target }}"
           mkdir -p "$stage"
-          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$stage/"
+          cp "target/${{ matrix.target }}/release/${{ matrix.cli_bin }}" "$stage/"
+          cp "target/${{ matrix.target }}/release/${{ matrix.server_bin }}" "$stage/"
           cp README.md LICENSE "$stage/"
           if [ "${{ matrix.archive }}" = "zip" ]; then
             7z a "${stage}.zip" "$stage" >/dev/null

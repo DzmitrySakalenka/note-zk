@@ -1,6 +1,6 @@
 use std::{future::Future, time::Duration};
 
-use axum::{Router, http::StatusCode, routing::get};
+use axum::{Router, http::StatusCode, middleware, routing::get};
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
 use tower::ServiceBuilder;
@@ -8,7 +8,8 @@ use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 
 use crate::{
     ServerError, ServerResult,
-    http::{ApiError, health::health},
+    auth::require_auth_layer,
+    http::{ApiError, health::health, sync_routes},
     state::ServerState,
 };
 
@@ -16,6 +17,10 @@ use crate::{
 pub fn build_router(state: ServerState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .merge(sync_routes().route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_auth_layer,
+        )))
         .fallback(not_found)
         .layer(
             ServiceBuilder::new()

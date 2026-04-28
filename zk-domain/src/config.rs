@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf};
+use url::Url;
+
+/// Default environment variable name used to read the sync bearer token.
+pub const DEFAULT_BEARER_TOKEN_ENV: &str = "ZK_DEVICE_TOKEN";
 
 // ==========================================================================
 // Global and vault-sourced config values
@@ -12,6 +16,8 @@ pub struct GlobalConfig {
     pub default_vault: Option<PathBuf>,
     /// Optional override for the local `SQLite` index path.
     pub local_db_path: Option<PathBuf>,
+    /// Optional sync settings for this user or machine.
+    pub sync: Option<SyncConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
@@ -27,9 +33,22 @@ pub struct VaultConfig {
     pub normalization: Option<NormalizationConfig>,
     /// Optional validation behavior overrides for this vault.
     pub validation: Option<ValidationConfig>,
+    /// Optional sync settings that travel with this vault.
+    pub sync: Option<SyncConfig>,
     #[serde(default)]
     /// Folder policies keyed by vault-relative prefix.
     pub folders: BTreeMap<String, FolderPolicy>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+/// Sync settings loaded from global or per-vault configuration.
+pub struct SyncConfig {
+    /// Base URL for the remote sync server.
+    pub server_url: Option<Url>,
+    /// Environment variable name that contains the bearer token.
+    pub bearer_token_env: Option<String>,
+    /// Stable local device identifier.
+    pub device_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
@@ -78,6 +97,31 @@ pub struct CliOverrides {
     pub derive_title_from_h1: Option<bool>,
     /// Explicit allowed extensions override.
     pub allowed_note_extensions: Option<Vec<String>>,
+    /// Explicit sync server URL override.
+    pub server_url: Option<Url>,
+    /// Explicit sync device identifier override.
+    pub device_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+/// Effective sync settings after global, vault, and CLI merge.
+pub struct EffectiveSyncConfig {
+    /// Effective remote sync server URL.
+    pub server_url: Option<Url>,
+    /// Effective environment variable name that contains the bearer token.
+    pub bearer_token_env: String,
+    /// Effective stable local device identifier.
+    pub device_id: Option<String>,
+}
+
+impl Default for EffectiveSyncConfig {
+    fn default() -> Self {
+        Self {
+            server_url: None,
+            bearer_token_env: DEFAULT_BEARER_TOKEN_ENV.to_string(),
+            device_id: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -101,6 +145,8 @@ pub struct EffectiveConfig {
     pub validation: ValidationConfig,
     /// Effective folder policy map.
     pub folders: BTreeMap<String, FolderPolicy>,
+    /// Effective sync client configuration.
+    pub sync: EffectiveSyncConfig,
 }
 
 impl Default for EffectiveConfig {
@@ -115,6 +161,7 @@ impl Default for EffectiveConfig {
             allowed_note_extensions: vec!["md".to_string()],
             validation: ValidationConfig::default(),
             folders: BTreeMap::new(),
+            sync: EffectiveSyncConfig::default(),
         }
     }
 }

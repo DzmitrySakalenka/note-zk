@@ -7,11 +7,11 @@ use zk_domain::{
     config::EffectiveConfig,
     derived::{AssetReference, ExternalLink, ParsedNoteIndex, ResolvedNoteLink},
     id::{ContentHash, NoteId, RelativePath},
-    note::{NoteDocument, NoteFrontmatter},
+    note::{DiagnosticLevel, NoteDocument, NoteFrontmatter},
 };
 use zk_vault::{
     NormalizationPlan, NormalizationResult, TitleSource, TrashState, VaultScanResult,
-    resolve_vault_links,
+    resolve_vault_links, resolve_vault_links_with_diagnostics,
 };
 
 fn base_config() -> EffectiveConfig {
@@ -375,6 +375,60 @@ fn duplicate_id_notes_are_excluded_from_output() {
         resolved[0].note_id,
         NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAN")
     );
+}
+
+#[test]
+fn duplicate_id_notes_detected_during_resolution_return_diagnostics() {
+    let duplicate_id = NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAT");
+    let scan = scan_with_notes(
+        vec![
+            make_note(
+                "notes/a.md",
+                "01ARZ3NDEKTSV4RRFFQ69G5FAT",
+                "Duplicate A",
+                &[],
+                "Body",
+            ),
+            make_note(
+                "notes/b.md",
+                "01ARZ3NDEKTSV4RRFFQ69G5FAT",
+                "Duplicate B",
+                &[],
+                "Body",
+            ),
+            make_note(
+                "notes/unique.md",
+                "01ARZ3NDEKTSV4RRFFQ69G5FAU",
+                "Unique",
+                &[],
+                "Body",
+            ),
+        ],
+        Vec::new(),
+    );
+
+    let outcome = resolve_vault_links_with_diagnostics(&scan, &base_config());
+
+    assert_eq!(outcome.parsed_indexes.len(), 1);
+    assert_eq!(
+        outcome.parsed_indexes[0].note_id,
+        NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAU")
+    );
+    assert_eq!(
+        outcome.duplicate_ids,
+        vec![(
+            duplicate_id.clone(),
+            vec![
+                RelativePath::new("notes/a.md"),
+                RelativePath::new("notes/b.md"),
+            ],
+        )]
+    );
+    assert_eq!(outcome.diagnostics.len(), 2);
+    assert!(outcome.diagnostics.iter().all(|diagnostic| {
+        diagnostic.level == DiagnosticLevel::Error
+            && diagnostic.message == format!("duplicate note id detected: {duplicate_id}")
+    }));
 }
 
 #[test]

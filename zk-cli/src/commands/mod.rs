@@ -8,12 +8,16 @@ use zk_app::{AppError, ItemKind, RelativePath, TargetSelector};
 pub mod doctor;
 /// Handles the `purge` subcommand.
 pub mod purge;
+/// Handles the `resolve-conflict` subcommand.
+pub mod resolve_conflict;
 /// Handles the `restore` subcommand.
 pub mod restore;
 /// Handles the `scan` subcommand.
 pub mod scan;
 /// Handles the `status` subcommand.
 pub mod status;
+/// Handles the `sync` subcommand.
+pub mod sync;
 /// Handles the `trash` subcommand.
 pub mod trash;
 

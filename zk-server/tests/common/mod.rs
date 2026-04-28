@@ -42,6 +42,8 @@ pub struct EnvGuard {
     zk_server_listen_addr: Option<OsString>,
     zk_server_log_filter: Option<OsString>,
     zk_server_token_sha256: Option<OsString>,
+    zk_server_trash_retention_days: Option<OsString>,
+    zk_server_max_batch_size: Option<OsString>,
     home: Option<OsString>,
     xdg_config_home: Option<OsString>,
 }
@@ -59,6 +61,8 @@ impl EnvGuard {
             zk_server_listen_addr: std::env::var_os("ZK_SERVER_LISTEN_ADDR"),
             zk_server_log_filter: std::env::var_os("ZK_SERVER_LOG_FILTER"),
             zk_server_token_sha256: std::env::var_os("ZK_SERVER_TOKEN_SHA256"),
+            zk_server_trash_retention_days: std::env::var_os("ZK_SERVER_TRASH_RETENTION_DAYS"),
+            zk_server_max_batch_size: std::env::var_os("ZK_SERVER_MAX_BATCH_SIZE"),
             home: std::env::var_os("HOME"),
             xdg_config_home: std::env::var_os("XDG_CONFIG_HOME"),
         }
@@ -100,6 +104,14 @@ impl Drop for EnvGuard {
         restore_env_var(
             "ZK_SERVER_TOKEN_SHA256",
             self.zk_server_token_sha256.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_TRASH_RETENTION_DAYS",
+            self.zk_server_trash_retention_days.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_MAX_BATCH_SIZE",
+            self.zk_server_max_batch_size.as_ref(),
         );
         restore_env_var("HOME", self.home.as_ref());
         restore_env_var("XDG_CONFIG_HOME", self.xdg_config_home.as_ref());

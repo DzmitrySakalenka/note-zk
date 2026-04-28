@@ -40,11 +40,15 @@ pub use bridge::{build_asset_inputs, build_note_inputs};
 pub use error::{AppError, Result};
 /// Transparent re-exports of CLI-facing config types from `zk-domain`.
 pub use zk_domain::config::{CliOverrides, EffectiveConfig};
+/// Transparent re-export of the sync device identifier type from `zk-domain`.
+pub use zk_domain::id::DeviceId;
 /// Transparent re-export of the CLI-facing relative path type from `zk-domain`.
 pub use zk_domain::id::RelativePath;
 /// Transparent re-exports of CLI-facing identifier and request types from `zk-domain`.
 pub use zk_domain::{
-    ItemKind, PurgeRequest, PurgeScope, RestoreRequest, TargetSelector, TrashRequest,
+    ItemKind, PurgeRequest, PurgeScope, RegisterDeviceRequest, ResolveConflictRequest,
+    ResolveConflictResponse, RestoreRequest, TargetSelector, TrashRequest, WireConflictResolution,
+    WireItemType,
 };
 /// Transparent re-exports of validation and sync enums used in CLI output.
 pub use zk_domain::{ItemType, note::DiagnosticLevel, note::ValidationFinding};
@@ -82,7 +86,7 @@ pub use retention::{
 };
 #[rustfmt::skip]
 pub use sync::{
-    BootstrapOutcome, PullApplyOutcome, PushApplyOutcome, SyncContext, bootstrap,
-    plan_and_push, pull_and_apply, register_device,
+    BootstrapOutcome, DeviceSyncStatus, PullApplyOutcome, PushApplyOutcome, SyncContext, bootstrap,
+    get_device_sync_status, plan_and_push, pull_and_apply, register_device,
 };
 pub use write_policy::{ensure_writable, is_path_immutable};

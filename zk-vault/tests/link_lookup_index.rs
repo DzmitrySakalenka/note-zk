@@ -5,11 +5,11 @@ use std::collections::BTreeMap;
 
 use zk_domain::{
     id::{ContentHash, NoteId, RelativePath},
-    note::{NoteDocument, NoteFrontmatter},
+    note::{DiagnosticLevel, NoteDocument, NoteFrontmatter, ScanDiagnostic},
 };
 use zk_vault::{
-    NormalizationPlan, NormalizationResult, NoteLookupIndex, ResolveResult, TitleSource,
-    TrashState, VaultScanResult, build_from_scan,
+    NormalizationPlan, NormalizationResult, NoteLookupIndex, NoteLookupIndexBuild, ResolveResult,
+    TitleSource, TrashState, VaultScanResult, build_from_scan,
 };
 
 fn empty_plan() -> NormalizationPlan {
@@ -98,6 +98,18 @@ fn assert_resolved(index: &NoteLookupIndex, target: &str, expected_id: &str) {
     );
 }
 
+fn build_lookup_index(scan: &VaultScanResult) -> NoteLookupIndex {
+    build_from_scan(scan).index
+}
+
+fn duplicate_diagnostics(build: &NoteLookupIndexBuild) -> Vec<&ScanDiagnostic> {
+    build
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.message.contains("duplicate note id detected"))
+        .collect()
+}
+
 #[test]
 fn title_match_resolves() {
     let scan = scan_with_notes(
@@ -110,7 +122,7 @@ fn title_match_resolves() {
         Vec::new(),
     );
 
-    let index = build_from_scan(&scan);
+    let index = build_lookup_index(&scan);
 
     assert_resolved(&index, "Alpha Title", "01ARZ3NDEKTSV4RRFFQ69G5FAA");
 }
@@ -127,7 +139,7 @@ fn alias_resolves_when_no_title_match_exists() {
         Vec::new(),
     );
 
-    let index = build_from_scan(&scan);
+    let index = build_lookup_index(&scan);
 
     assert_resolved(&index, "Alias Name", "01ARZ3NDEKTSV4RRFFQ69G5FAB");
 }
@@ -144,7 +156,7 @@ fn basename_resolves_when_no_title_or_alias_match_exists() {
         Vec::new(),
     );
 
-    let index = build_from_scan(&scan);
+    let index = build_lookup_index(&scan);
 
     assert_resolved(&index, "my-note", "01ARZ3NDEKTSV4RRFFQ69G5FAC");
 }
@@ -161,7 +173,7 @@ fn path_resolves_as_last_resort() {
         Vec::new(),
     );
 
-    let index = build_from_scan(&scan);
+    let index = build_lookup_index(&scan);
 
     assert_resolved(&index, "projects/my-note", "01ARZ3NDEKTSV4RRFFQ69G5FAD");
     assert_resolved(
@@ -197,7 +209,7 @@ fn path_lookup_handles_root_nested_and_dotless_paths_without_panic() {
         Vec::new(),
     );
 
-    let index = build_from_scan(&scan);
+    let index = build_lookup_index(&scan);
 
     assert_resolved(&index, "root-note", "01ARZ3NDEKTSV4RRFFQ69G5FAQ");
     assert_resolved(&index, "notes/nested-note", "01ARZ3NDEKTSV4RRFFQ69G5FAR");
@@ -224,7 +236,7 @@ fn ambiguous_when_two_notes_share_same_title() {
         Vec::new(),
     );
 
-    let index = build_from_scan(&scan);
+    let index = build_lookup_index(&scan);
 
     assert_eq!(
         index.resolve_target("Shared Title"),
@@ -244,7 +256,7 @@ fn returns_not_found_when_no_match_exists() {
         Vec::new(),
     );
 
-    let index = build_from_scan(&scan);
+    let index = build_lookup_index(&scan);
 
     assert_eq!(index.resolve_target("Missing"), ResolveResult::NotFound);
 }
@@ -261,7 +273,7 @@ fn notes_without_document_are_excluded_from_index() {
         Vec::new(),
     );
 
-    let index = build_from_scan(&scan);
+    let index = build_lookup_index(&scan);
 
     assert!(index.titles.is_empty());
     assert!(index.aliases.is_empty());
@@ -283,10 +295,83 @@ fn duplicate_id_notes_are_excluded_from_index() {
         vec![(duplicate_id, vec![RelativePath::new("notes/alpha.md")])],
     );
 
-    let index = build_from_scan(&scan);
+    let index = build_lookup_index(&scan);
 
     assert!(index.titles.is_empty());
     assert_eq!(index.resolve_target("Alpha Title"), ResolveResult::NotFound);
+}
+
+#[test]
+fn duplicate_id_notes_detected_from_notes_are_excluded_and_reported() {
+    let duplicate_id = NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAT");
+    let scan = scan_with_notes(
+        vec![
+            make_note(
+                "notes/alpha.md",
+                "01ARZ3NDEKTSV4RRFFQ69G5FAT",
+                "Alpha Title",
+                &["Alias Name"],
+            ),
+            make_note(
+                "notes/beta.md",
+                "01ARZ3NDEKTSV4RRFFQ69G5FAT",
+                "Beta Title",
+                &["Other Alias"],
+            ),
+        ],
+        Vec::new(),
+    );
+
+    let build = build_from_scan(&scan);
+    let diagnostics = duplicate_diagnostics(&build);
+
+    assert!(build.index.titles.is_empty());
+    assert_eq!(
+        build.index.resolve_target("Alpha Title"),
+        ResolveResult::NotFound
+    );
+    assert_eq!(
+        build.duplicate_ids,
+        vec![(
+            duplicate_id.clone(),
+            vec![
+                RelativePath::new("notes/alpha.md"),
+                RelativePath::new("notes/beta.md"),
+            ],
+        )]
+    );
+    assert_eq!(diagnostics.len(), 2);
+    assert!(diagnostics.iter().all(|diagnostic| {
+        diagnostic.level == DiagnosticLevel::Error
+            && diagnostic.message == format!("duplicate note id detected: {duplicate_id}")
+    }));
+}
+
+#[test]
+fn existing_duplicate_id_diagnostics_are_not_emitted_twice() {
+    let duplicate_id = NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    let duplicate_path = RelativePath::new("notes/alpha.md");
+    let scan = VaultScanResult {
+        notes: vec![make_note(
+            "notes/alpha.md",
+            "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "Alpha Title",
+            &["Alias Name"],
+        )],
+        assets: Vec::new(),
+        diagnostics: vec![ScanDiagnostic {
+            level: DiagnosticLevel::Error,
+            path: duplicate_path.clone(),
+            message: format!("duplicate note id detected: {duplicate_id}"),
+        }],
+        frontmatter_parse_failures: Vec::new(),
+        duplicate_ids: vec![(duplicate_id, vec![duplicate_path])],
+        trashed_note_count: 0,
+    };
+
+    let build = build_from_scan(&scan);
+
+    assert!(duplicate_diagnostics(&build).is_empty());
 }
 
 #[test]
@@ -321,7 +406,7 @@ fn matching_is_case_insensitive_for_all_lookup_levels() {
         Vec::new(),
     );
 
-    let index = build_from_scan(&scan);
+    let index = build_lookup_index(&scan);
 
     assert_resolved(&index, "title case", "01ARZ3NDEKTSV4RRFFQ69G5FAK");
     assert_resolved(&index, "ALIAS VALUE", "01ARZ3NDEKTSV4RRFFQ69G5FAL");
@@ -345,7 +430,7 @@ fn same_note_id_is_deduplicated_within_each_bucket() {
         Vec::new(),
     );
 
-    let index = build_from_scan(&scan);
+    let index = build_lookup_index(&scan);
 
     assert_eq!(
         index.titles.get("same key"),

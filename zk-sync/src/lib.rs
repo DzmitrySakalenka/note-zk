@@ -6,6 +6,7 @@
 pub mod bootstrap;
 pub mod conflict;
 pub mod error;
+mod http_transport;
 pub mod plan;
 pub mod pull;
 pub mod push;
@@ -22,8 +23,9 @@ pub use error::{SyncError, SyncResult};
 #[rustfmt::skip]
 pub use plan::{PlannerContext, PlannedOp, PlannedOperation, plan_local_changes};
 #[rustfmt::skip]
-pub use pull::{PullApplyContext, PullApplyOutcome, apply_pull_response};
-#[rustfmt::skip]
 pub use push::{PushApplyOutcome, apply_push_response, build_push_request};
 #[rustfmt::skip]
+pub use pull::{PullApplyContext, PullApplyOutcome, apply_pull_response};
+#[rustfmt::skip]
 pub use transport::{NoopTransport, SyncTransport};
+pub use http_transport::HttpTransport;
