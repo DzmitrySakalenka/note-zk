@@ -1,11 +1,12 @@
 //! Internal link-classification and resolution types for the vault-aware pass.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use zk_domain::{
     config::EffectiveConfig,
     derived::{AssetReference, ExternalLink, ParsedNoteIndex, ResolvedNoteLink},
     id::{NoteId, RelativePath},
+    note::{DiagnosticLevel, ScanDiagnostic},
 };
 
 use crate::{
@@ -61,6 +62,17 @@ pub struct NoteLookupIndex {
     pub paths: HashMap<String, Vec<NoteId>>,
 }
 
+/// Lookup-index build output, including diagnostics for IDs filtered out of link resolution.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct NoteLookupIndexBuild {
+    /// Case-insensitive note lookup index built from unique note IDs.
+    pub index: NoteLookupIndex,
+    /// Additional scan diagnostics discovered while building the lookup index.
+    pub diagnostics: Vec<ScanDiagnostic>,
+    /// Duplicate note IDs grouped with the paths that share each ID.
+    pub duplicate_ids: Vec<(NoteId, Vec<RelativePath>)>,
+}
+
 /// Outcome of resolving a single link target against the lookup index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolveResult {
@@ -74,13 +86,12 @@ pub enum ResolveResult {
 
 /// Builds a note lookup index from normalized scan results.
 #[must_use]
-pub fn build_from_scan(scan_result: &VaultScanResult) -> NoteLookupIndex {
-    let duplicate_ids: HashSet<NoteId> = scan_result
-        .duplicate_ids
+pub fn build_from_scan(scan_result: &VaultScanResult) -> NoteLookupIndexBuild {
+    let duplicate_ids = collect_duplicate_ids(scan_result);
+    let duplicate_id_set: HashSet<NoteId> = duplicate_ids
         .iter()
         .map(|(note_id, _)| note_id.clone())
         .collect();
-
     let mut index = NoteLookupIndex::default();
 
     for note in &scan_result.notes {
@@ -91,7 +102,7 @@ pub fn build_from_scan(scan_result: &VaultScanResult) -> NoteLookupIndex {
         let Some(frontmatter) = note.frontmatter.as_ref() else {
             continue;
         };
-        if duplicate_ids.contains(&frontmatter.id) {
+        if duplicate_id_set.contains(&frontmatter.id) {
             continue;
         }
 
@@ -116,7 +127,94 @@ pub fn build_from_scan(scan_result: &VaultScanResult) -> NoteLookupIndex {
         insert_path_keys(&mut index.paths, note, &frontmatter.id);
     }
 
-    index
+    NoteLookupIndexBuild {
+        index,
+        diagnostics: duplicate_id_diagnostics(scan_result, &duplicate_ids),
+        duplicate_ids,
+    }
+}
+
+fn collect_duplicate_ids(scan_result: &VaultScanResult) -> Vec<(NoteId, Vec<RelativePath>)> {
+    let mut paths_by_id: BTreeMap<String, Vec<RelativePath>> = BTreeMap::new();
+
+    for (note_id, paths) in &scan_result.duplicate_ids {
+        let entry = paths_by_id.entry(note_id.to_string()).or_default();
+        for path in paths {
+            insert_sorted_unique_path(entry, path.clone());
+        }
+    }
+
+    let mut detected_paths_by_id: BTreeMap<String, Vec<RelativePath>> = BTreeMap::new();
+    for note in &scan_result.notes {
+        let note_id = note
+            .frontmatter
+            .as_ref()
+            .map(|frontmatter| &frontmatter.id)
+            .or(note.note_id.as_ref());
+        let Some(note_id) = note_id else {
+            continue;
+        };
+        detected_paths_by_id
+            .entry(note_id.to_string())
+            .or_default()
+            .push(note.relative_path.clone());
+    }
+
+    for (note_id, paths) in detected_paths_by_id {
+        if paths.len() < 2 {
+            continue;
+        }
+        let entry = paths_by_id.entry(note_id).or_default();
+        for path in paths {
+            insert_sorted_unique_path(entry, path);
+        }
+    }
+
+    paths_by_id
+        .into_iter()
+        .map(|(note_id, paths)| (NoteId::new(&note_id), paths))
+        .collect()
+}
+
+fn insert_sorted_unique_path(paths: &mut Vec<RelativePath>, path: RelativePath) {
+    if paths.iter().any(|existing_path| existing_path == &path) {
+        return;
+    }
+    paths.push(path);
+    paths.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+}
+
+fn duplicate_id_diagnostics(
+    scan_result: &VaultScanResult,
+    duplicate_ids: &[(NoteId, Vec<RelativePath>)],
+) -> Vec<ScanDiagnostic> {
+    let existing_diagnostics = scan_result
+        .diagnostics
+        .iter()
+        .map(|diagnostic| {
+            (
+                diagnostic.path.as_str().to_string(),
+                diagnostic.message.clone(),
+            )
+        })
+        .collect::<HashSet<_>>();
+    let mut diagnostics = Vec::new();
+
+    for (duplicate_id, paths) in duplicate_ids {
+        let message = format!("duplicate note id detected: {duplicate_id}");
+        for path in paths {
+            if existing_diagnostics.contains(&(path.as_str().to_string(), message.clone())) {
+                continue;
+            }
+            diagnostics.push(ScanDiagnostic {
+                level: DiagnosticLevel::Error,
+                path: path.clone(),
+                message: message.clone(),
+            });
+        }
+    }
+
+    diagnostics
 }
 
 impl NoteLookupIndex {
@@ -150,12 +248,21 @@ pub fn resolve_vault_links(
     scan_result: &VaultScanResult,
     config: &EffectiveConfig,
 ) -> Vec<ParsedNoteIndex> {
-    let duplicate_ids: HashSet<NoteId> = scan_result
+    resolve_vault_links_with_diagnostics(scan_result, config).parsed_indexes
+}
+
+/// Resolves vault links and returns diagnostics produced by the link-resolution stage.
+#[must_use]
+pub fn resolve_vault_links_with_diagnostics(
+    scan_result: &VaultScanResult,
+    config: &EffectiveConfig,
+) -> LinkResolutionOutcome {
+    let lookup_build = build_from_scan(scan_result);
+    let duplicate_ids: HashSet<NoteId> = lookup_build
         .duplicate_ids
         .iter()
         .map(|(note_id, _)| note_id.clone())
         .collect();
-    let lookup_index = build_from_scan(scan_result);
     let mut parsed_indexes = Vec::with_capacity(scan_result.notes.len());
 
     for note in &scan_result.notes {
@@ -172,7 +279,7 @@ pub fn resolve_vault_links(
         let extracted_links = extract_links(&document.body_markdown);
         let classified_links = classify_links(&extracted_links, &config.allowed_note_extensions);
         let (outbound_note_links, outbound_external_links, asset_references) =
-            assemble_note_outputs(&frontmatter.id, &classified_links, &lookup_index);
+            assemble_note_outputs(&frontmatter.id, &classified_links, &lookup_build.index);
         let body_analysis = analyze_body(&document.body_markdown);
 
         parsed_indexes.push(ParsedNoteIndex {
@@ -187,7 +294,22 @@ pub fn resolve_vault_links(
         });
     }
 
-    parsed_indexes
+    LinkResolutionOutcome {
+        parsed_indexes,
+        diagnostics: lookup_build.diagnostics,
+        duplicate_ids: lookup_build.duplicate_ids,
+    }
+}
+
+/// Link-resolution output plus diagnostics that should be merged into the scan outcome.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LinkResolutionOutcome {
+    /// Parsed per-note link/reference indexes derived from scan output.
+    pub parsed_indexes: Vec<ParsedNoteIndex>,
+    /// Additional scan diagnostics discovered while resolving links.
+    pub diagnostics: Vec<ScanDiagnostic>,
+    /// Duplicate note IDs grouped with the paths that share each ID.
+    pub duplicate_ids: Vec<(NoteId, Vec<RelativePath>)>,
 }
 
 /// Classifies extracted raw links before vault-aware resolution.
