@@ -139,12 +139,27 @@ fn existing_note_required_error(item_type: &str) -> ServerError {
     ))
 }
 
+/// Converts one fetched event row into a V1 pull change.
+///
+/// Asset create/update rows return `None` because V1 HTTP sync has no binary
+/// asset snapshot storage; callers should still advance cursors over them.
 pub(super) fn sync_change_from_row(
     conn: &Connection,
     row: &SyncChangeRow,
-) -> ServerResult<SyncChange> {
+) -> ServerResult<Option<SyncChange>> {
     let item_type = parse_item_type(&row.item_type)?;
     let event_type = parse_event_type(&row.event_type)?;
+
+    if matches!(
+        (item_type, event_type),
+        (
+            WireItemType::Asset,
+            WireEventType::Create | WireEventType::Update
+        )
+    ) {
+        return Ok(None);
+    }
+
     let delete_record = if matches!(event_type, WireEventType::Trash | WireEventType::Purge) {
         DeleteRecordsRepo::get(conn, &row.item_id, &row.item_type)?
     } else {
@@ -189,7 +204,7 @@ pub(super) fn sync_change_from_row(
         }
     }
 
-    Ok(change)
+    Ok(Some(change))
 }
 
 fn populate_snapshot_fields(
@@ -208,8 +223,6 @@ fn populate_snapshot_fields(
             let asset = require_asset(row)?;
             change.path = Some(asset.current_path.clone());
             change.content_hash = Some(asset.content_hash.clone());
-            // TODO(post-Milestone-C): binary asset upload transport should
-            // populate `asset_bytes_base64` once the server stores asset bytes.
         }
     }
 

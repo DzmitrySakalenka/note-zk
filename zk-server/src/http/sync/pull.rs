@@ -24,16 +24,29 @@ pub(super) async fn sync_pull(
     let requested_batch_size = body.batch_size.unwrap_or(max_batch_size);
     let batch_size = requested_batch_size.clamp(1, max_batch_size);
     let outcome = service::fetch_changes_since(state.db(), cursor, i64::from(batch_size))?;
+    let last_fetched_event_seq = outcome.events.last().map(|row| row.event_seq);
     let changes = state.db().with_conn(|connection| {
-        outcome
-            .events
-            .iter()
-            .map(|row| dto::sync_change_from_row(connection, row))
-            .collect()
+        let mut changes = Vec::with_capacity(outcome.events.len());
+
+        for row in &outcome.events {
+            if let Some(change) = dto::sync_change_from_row(connection, row)? {
+                changes.push(change);
+            }
+        }
+
+        Ok(changes)
     })?;
+    let visible_last_event_seq = changes.last().map(|change| change.event_seq);
+    let next_cursor = outcome.next_cursor.or_else(|| {
+        if visible_last_event_seq == last_fetched_event_seq {
+            None
+        } else {
+            last_fetched_event_seq
+        }
+    });
 
     Ok(Json(SyncPullResponse {
         changes,
-        next_cursor: outcome.next_cursor,
+        next_cursor,
     }))
 }

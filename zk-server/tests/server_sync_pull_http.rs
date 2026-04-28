@@ -132,6 +132,37 @@ fn seed_asset_create(state: &ServerState, asset_id: &str, server_revision: i64) 
     .expect("asset create event should record");
 }
 
+fn seed_asset_update(state: &ServerState, asset_id: &str, server_revision: i64) {
+    let asset = asset_fixture(asset_id, server_revision);
+
+    record_asset_change(
+        state.db(),
+        RecordAssetChange {
+            device_id: Some("device-a"),
+            event_type: "update",
+            asset: &asset,
+        },
+        parse_timestamp("2026-04-24T10:07:00Z"),
+    )
+    .expect("asset update event should record");
+}
+
+fn seed_asset_move(state: &ServerState, asset_id: &str, server_revision: i64, path: &str) {
+    let mut asset = asset_fixture(asset_id, server_revision);
+    asset.current_path = path.to_string();
+
+    record_asset_change(
+        state.db(),
+        RecordAssetChange {
+            device_id: Some("device-a"),
+            event_type: "move",
+            asset: &asset,
+        },
+        parse_timestamp("2026-04-24T10:08:00Z"),
+    )
+    .expect("asset move event should record");
+}
+
 fn pull_request(device_id: &str, cursor: Option<i64>, batch_size: Option<u32>) -> Request<Body> {
     let mut body = Map::new();
     body.insert("device_id".to_string(), json!(device_id));
@@ -201,9 +232,10 @@ async fn pull_note_create_maps_snapshot_fields() {
 }
 
 #[tokio::test]
-async fn pull_asset_create_omits_binary_payload_for_v1() {
+async fn pull_filters_asset_snapshot_events_and_advances_cursor() {
     let harness = build_harness();
     seed_asset_create(&harness.state, "asset-a", 1);
+    seed_asset_update(&harness.state, "asset-a", 2);
 
     let response = test_router(harness.state)
         .oneshot(pull_request("device-a", None, None))
@@ -212,17 +244,35 @@ async fn pull_asset_create_omits_binary_payload_for_v1() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let json_body = response_json(response).await;
-    let change = &json_body["changes"][0];
 
-    assert_eq!(change["event_seq"], 1);
+    assert_eq!(json_body["changes"], json!([]));
+    assert_eq!(json_body["next_cursor"], 2);
+}
+
+#[tokio::test]
+async fn pull_keeps_asset_lifecycle_events_visible_after_filtered_snapshot() {
+    let harness = build_harness();
+    seed_asset_create(&harness.state, "asset-a", 1);
+    seed_asset_move(&harness.state, "asset-a", 2, "assets/archive/asset-a.png");
+
+    let response = test_router(harness.state)
+        .oneshot(pull_request("device-a", None, None))
+        .await
+        .expect("pull request should succeed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json_body = response_json(response).await;
+    let changes = json_body["changes"].as_array().expect("changes array");
+
+    assert_eq!(changes.len(), 1);
+    let change = &changes[0];
+    assert_eq!(change["event_seq"], 2);
     assert_eq!(change["item_id"], "asset-a");
     assert_eq!(change["item_type"], "asset");
-    assert_eq!(change["event_type"], "create");
-    assert_eq!(change["path"], "assets/asset-a.png");
-    assert_eq!(change["content_hash"], "hash-asset-a-1");
-    assert_eq!(change["server_revision"], 1);
-    assert!(change.get("asset_bytes_base64").is_none());
-    assert!(change.get("content").is_none());
+    assert_eq!(change["event_type"], "move");
+    assert_eq!(change["path"], "assets/archive/asset-a.png");
+    assert_eq!(change["server_revision"], 2);
+    assert_eq!(json_body["next_cursor"], 2);
 }
 
 #[tokio::test]
@@ -245,10 +295,9 @@ async fn pull_paginates_with_next_cursor_and_cursor_filter() {
             .as_array()
             .expect("changes array")
             .len(),
-        2
+        1
     );
     assert_eq!(first_json["changes"][0]["event_seq"], 1);
-    assert_eq!(first_json["changes"][1]["event_seq"], 2);
     assert_eq!(first_json["next_cursor"], 2);
 
     let second_response = app
