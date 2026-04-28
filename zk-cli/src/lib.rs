@@ -22,7 +22,8 @@ use cli::{Cli, Command};
 use error::CliError;
 
 pub use bootstrap::{
-    build_overrides, load_effective_config, open_index_connection, resolve_vault_root,
+    ResolvedSyncSettings, build_overrides, load_effective_config, open_index_connection,
+    resolve_sync_settings, resolve_vault_root,
 };
 
 /// Dispatches a parsed CLI invocation to the matching subcommand handler.

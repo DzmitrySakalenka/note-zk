@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, builder::BoolishValueParser};
+use url::Url;
 
 /// Top-level command-line parser for the `zk-cli` binary.
 #[derive(Debug, Clone, Parser)]
@@ -71,6 +72,12 @@ pub struct SharedFlags {
     /// Explicit allowed extension override.
     #[arg(long = "allowed-extensions", global = true, value_delimiter = ',')]
     pub allowed_extensions: Option<Vec<String>>,
+    /// Remote sync server base URL.
+    #[arg(long = "server-url", global = true)]
+    pub server_url: Option<Url>,
+    /// Stable sync device identifier for this installation.
+    #[arg(long = "device-id", global = true)]
+    pub device_id: Option<String>,
 }
 
 /// Shared output rendering modes for all subcommands.

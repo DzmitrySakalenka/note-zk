@@ -2200,6 +2200,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]
@@ -2888,6 +2889,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tracing-subscriber",
+ "url",
  "zk-app",
  "zk-domain",
  "zk-index",
@@ -2907,6 +2909,7 @@ dependencies = [
  "thiserror",
  "toml",
  "ulid",
+ "url",
 ]
 
 [[package]]

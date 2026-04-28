@@ -11,6 +11,16 @@ use zk_app::{CliOverrides, EffectiveConfig};
 
 use crate::{cli::SharedFlags, error::CliError};
 
+/// Sync settings resolved for constructing a remote transport.
+pub struct ResolvedSyncSettings {
+    /// Remote sync server base URL.
+    pub server_url: url::Url,
+    /// Stable sync device identifier for this installation.
+    pub device_id: String,
+    /// Bearer token read from the configured environment variable.
+    pub bearer_token: String,
+}
+
 /// Builds config overrides from the shared per-invocation flags.
 #[must_use]
 pub fn build_overrides(shared: &SharedFlags) -> CliOverrides {
@@ -22,7 +32,38 @@ pub fn build_overrides(shared: &SharedFlags) -> CliOverrides {
         allow_insert_frontmatter: shared.allow_insert_frontmatter,
         derive_title_from_h1: shared.derive_title_from_h1,
         allowed_note_extensions: shared.allowed_extensions.clone(),
+        server_url: shared.server_url.clone(),
+        device_id: shared.device_id.clone(),
     }
+}
+
+/// Resolves sync settings and reads the bearer token from the configured env var.
+///
+/// # Errors
+///
+/// Returns [`CliError::Issue`] when a required sync setting or token environment
+/// variable is missing.
+pub fn resolve_sync_settings(config: &EffectiveConfig) -> Result<ResolvedSyncSettings, CliError> {
+    let server_url =
+        config.sync.server_url.clone().ok_or_else(|| {
+            CliError::Issue("server_url is required for sync subcommand".to_string())
+        })?;
+    let device_id =
+        config.sync.device_id.clone().ok_or_else(|| {
+            CliError::Issue("device_id is required for sync subcommand".to_string())
+        })?;
+    let bearer_token = std::env::var(&config.sync.bearer_token_env).map_err(|_| {
+        CliError::Issue(format!(
+            "environment variable {} is required for sync subcommand",
+            config.sync.bearer_token_env
+        ))
+    })?;
+
+    Ok(ResolvedSyncSettings {
+        server_url,
+        device_id,
+        bearer_token,
+    })
 }
 
 /// Resolves the vault root from CLI flags or the current working directory.

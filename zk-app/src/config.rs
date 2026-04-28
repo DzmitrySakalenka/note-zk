@@ -8,7 +8,8 @@ use std::{
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 use zk_domain::config::{
-    CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, NormalizationConfig, VaultConfig,
+    CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, NormalizationConfig, SyncConfig,
+    VaultConfig,
 };
 use zk_domain::id::RelativePath;
 
@@ -230,6 +231,9 @@ pub fn merge_effective_config(
     if let Some(local_db_path) = &global.local_db_path {
         merged.local_db_path.clone_from(local_db_path);
     }
+    if let Some(sync) = &global.sync {
+        apply_sync_config(sync, &mut merged);
+    }
 
     if let Some(trash_dir) = &vault.trash_dir {
         merged.trash_dir.clone_from(trash_dir);
@@ -245,6 +249,9 @@ pub fn merge_effective_config(
     }
     if let Some(validation) = &vault.validation {
         merged.validation.clone_from(validation);
+    }
+    if let Some(sync) = &vault.sync {
+        apply_sync_config(sync, &mut merged);
     }
     if !vault.folders.is_empty() {
         merged.folders.clone_from(&vault.folders);
@@ -270,6 +277,12 @@ pub fn merge_effective_config(
     }
     if let Some(extensions) = &cli.allowed_note_extensions {
         merged.allowed_note_extensions.clone_from(extensions);
+    }
+    if let Some(server_url) = &cli.server_url {
+        merged.sync.server_url = Some(server_url.clone());
+    }
+    if let Some(device_id) = &cli.device_id {
+        merged.sync.device_id = Some(device_id.clone());
     }
 
     merged
@@ -329,6 +342,18 @@ fn apply_normalization_overrides(
     }
     if let Some(derive_title_from_h1) = normalization.derive_title_from_h1 {
         merged.derive_title_from_h1 = derive_title_from_h1;
+    }
+}
+
+fn apply_sync_config(sync: &SyncConfig, merged: &mut EffectiveConfig) {
+    if let Some(server_url) = &sync.server_url {
+        merged.sync.server_url = Some(server_url.clone());
+    }
+    if let Some(bearer_token_env) = &sync.bearer_token_env {
+        merged.sync.bearer_token_env.clone_from(bearer_token_env);
+    }
+    if let Some(device_id) = &sync.device_id {
+        merged.sync.device_id = Some(device_id.clone());
     }
 }
 

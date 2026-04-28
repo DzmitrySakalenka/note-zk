@@ -25,6 +25,10 @@ fn scan_parses_subcommand_and_shared_flags() {
         "md,markdown",
         "--allowed-extensions",
         "txt",
+        "--server-url",
+        "https://zk.example.com",
+        "--device-id",
+        "device-cli",
         "--allow-insert-frontmatter=false",
         "--derive-title-from-h1",
         "--json",
@@ -52,6 +56,11 @@ fn scan_parses_subcommand_and_shared_flags() {
             "txt".to_string(),
         ])
     );
+    assert_eq!(
+        cli.shared.server_url,
+        Some(url::Url::parse("https://zk.example.com").expect("URL should parse"))
+    );
+    assert_eq!(cli.shared.device_id.as_deref(), Some("device-cli"));
 
     match cli.command {
         Command::Scan(args) => {

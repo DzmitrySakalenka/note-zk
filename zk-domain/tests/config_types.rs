@@ -4,9 +4,10 @@
 use std::fmt::Debug;
 
 use serde::{Serialize, de::DeserializeOwned};
+use url::Url;
 use zk_domain::config::{
-    CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, NormalizationConfig,
-    ValidationConfig, VaultConfig,
+    CliOverrides, EffectiveConfig, EffectiveSyncConfig, FolderPolicy, GlobalConfig,
+    NormalizationConfig, SyncConfig, ValidationConfig, VaultConfig,
 };
 
 // ==========================================================================
@@ -23,10 +24,12 @@ where
 fn config_types_implement_required_common_traits() {
     assert_common_traits::<GlobalConfig>();
     assert_common_traits::<VaultConfig>();
+    assert_common_traits::<SyncConfig>();
     assert_common_traits::<FolderPolicy>();
     assert_common_traits::<NormalizationConfig>();
     assert_common_traits::<ValidationConfig>();
     assert_common_traits::<CliOverrides>();
+    assert_common_traits::<EffectiveSyncConfig>();
     assert_common_traits::<EffectiveConfig>();
 }
 
@@ -39,9 +42,15 @@ fn global_config_deserializes_phase1_keys() {
     let input = r#"
 default_vault = "/Users/test/vault"
 local_db_path = "/Users/test/.local/share/note-zk/index.sqlite"
+
+[sync]
+server_url = "https://zk.example.com"
+bearer_token_env = "ZK_TEST_DEVICE_TOKEN"
+device_id = "device-global"
 "#;
 
     let parsed: GlobalConfig = toml::from_str(input).expect("parse GlobalConfig from TOML");
+    let sync = parsed.sync.expect("sync table should deserialize");
 
     assert_eq!(
         parsed.default_vault,
@@ -53,6 +62,15 @@ local_db_path = "/Users/test/.local/share/note-zk/index.sqlite"
             "/Users/test/.local/share/note-zk/index.sqlite"
         ))
     );
+    assert_eq!(
+        sync.server_url,
+        Some(Url::parse("https://zk.example.com").expect("URL should parse"))
+    );
+    assert_eq!(
+        sync.bearer_token_env.as_deref(),
+        Some("ZK_TEST_DEVICE_TOKEN")
+    );
+    assert_eq!(sync.device_id.as_deref(), Some("device-global"));
 }
 
 // ==========================================================================
@@ -69,6 +87,11 @@ allowed_note_extensions = ["md", "markdown"]
 [normalization]
 allow_insert_frontmatter = true
 derive_title_from_h1 = false
+
+[sync]
+server_url = "https://vault-zk.example.com"
+bearer_token_env = "ZK_VAULT_DEVICE_TOKEN"
+device_id = "device-vault"
 
 [folders."raw"]
 immutable = true
@@ -88,6 +111,17 @@ immutable = true
         .expect("normalization table should deserialize");
     assert_eq!(normalization.allow_insert_frontmatter, Some(true));
     assert_eq!(normalization.derive_title_from_h1, Some(false));
+
+    let sync = parsed.sync.expect("sync table should deserialize");
+    assert_eq!(
+        sync.server_url,
+        Some(Url::parse("https://vault-zk.example.com").expect("URL should parse"))
+    );
+    assert_eq!(
+        sync.bearer_token_env.as_deref(),
+        Some("ZK_VAULT_DEVICE_TOKEN")
+    );
+    assert_eq!(sync.device_id.as_deref(), Some("device-vault"));
 
     let raw_policy = parsed
         .folders
@@ -140,6 +174,8 @@ fn cli_overrides_support_all_phase1_runtime_override_fields() {
         allow_insert_frontmatter: Some(false),
         derive_title_from_h1: Some(true),
         allowed_note_extensions: Some(vec!["md".to_string()]),
+        server_url: Some(Url::parse("https://cli-zk.example.com").expect("URL should parse")),
+        device_id: Some("device-cli".to_string()),
     };
 
     assert_eq!(
@@ -158,6 +194,11 @@ fn cli_overrides_support_all_phase1_runtime_override_fields() {
         overrides.allowed_note_extensions,
         Some(vec!["md".to_string()])
     );
+    assert_eq!(
+        overrides.server_url,
+        Some(Url::parse("https://cli-zk.example.com").expect("URL should parse"))
+    );
+    assert_eq!(overrides.device_id.as_deref(), Some("device-cli"));
 }
 
 // ==========================================================================
@@ -183,6 +224,9 @@ fn effective_config_default_is_safe_for_phase1() {
             .any(|ext| ext == "md"),
         "markdown extension should be enabled by default"
     );
+    assert_eq!(effective.sync.server_url, None);
+    assert_eq!(effective.sync.bearer_token_env, "ZK_DEVICE_TOKEN");
+    assert_eq!(effective.sync.device_id, None);
 }
 
 #[test]

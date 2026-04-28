@@ -69,6 +69,8 @@ immutable = true
         allow_insert_frontmatter: Some(false),
         derive_title_from_h1: Some(false),
         allowed_note_extensions: Some(vec!["md".to_string(), "txt".to_string()]),
+        server_url: None,
+        device_id: None,
     };
 
     let merged = merge_effective_config(&global, &vault, &cli);
