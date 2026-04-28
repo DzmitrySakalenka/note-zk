@@ -136,7 +136,10 @@ async fn run_bootstrap(
     payload.bootstrap = true;
     match bootstrap(context.transport, sync_context(context)).await? {
         BootstrapOutcome::Pulled(outcome) => payload.pulled = Some(pull_summary(&outcome)),
-        BootstrapOutcome::Pushed(outcome) => payload.pushed = Some(push_summary(&outcome)),
+        BootstrapOutcome::Pushed(outcome) => {
+            payload.pushed = Some(push_summary(&outcome));
+            run_pull(context, payload).await?;
+        }
     }
 
     Ok(())

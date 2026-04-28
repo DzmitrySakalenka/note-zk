@@ -224,6 +224,57 @@ fn apply_pull_response_rejects_out_of_order_batches_without_advancing_cursor() {
 }
 
 #[test]
+fn apply_pull_response_advances_to_last_change_when_next_cursor_is_absent() {
+    let vault = TempDir::new().expect("temp vault should create");
+    let mut connection = open_sync_connection();
+    DeviceRepo::upsert_device(&connection, &device_record(None)).expect("device should insert");
+
+    let note_id = "01TG13012FINALPAGE00000001";
+    let response = SyncPullResponse {
+        changes: vec![note_change(
+            7,
+            note_id,
+            WireEventType::Create,
+            Some("notes/final-page.md"),
+            "Final Page",
+            "2026-04-22T18:00:00Z",
+            "# Final Page",
+            3,
+        )],
+        next_cursor: None,
+    };
+
+    let outcome = apply(&mut connection, &vault, &response).expect("pull apply should succeed");
+
+    assert_eq!(outcome.applied, 1);
+    assert_eq!(outcome.next_cursor, Some(7));
+    let actual_device = DeviceRepo::get_device(&connection, &device_id())
+        .expect("device query should succeed")
+        .expect("device should exist");
+    assert_eq!(actual_device.last_sync_cursor, Some(7));
+}
+
+#[test]
+fn apply_pull_response_preserves_cursor_when_empty_final_page_has_no_next_cursor() {
+    let vault = TempDir::new().expect("temp vault should create");
+    let mut connection = open_sync_connection();
+    DeviceRepo::upsert_device(&connection, &device_record(Some(11))).expect("device should insert");
+    let response = SyncPullResponse {
+        changes: Vec::new(),
+        next_cursor: None,
+    };
+
+    let outcome = apply(&mut connection, &vault, &response).expect("pull apply should succeed");
+
+    assert_eq!(outcome.applied, 0);
+    assert_eq!(outcome.next_cursor, Some(11));
+    let actual_device = DeviceRepo::get_device(&connection, &device_id())
+        .expect("device query should succeed")
+        .expect("device should exist");
+    assert_eq!(actual_device.last_sync_cursor, Some(11));
+}
+
+#[test]
 fn apply_pull_response_creates_note_and_advances_cursor() {
     let vault = TempDir::new().expect("temp vault should create");
     let mut connection = open_sync_connection();

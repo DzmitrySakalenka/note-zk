@@ -68,8 +68,11 @@ pub fn apply_pull_response(
     let device = DeviceRepo::get_device(conn, ctx.device_id)?
         .ok_or_else(|| SyncError::ItemMissing(ctx.device_id.to_string()))?;
     validate_event_order(device.last_sync_cursor, &response.changes)?;
+    let next_cursor = response
+        .next_cursor
+        .or_else(|| response.changes.last().map(|change| change.event_seq))
+        .or(device.last_sync_cursor);
 
-    let next_cursor = response.next_cursor;
     let transaction = conn.transaction().map_err(|source| {
         SyncError::Index(IndexError::Sqlite {
             source,

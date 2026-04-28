@@ -2881,12 +2881,15 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "axum",
  "clap",
+ "hex",
  "insta",
  "predicates",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tracing-subscriber",
@@ -2894,6 +2897,7 @@ dependencies = [
  "zk-app",
  "zk-domain",
  "zk-index",
+ "zk-server",
  "zk-sync",
  "zk-vault",
 ]

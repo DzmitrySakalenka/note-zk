@@ -159,6 +159,7 @@ pub async fn pull_and_apply(
         let mut request = plan_empty_local_bootstrap(device_id);
         request.cursor = cursor;
         let response = transport.pull(&request).await?;
+        let remote_exhausted = response.next_cursor.is_none();
         let pull_ctx = PullApplyContext {
             vault,
             device_id,
@@ -171,7 +172,7 @@ pub async fn pull_and_apply(
         aggregate.conflicts.extend(batch.conflicts);
         aggregate.next_cursor = batch.next_cursor;
 
-        if response.next_cursor == request.cursor {
+        if remote_exhausted || response.next_cursor == request.cursor {
             break;
         }
     }
