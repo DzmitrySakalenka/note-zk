@@ -253,7 +253,7 @@ async fn push_duplicate_note_create_returns_existing_revision_conflict() {
 }
 
 #[tokio::test]
-async fn push_mixed_batch_accepts_conflicts_and_rejects_per_item() {
+async fn push_mixed_batch_accepts_notes_and_assets_with_conflicts() {
     let harness = build_harness();
     seed_note(&harness.state, "stale-note", 3);
 
@@ -306,9 +306,9 @@ async fn push_mixed_batch_accepts_conflicts_and_rejects_per_item() {
                 },
                 {
                     "item_id": "asset-a",
-                    "accepted": false,
+                    "accepted": true,
                     "conflict": false,
-                    "message": "upload_ref required for asset bodies"
+                    "new_server_revision": 1
                 }
             ]
         })
@@ -319,8 +319,12 @@ async fn push_mixed_batch_accepts_conflicts_and_rejects_per_item() {
         .db()
         .with_conn(|connection| {
             assert!(NotesRepo::get(connection, "new-note")?.is_some());
-            assert!(AssetsRepo::get(connection, "asset-a")?.is_none());
-            assert_eq!(SyncEventsRepo::list_since(connection, 0, 10)?.len(), 2);
+            let asset =
+                AssetsRepo::get(connection, "asset-a")?.expect("accepted asset should be stored");
+            assert_eq!(asset.current_path, "assets/asset-a.png");
+            assert_eq!(asset.content_hash, "hash-asset-a");
+            assert_eq!(asset.server_revision, 1);
+            assert_eq!(SyncEventsRepo::list_since(connection, 0, 10)?.len(), 3);
 
             Ok(())
         })

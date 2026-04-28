@@ -170,6 +170,34 @@ async fn pull_is_idempotent() {
     assert_eq!(server.sync_event_count(), events_before);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn asset_create_is_filtered_from_multi_device_pull_until_upload_transport() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let source = device_fixture(tempdir.path(), "device-a");
+    let target = device_fixture(tempdir.path(), "device-b");
+    let token = token_for("asset-filter");
+    let server = start_server(&token).await;
+    let asset_path = "images/audit-fixture.png";
+    let asset_bytes = *b"zk-asset-fixture";
+
+    write_asset(&source, asset_path, &asset_bytes);
+    run_scan_write(&source);
+    assert_eq!(indexed_asset_count(&source.db_path, asset_path), 1);
+
+    let source_sync = run_sync(&source, &server, &token, 0);
+    assert_eq!(source_sync["payload"]["pushed"]["accepted"], 1);
+    assert_eq!(server.sync_event_count(), 1);
+
+    let target_sync = run_sync(&target, &server, &token, 0);
+    assert_eq!(target_sync["payload"]["pulled"]["applied"], 0);
+    assert!(!target.vault_root.join(asset_path).exists());
+    assert_eq!(indexed_asset_count(&target.db_path, asset_path), 0);
+    assert_eq!(
+        device_sync_cursor(&target.db_path, &target.device_id),
+        Some(server.sync_event_count())
+    );
+}
+
 async fn start_server(token: &str) -> TestServer {
     let db = NamedTempFile::new().expect("server database tempfile should be created");
     let db_path = db.path().to_path_buf();
@@ -277,6 +305,13 @@ fn write_note(device: &DeviceFixture, relative_path: &str, note_id: &str, title:
     .expect("note should be written");
 }
 
+fn write_asset(device: &DeviceFixture, relative_path: &str, bytes: &[u8]) {
+    let path = device.vault_root.join(relative_path);
+    let parent = path.parent().expect("asset path should have parent");
+    fs::create_dir_all(parent).expect("asset parent dir should be created");
+    fs::write(path, bytes).expect("asset should be written");
+}
+
 fn read_note(device: &DeviceFixture, relative_path: &str) -> String {
     fs::read_to_string(device.vault_root.join(relative_path)).expect("note should read")
 }
@@ -344,6 +379,28 @@ fn note_sync_state_count(db_path: &Path) -> i64 {
     connection
         .query_row("SELECT COUNT(*) FROM note_sync_state", [], |row| row.get(0))
         .expect("note_sync_state count should query")
+}
+
+fn indexed_asset_count(db_path: &Path, asset_path: &str) -> i64 {
+    let connection = Connection::open(db_path).expect("local database should open");
+    connection
+        .query_row(
+            "SELECT COUNT(*) FROM assets_index WHERE current_path = ?1",
+            [asset_path],
+            |row| row.get(0),
+        )
+        .expect("asset index count should query")
+}
+
+fn device_sync_cursor(db_path: &Path, device_id: &str) -> Option<i64> {
+    let connection = Connection::open(db_path).expect("local database should open");
+    connection
+        .query_row(
+            "SELECT last_sync_cursor FROM devices WHERE device_id = ?1",
+            [device_id],
+            |row| row.get(0),
+        )
+        .expect("device cursor should query")
 }
 
 fn indexed_note_state(db_path: &Path, note_id: &str) -> (String, bool) {

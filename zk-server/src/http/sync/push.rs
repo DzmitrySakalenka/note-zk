@@ -108,14 +108,8 @@ fn process_asset_item(
 ) -> ServerResult<PushItemResult> {
     state.db().with_tx(|transaction| {
         let existing = AssetsRepo::get(transaction, &item.asset_id)?;
-        if existing.is_none() && item.upload_ref.is_none() {
-            return Ok(rejected_result(
-                &item.asset_id,
-                "upload_ref required for asset bodies",
-            ));
-        }
-
         let current_revision = existing.as_ref().map_or(0, |row| row.server_revision);
+
         match accept_or_conflict(
             &item.base_server_revision,
             current_revision,
@@ -305,16 +299,5 @@ fn conflict_result(item_id: &str, current_revision: i64) -> PushItemResult {
         new_server_revision: Some(current_revision),
         canonical_path: None,
         message: None,
-    }
-}
-
-fn rejected_result(item_id: &str, message: &str) -> PushItemResult {
-    PushItemResult {
-        item_id: item_id.to_string(),
-        accepted: false,
-        conflict: false,
-        new_server_revision: None,
-        canonical_path: None,
-        message: Some(message.to_string()),
     }
 }
