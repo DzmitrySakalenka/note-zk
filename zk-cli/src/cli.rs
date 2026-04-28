@@ -34,6 +34,8 @@ pub enum Command {
     Purge(PurgeArgs),
     /// Run one foreground sync cycle against the configured server.
     Sync(SyncArgs),
+    /// Resolve one server-side sync conflict explicitly.
+    ResolveConflict(ResolveConflictArgs),
 }
 
 /// Shared per-invocation flags that later map onto `CliOverrides`.
@@ -204,6 +206,27 @@ pub struct SyncArgs {
     /// Run only the pull half of the cycle.
     #[arg(long = "pull-only")]
     pub pull_only: bool,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for the `resolve-conflict` subcommand.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("resolve_kind").args(["keep_local", "keep_remote"]).required(true).multiple(false)))]
+#[allow(clippy::struct_excessive_bools)]
+pub struct ResolveConflictArgs {
+    /// Identifier of the conflicting note or asset.
+    pub target: String,
+    /// Treat target as an asset id rather than a note id.
+    #[arg(long = "as-asset")]
+    pub as_asset: bool,
+    /// Resolve by keeping the local version.
+    #[arg(long = "keep-local")]
+    pub keep_local: bool,
+    /// Resolve by keeping the remote version.
+    #[arg(long = "keep-remote")]
+    pub keep_remote: bool,
     /// Render compact JSON to stdout.
     #[arg(long)]
     pub json: bool,

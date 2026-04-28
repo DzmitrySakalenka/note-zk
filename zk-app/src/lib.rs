@@ -46,8 +46,9 @@ pub use zk_domain::id::DeviceId;
 pub use zk_domain::id::RelativePath;
 /// Transparent re-exports of CLI-facing identifier and request types from `zk-domain`.
 pub use zk_domain::{
-    ItemKind, PurgeRequest, PurgeScope, RegisterDeviceRequest, RestoreRequest, TargetSelector,
-    TrashRequest,
+    ItemKind, PurgeRequest, PurgeScope, RegisterDeviceRequest, ResolveConflictRequest,
+    ResolveConflictResponse, RestoreRequest, TargetSelector, TrashRequest, WireConflictResolution,
+    WireItemType,
 };
 /// Transparent re-exports of validation and sync enums used in CLI output.
 pub use zk_domain::{ItemType, note::DiagnosticLevel, note::ValidationFinding};

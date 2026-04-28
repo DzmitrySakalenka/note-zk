@@ -42,5 +42,6 @@ pub fn run(cli: Cli) -> Result<i32, CliError> {
         Command::Restore(args) => commands::restore::run(&args, &shared),
         Command::Purge(args) => commands::purge::run(&args, &shared),
         Command::Sync(args) => commands::sync::run(&args, &shared),
+        Command::ResolveConflict(args) => commands::resolve_conflict::run(&args, &shared),
     }
 }

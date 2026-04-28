@@ -111,6 +111,72 @@ fn sync_rejects_conflicting_modes() {
 }
 
 #[test]
+fn resolve_conflict_parses_keep_local_note_target() {
+    let cli = Cli::try_parse_from(["zk-cli", "resolve-conflict", "note-a", "--keep-local"])
+        .expect("resolve-conflict arguments should parse");
+
+    match cli.command {
+        Command::ResolveConflict(args) => {
+            assert_eq!(args.target, "note-a");
+            assert!(!args.as_asset);
+            assert!(args.keep_local);
+            assert!(!args.keep_remote);
+            assert_eq!(OutputMode::from(args.json), OutputMode::Human);
+        }
+        other => panic!("expected resolve-conflict command, got {other:?}"),
+    }
+}
+
+#[test]
+fn resolve_conflict_parses_keep_remote_asset_json() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "resolve-conflict",
+        "asset-a",
+        "--as-asset",
+        "--keep-remote",
+        "--json",
+    ])
+    .expect("resolve-conflict asset arguments should parse");
+
+    match cli.command {
+        Command::ResolveConflict(args) => {
+            assert_eq!(args.target, "asset-a");
+            assert!(args.as_asset);
+            assert!(!args.keep_local);
+            assert!(args.keep_remote);
+            assert_eq!(OutputMode::from(args.json), OutputMode::Json);
+        }
+        other => panic!("expected resolve-conflict command, got {other:?}"),
+    }
+}
+
+#[test]
+fn resolve_conflict_requires_resolution_flag() {
+    let error = Cli::try_parse_from(["zk-cli", "resolve-conflict", "note-a"])
+        .expect_err("resolve-conflict should require one resolution flag");
+
+    assert_eq!(
+        error.kind(),
+        clap::error::ErrorKind::MissingRequiredArgument
+    );
+}
+
+#[test]
+fn resolve_conflict_rejects_conflicting_resolution_flags() {
+    let error = Cli::try_parse_from([
+        "zk-cli",
+        "resolve-conflict",
+        "note-a",
+        "--keep-local",
+        "--keep-remote",
+    ])
+    .expect_err("resolve-conflict should reject conflicting resolution flags");
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
 fn trash_parses_target_and_flags() {
     let cli = Cli::try_parse_from([
         "zk-cli",

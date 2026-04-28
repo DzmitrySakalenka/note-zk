@@ -116,6 +116,24 @@ pub struct SyncJsonOutput {
     pub payload: SyncCommandPayload,
 }
 
+/// Payload emitted by the `resolve-conflict` command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResolveConflictCommandPayload {
+    /// Whether the server accepted the requested resolution.
+    pub accepted: bool,
+    /// Server revision returned by the server, when one exists.
+    pub new_server_revision: Option<i64>,
+}
+
+/// Top-level JSON object emitted by `resolve-conflict --json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResolveConflictJsonOutput {
+    /// Stable command identifier for script consumers.
+    pub command: &'static str,
+    /// Resolve-conflict command payload.
+    pub payload: ResolveConflictCommandPayload,
+}
+
 /// Derives the user-facing `scan` counters from a full `ScanOutcome`.
 #[must_use]
 pub fn build_scan_summary(scan_outcome: &ScanOutcome) -> ScanSummary {
@@ -403,6 +421,22 @@ pub fn write_sync_human(out: &mut dyn io::Write, payload: &SyncCommandPayload) -
     }
 
     Ok(())
+}
+
+/// Writes human-readable `resolve-conflict` output to the provided writer.
+///
+/// # Errors
+///
+/// Returns an `io::Error` when writing to the provided output fails.
+pub fn write_resolve_conflict_human(
+    out: &mut dyn io::Write,
+    payload: &ResolveConflictCommandPayload,
+) -> io::Result<()> {
+    writeln!(out, "Accepted: {}", payload.accepted)?;
+    match payload.new_server_revision {
+        Some(revision) => writeln!(out, "New server revision: {revision}"),
+        None => writeln!(out, "New server revision: none"),
+    }
 }
 
 fn count_findings(findings: &[ValidationFinding], level: &DiagnosticLevel) -> u32 {

@@ -4,9 +4,9 @@
 use insta::assert_snapshot;
 use zk_app::{DoctorIssue, DoctorReport, StatusSummary};
 use zk_cli::output::{
-    ScanCommandPayload, ScanSummary, SyncCommandPayload, SyncPullSummary, SyncPushSummary,
-    SyncRegistrationSummary, write_doctor_human, write_scan_human, write_status_human,
-    write_sync_human,
+    ResolveConflictCommandPayload, ScanCommandPayload, ScanSummary, SyncCommandPayload,
+    SyncPullSummary, SyncPushSummary, SyncRegistrationSummary, write_doctor_human,
+    write_resolve_conflict_human, write_scan_human, write_status_human, write_sync_human,
 };
 use zk_domain::{id::RelativePath, note::DiagnosticLevel, sync::ItemType};
 use zk_vault::NormalizationSummary;
@@ -33,6 +33,13 @@ fn render_sync(payload: &SyncCommandPayload) -> String {
     let mut output = Vec::new();
     write_sync_human(&mut output, payload).expect("sync formatter should write");
     String::from_utf8(output).expect("sync formatter should emit UTF-8")
+}
+
+fn render_resolve_conflict(payload: &ResolveConflictCommandPayload) -> String {
+    let mut output = Vec::new();
+    write_resolve_conflict_human(&mut output, payload)
+        .expect("resolve-conflict formatter should write");
+    String::from_utf8(output).expect("resolve-conflict formatter should emit UTF-8")
 }
 
 fn scan_check_fixture() -> ScanCommandPayload {
@@ -171,6 +178,13 @@ fn sync_fixture() -> SyncCommandPayload {
     }
 }
 
+fn resolve_conflict_fixture() -> ResolveConflictCommandPayload {
+    ResolveConflictCommandPayload {
+        accepted: true,
+        new_server_revision: Some(7),
+    }
+}
+
 #[test]
 fn scan_check_human_snapshot() {
     assert_snapshot!("scan_check_human", render_scan(&scan_check_fixture()));
@@ -238,4 +252,35 @@ fn sync_json_envelope_contains_command_and_payload() {
     assert_eq!(json["payload"]["registered"]["first_time"], true);
     assert_eq!(json["payload"]["pushed"]["accepted"], 4);
     assert_eq!(json["payload"]["pulled"]["applied"], 3);
+}
+
+#[test]
+fn resolve_conflict_human_lists_response_fields() {
+    assert_eq!(
+        render_resolve_conflict(&resolve_conflict_fixture()),
+        "Accepted: true\nNew server revision: 7\n"
+    );
+}
+
+#[test]
+fn resolve_conflict_human_prints_none_revision() {
+    assert_eq!(
+        render_resolve_conflict(&ResolveConflictCommandPayload {
+            accepted: false,
+            new_server_revision: None,
+        }),
+        "Accepted: false\nNew server revision: none\n"
+    );
+}
+
+#[test]
+fn resolve_conflict_json_envelope_contains_command_and_payload() {
+    let json = serde_json::json!({
+        "command": "resolve-conflict",
+        "payload": resolve_conflict_fixture(),
+    });
+
+    assert_eq!(json["command"], "resolve-conflict");
+    assert_eq!(json["payload"]["accepted"], true);
+    assert_eq!(json["payload"]["new_server_revision"], 7);
 }
