@@ -133,6 +133,22 @@ fn with_tx_rolls_back_on_error() {
 }
 
 #[test]
+fn with_conn_mut_allows_transaction() {
+    let db = ServerDb::open_in_memory().expect("in-memory database should open");
+
+    db.with_conn_mut(|conn: &mut Connection| {
+        let transaction = conn.transaction().map_err(ServerError::Database)?;
+        transaction
+            .execute("CREATE TABLE mut_conn_probe (value INTEGER NOT NULL)", [])
+            .map_err(ServerError::Database)?;
+        transaction.commit().map_err(ServerError::Database)
+    })
+    .expect("mutable connection transaction should commit");
+
+    assert_eq!(query_table_count(&db, "mut_conn_probe"), 1);
+}
+
+#[test]
 fn reopening_file_backed_database_keeps_current_schema_version() {
     let path = database_path("db-reopen");
 

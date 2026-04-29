@@ -5,7 +5,10 @@ mod conflict;
 mod devices;
 mod events;
 
-pub use auth::{RegisteredUser, VerifiedUser, register_user, verify_password};
+pub use auth::{
+    IssueTokenSpec, IssuedToken, RegisteredUser, RotateTokenSpec, VerifiedUser, issue_device_token,
+    register_user, revoke_device_token, rotate_device_token, verify_password,
+};
 pub use conflict::{
     AcceptOutcome, accept_or_conflict, is_fresh_create, is_stale_revision, next_server_revision,
 };

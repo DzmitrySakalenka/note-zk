@@ -8,12 +8,19 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
-use zk_auth::password::{HashParams, hash_password};
+use zk_auth::{
+    password::{HashParams, hash_password},
+    token::hash_device_token,
+};
+use zk_domain::AuthScope;
 use zk_server::{
     ServerError,
     migration::ensure_schema,
-    repo::UserRepo,
-    service::{register_user, verify_password},
+    repo::{DeviceTokenRepo, UserRepo},
+    service::{
+        IssueTokenSpec, RotateTokenSpec, issue_device_token, register_user, revoke_device_token,
+        rotate_device_token, verify_password,
+    },
 };
 
 const TEST_HASH_PARAMS: HashParams = HashParams {
@@ -48,6 +55,14 @@ fn create_user_fixture(connection: &Connection, user_id: &str, username: &str, p
         parse_timestamp("2026-04-29T12:00:00Z"),
     )
     .expect("user fixture insert should succeed");
+}
+
+fn issue_token_spec(label: &str) -> IssueTokenSpec {
+    IssueTokenSpec {
+        label: label.to_string(),
+        device_id: None,
+        scopes: vec![AuthScope::Sync],
+    }
 }
 
 #[test]
@@ -183,4 +198,235 @@ fn verify_timing_for_missing_and_wrong_are_within_tolerance() {
     assert!(matches!(missing, Err(ServerError::Unauthorized)));
     assert!(missing_elapsed >= Duration::from_millis(45));
     assert!(wrong_elapsed.abs_diff(missing_elapsed) <= Duration::from_millis(80));
+}
+
+#[test]
+fn issue_returns_unique_plaintexts() {
+    let connection = setup_connection();
+    let now = parse_timestamp("2026-04-29T12:00:00Z");
+
+    let first = issue_device_token(&connection, &issue_token_spec("Laptop"), now)
+        .expect("first token issue should succeed");
+    let second = issue_device_token(&connection, &issue_token_spec("Phone"), now)
+        .expect("second token issue should succeed");
+    let first_row =
+        DeviceTokenRepo::lookup_by_hash(&connection, &hash_device_token(&first.plaintext))
+            .expect("first token lookup should succeed")
+            .expect("first token should be persisted");
+    let second_row =
+        DeviceTokenRepo::lookup_by_hash(&connection, &hash_device_token(&second.plaintext))
+            .expect("second token lookup should succeed")
+            .expect("second token should be persisted");
+
+    assert_ne!(first.token_id, second.token_id);
+    assert_ne!(first.plaintext, second.plaintext);
+    assert_eq!(first.plaintext.len(), 52);
+    assert_eq!(second.plaintext.len(), 52);
+    assert_eq!(first.scopes, vec![AuthScope::Sync]);
+    assert_eq!(first.created_at, now);
+    assert_eq!(first_row.token_id, first.token_id);
+    assert_eq!(second_row.token_id, second.token_id);
+    assert_eq!(
+        first_row.token_sha256_hex,
+        hash_device_token(&first.plaintext)
+    );
+    assert_ne!(first_row.token_sha256_hex, first.plaintext);
+}
+
+#[test]
+fn issue_with_empty_scopes_returns_invalid_request() {
+    let connection = setup_connection();
+    let spec = IssueTokenSpec {
+        label: "Laptop".to_string(),
+        device_id: None,
+        scopes: Vec::new(),
+    };
+
+    let error = issue_device_token(&connection, &spec, parse_timestamp("2026-04-29T12:00:00Z"))
+        .expect_err("empty scopes should fail");
+
+    assert!(
+        matches!(error, ServerError::InvalidRequest(message) if message == "scopes must not be empty")
+    );
+}
+
+#[test]
+fn issue_with_invalid_label_returns_invalid_request() {
+    let connection = setup_connection();
+    let too_long = "a".repeat(129);
+    let cases = ["", too_long.as_str()];
+
+    for label in cases {
+        let error = issue_device_token(
+            &connection,
+            &issue_token_spec(label),
+            parse_timestamp("2026-04-29T12:00:00Z"),
+        )
+        .expect_err("invalid label should fail");
+
+        assert!(
+            matches!(error, ServerError::InvalidRequest(message) if message == "token label format")
+        );
+    }
+}
+
+#[test]
+fn issued_token_debug_redacts_plaintext() {
+    let connection = setup_connection();
+
+    let issued = issue_device_token(
+        &connection,
+        &issue_token_spec("Laptop"),
+        parse_timestamp("2026-04-29T12:00:00Z"),
+    )
+    .expect("token issue should succeed");
+    let debug = format!("{issued:?}");
+
+    assert!(debug.contains("plaintext: <REDACTED>"));
+    assert!(!debug.contains(&issued.plaintext));
+}
+
+#[test]
+fn revoke_succeeds_then_lookup_by_hash_returns_none() {
+    let connection = setup_connection();
+    let issued = issue_device_token(
+        &connection,
+        &issue_token_spec("Laptop"),
+        parse_timestamp("2026-04-29T12:00:00Z"),
+    )
+    .expect("token issue should succeed");
+    let token_hash = hash_device_token(&issued.plaintext);
+
+    let revoked = revoke_device_token(
+        &connection,
+        &issued.token_id,
+        parse_timestamp("2026-04-29T13:00:00Z"),
+    )
+    .expect("revoke should succeed");
+    let loaded =
+        DeviceTokenRepo::lookup_by_hash(&connection, &token_hash).expect("lookup should succeed");
+
+    assert!(revoked);
+    assert!(loaded.is_none());
+}
+
+#[test]
+fn revoke_idempotent_second_call_returns_false() {
+    let connection = setup_connection();
+    let issued = issue_device_token(
+        &connection,
+        &issue_token_spec("Laptop"),
+        parse_timestamp("2026-04-29T12:00:00Z"),
+    )
+    .expect("token issue should succeed");
+
+    let first = revoke_device_token(
+        &connection,
+        &issued.token_id,
+        parse_timestamp("2026-04-29T13:00:00Z"),
+    )
+    .expect("first revoke should succeed");
+    let second = revoke_device_token(
+        &connection,
+        &issued.token_id,
+        parse_timestamp("2026-04-29T14:00:00Z"),
+    )
+    .expect("second revoke should succeed");
+
+    assert!(first);
+    assert!(!second);
+}
+
+#[test]
+fn rotate_revokes_old_and_issues_new_atomically() {
+    let mut connection = setup_connection();
+    let issued = issue_device_token(
+        &connection,
+        &issue_token_spec("Laptop"),
+        parse_timestamp("2026-04-29T12:00:00Z"),
+    )
+    .expect("token issue should succeed");
+    let old_hash = hash_device_token(&issued.plaintext);
+    let spec = RotateTokenSpec {
+        current_token_id: issued.token_id.clone(),
+        label: "Laptop replacement".to_string(),
+        device_id: None,
+        scopes: vec![AuthScope::Sync, AuthScope::Admin],
+    };
+
+    let rotated = rotate_device_token(
+        &mut connection,
+        &spec,
+        parse_timestamp("2026-04-29T13:00:00Z"),
+    )
+    .expect("rotation should succeed");
+    let old_lookup =
+        DeviceTokenRepo::lookup_by_hash(&connection, &old_hash).expect("old lookup should succeed");
+    let new_lookup =
+        DeviceTokenRepo::lookup_by_hash(&connection, &hash_device_token(&rotated.plaintext))
+            .expect("new lookup should succeed")
+            .expect("new token should be active");
+
+    assert!(old_lookup.is_none());
+    assert_ne!(rotated.token_id, issued.token_id);
+    assert_eq!(rotated.scopes, vec![AuthScope::Sync, AuthScope::Admin]);
+    assert_eq!(new_lookup.token_id, rotated.token_id);
+}
+
+#[test]
+fn rotate_with_unknown_token_id_returns_not_found_and_does_not_issue() {
+    let mut connection = setup_connection();
+    let spec = RotateTokenSpec {
+        current_token_id: "missing-token".to_string(),
+        label: "Replacement".to_string(),
+        device_id: None,
+        scopes: vec![AuthScope::Sync],
+    };
+
+    let error = rotate_device_token(
+        &mut connection,
+        &spec,
+        parse_timestamp("2026-04-29T13:00:00Z"),
+    )
+    .expect_err("unknown token rotation should fail");
+    let active_tokens =
+        DeviceTokenRepo::list_all_active(&connection).expect("active token list should succeed");
+
+    assert!(matches!(error, ServerError::NotFound(message) if message == "token id"));
+    assert!(active_tokens.is_empty());
+}
+
+#[test]
+fn rotate_failure_in_issue_rolls_back_revoke() {
+    let mut connection = setup_connection();
+    let issued = issue_device_token(
+        &connection,
+        &issue_token_spec("Laptop"),
+        parse_timestamp("2026-04-29T12:00:00Z"),
+    )
+    .expect("token issue should succeed");
+    let old_hash = hash_device_token(&issued.plaintext);
+    let spec = RotateTokenSpec {
+        current_token_id: issued.token_id.clone(),
+        label: "Replacement".to_string(),
+        device_id: Some("missing-device".to_string()),
+        scopes: vec![AuthScope::Sync],
+    };
+
+    let error = rotate_device_token(
+        &mut connection,
+        &spec,
+        parse_timestamp("2026-04-29T13:00:00Z"),
+    )
+    .expect_err("foreign-key failure should roll back rotation");
+    let original = DeviceTokenRepo::lookup_by_hash(&connection, &old_hash)
+        .expect("original lookup should succeed")
+        .expect("original token should remain active");
+    let active_tokens =
+        DeviceTokenRepo::list_all_active(&connection).expect("active token list should succeed");
+
+    assert!(matches!(error, ServerError::Database(_)));
+    assert_eq!(original.token_id, issued.token_id);
+    assert_eq!(active_tokens.len(), 1);
+    assert_eq!(active_tokens[0].token_id, issued.token_id);
 }
