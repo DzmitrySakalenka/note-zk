@@ -1,9 +1,11 @@
 //! Business-logic services built on top of the server repositories.
 
+mod auth;
 mod conflict;
 mod devices;
 mod events;
 
+pub use auth::{RegisteredUser, VerifiedUser, register_user, verify_password};
 pub use conflict::{
     AcceptOutcome, accept_or_conflict, is_fresh_create, is_stale_revision, next_server_revision,
 };
