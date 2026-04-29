@@ -3,6 +3,8 @@
 // Shared integration-test helpers are compiled separately for each test target,
 // so some helpers are intentionally unused in a given target.
 
+pub mod auth_fixtures;
+
 use std::{
     ffi::OsString,
     fs,
