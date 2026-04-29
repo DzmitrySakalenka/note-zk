@@ -6,7 +6,10 @@ use std::fmt::Debug;
 use chrono::{TimeZone, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
-use zk_domain::{LoginRequest, LoginResponse, RefreshResponse};
+use zk_domain::{
+    AuthScope, IssueTokenRequest, IssueTokenResponse, ListTokensResponse, ListedToken,
+    LoginRequest, LoginResponse, RefreshResponse,
+};
 
 fn assert_common_traits<T>()
 where
@@ -20,6 +23,10 @@ fn auth_wire_types_implement_required_common_traits() {
     assert_common_traits::<LoginRequest>();
     assert_common_traits::<LoginResponse>();
     assert_common_traits::<RefreshResponse>();
+    assert_common_traits::<IssueTokenRequest>();
+    assert_common_traits::<IssueTokenResponse>();
+    assert_common_traits::<ListedToken>();
+    assert_common_traits::<ListTokensResponse>();
 }
 
 #[test]
@@ -72,5 +79,87 @@ fn session_responses_round_trip_json() {
         )
         .expect("refresh response should deserialize"),
         refresh_response
+    );
+}
+
+#[test]
+fn issue_token_request_round_trips_json() {
+    let request = IssueTokenRequest {
+        label: "Laptop".to_string(),
+        device_id: Some("device-a".to_string()),
+        scopes: vec![AuthScope::Sync, AuthScope::Read],
+    };
+
+    let encoded = serde_json::to_value(&request).expect("issue token request should serialize");
+
+    assert_eq!(
+        encoded,
+        json!({
+            "label": "Laptop",
+            "device_id": "device-a",
+            "scopes": ["sync", "read"],
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<IssueTokenRequest>(encoded)
+            .expect("issue token request should deserialize"),
+        request
+    );
+}
+
+#[test]
+fn token_management_responses_round_trip_json_without_list_plaintext() {
+    let created_at = Utc
+        .with_ymd_and_hms(2026, 4, 29, 12, 0, 0)
+        .single()
+        .expect("timestamp fixture should be valid");
+    let issue_response = IssueTokenResponse {
+        token_id: "01HZ3KQBFG9T2R5XJ4N8VW6YMP".to_string(),
+        plaintext: "zk_token_plaintext".to_string(),
+        scopes: vec![AuthScope::Sync],
+        created_at,
+    };
+    let list_response = ListTokensResponse {
+        tokens: vec![ListedToken {
+            token_id: issue_response.token_id.clone(),
+            label: "Laptop".to_string(),
+            device_id: None,
+            scopes: issue_response.scopes.clone(),
+            created_at,
+            last_used_at: None,
+        }],
+    };
+
+    assert_eq!(
+        serde_json::to_value(&issue_response).expect("issue token response should serialize"),
+        json!({
+            "token_id": "01HZ3KQBFG9T2R5XJ4N8VW6YMP",
+            "plaintext": "zk_token_plaintext",
+            "scopes": ["sync"],
+            "created_at": "2026-04-29T12:00:00Z",
+        })
+    );
+
+    let listed_json =
+        serde_json::to_value(&list_response).expect("list token response should serialize");
+
+    assert_eq!(
+        listed_json,
+        json!({
+            "tokens": [{
+                "token_id": "01HZ3KQBFG9T2R5XJ4N8VW6YMP",
+                "label": "Laptop",
+                "device_id": null,
+                "scopes": ["sync"],
+                "created_at": "2026-04-29T12:00:00Z",
+                "last_used_at": null,
+            }],
+        })
+    );
+    assert!(listed_json["tokens"][0].get("plaintext").is_none());
+    assert_eq!(
+        serde_json::from_value::<ListTokensResponse>(listed_json)
+            .expect("list token response should deserialize"),
+        list_response
     );
 }
