@@ -8,19 +8,25 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use axum_extra::extract::CookieJar;
 use chrono::Utc;
 use rusqlite::{OptionalExtension, types::Type};
 use subtle::ConstantTimeEq;
-use zk_auth::token::hash_device_token;
+use zk_auth::{
+    session::{hash_session_id, validate_session_id_format},
+    token::hash_device_token,
+};
 use zk_domain::AuthScope;
 
 use crate::{
     ServerError, ServerResult,
     http::ApiError,
-    repo::{DeviceTokenRepo, UserRepo},
+    repo::{DeviceTokenRepo, UserRepo, WebSessionRepo},
     state::ServerState,
 };
 
+/// Browser session cookie name required by the `__Host-` prefix contract.
+pub const SESSION_COOKIE_NAME: &str = "__Host-zk_session";
 const DEVICE_TOKENS_EXIST_SQL: &str = "SELECT 1 FROM device_tokens LIMIT 1";
 static STUB_AUTH_TOKEN_WARNING: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 type ScopeMiddlewareFuture = Pin<Box<dyn Future<Output = Result<Response, ApiError>> + Send>>;
@@ -34,6 +40,19 @@ pub struct AuthenticatedDevice {
     /// Owning device id, when one device token is bound to a device.
     pub device_id: Option<String>,
     /// Authorization scopes granted to the authenticated caller.
+    pub scopes: Vec<AuthScope>,
+}
+
+/// Auth context inserted by browser-session middleware.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthenticatedUser {
+    /// Owning user identifier.
+    pub user_id: String,
+    /// Lowercase `SHA-256(plaintext_session_id)` hex digest.
+    pub session_id_sha256_hex: String,
+    /// Lowercase `SHA-256(plaintext_csrf_token)` hex digest.
+    pub csrf_token_sha256_hex: String,
+    /// Authorization scopes granted to the authenticated user session.
     pub scopes: Vec<AuthScope>,
 }
 
@@ -103,7 +122,52 @@ pub async fn require_auth_layer(
     Err(ApiError::from(ServerError::Unauthorized))
 }
 
+/// Middleware that enforces browser-session cookie authentication.
+///
+/// # Errors
+///
+/// Returns [`ApiError`] when the cookie is missing, malformed, revoked, expired,
+/// or when the session lookup path hits a database error.
+pub async fn require_session_layer(
+    State(state): State<ServerState>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    let session_id = session_id_from_cookies(&req)?;
+    validate_session_id_format(&session_id)
+        .map_err(|_| ApiError::from(ServerError::Unauthorized))?;
+    let session_id_sha256_hex = hash_session_id(&session_id);
+    let now = Utc::now();
+
+    let Some(session_row) = state.db().with_conn(|connection| {
+        WebSessionRepo::get_by_session_hash(connection, &session_id_sha256_hex, now)
+    })?
+    else {
+        return Err(ApiError::from(ServerError::Unauthorized));
+    };
+
+    state.db().with_conn(|connection| {
+        WebSessionRepo::refresh_last_seen(connection, &session_id_sha256_hex, now)
+    })?;
+
+    attach_authenticated_user(
+        &mut req,
+        AuthenticatedUser {
+            user_id: session_row.user_id,
+            session_id_sha256_hex: session_row.session_id_sha256_hex,
+            csrf_token_sha256_hex: session_row.csrf_token_sha256_hex,
+            scopes: session_row.scopes,
+        },
+    );
+
+    Ok(next.run(req).await)
+}
+
 /// Returns a layer that requires one authorization scope.
+///
+/// Browser sessions and device tokens can share route-level authorization.
+/// If both auth contexts are present, the browser-session scopes take
+/// precedence over device-token scopes.
 pub fn require_scope_layer(
     required: AuthScope,
 ) -> axum::middleware::FromFnLayer<ScopeMiddleware, AuthScope, (State<AuthScope>, Request)> {
@@ -123,6 +187,21 @@ where
         parts
             .extensions
             .get::<AuthenticatedDevice>()
+            .cloned()
+            .ok_or_else(|| ApiError::from(ServerError::Unauthorized))
+    }
+}
+
+impl<S> FromRequestParts<S> for AuthenticatedUser
+where
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<AuthenticatedUser>()
             .cloned()
             .ok_or_else(|| ApiError::from(ServerError::Unauthorized))
     }
@@ -152,11 +231,17 @@ fn require_scope(
     next: Next,
 ) -> ScopeMiddlewareFuture {
     Box::pin(async move {
-        let Some(authenticated_device) = req.extensions().get::<AuthenticatedDevice>() else {
+        let has_required_scope = if let Some(authenticated_user) =
+            req.extensions().get::<AuthenticatedUser>()
+        {
+            authenticated_user.scopes.contains(&required)
+        } else if let Some(authenticated_device) = req.extensions().get::<AuthenticatedDevice>() {
+            authenticated_device.scopes.contains(&required)
+        } else {
             return Err(ApiError::from(ServerError::Unauthorized));
         };
 
-        if authenticated_device.scopes.contains(&required) {
+        if has_required_scope {
             return Ok(next.run(req).await);
         }
 
@@ -209,6 +294,13 @@ fn bearer_token_from_headers(headers: &axum::http::HeaderMap) -> Result<&str, Ap
         .ok_or_else(|| ApiError::from(ServerError::Unauthorized))
 }
 
+fn session_id_from_cookies(req: &Request) -> Result<String, ApiError> {
+    CookieJar::from_headers(req.headers())
+        .get(SESSION_COOKIE_NAME)
+        .map(|cookie| cookie.value().to_string())
+        .ok_or_else(|| ApiError::from(ServerError::Unauthorized))
+}
+
 fn hashes_match_constant_time(candidate: &str, expected: &str) -> bool {
     let candidate_bytes = candidate.as_bytes();
     let expected_bytes = expected.as_bytes();
@@ -235,4 +327,8 @@ fn warn_once_for_stub_token() {
 
 fn attach_authenticated_device(req: &mut Request, authenticated_device: AuthenticatedDevice) {
     req.extensions_mut().insert(authenticated_device);
+}
+
+fn attach_authenticated_user(req: &mut Request, authenticated_user: AuthenticatedUser) {
+    req.extensions_mut().insert(authenticated_user);
 }
