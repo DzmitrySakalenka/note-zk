@@ -9,6 +9,13 @@ pub mod session;
 pub mod token;
 
 pub use error::{AuthError, AuthResult};
+pub use password::{HashParams, hash_password, verify_password};
+pub use session::{
+    IssuedSession, SessionLifetime, hash_session_id, issue_session, validate_session_id_format,
+};
+pub use token::{
+    IssuedDeviceToken, hash_device_token, issue_device_token, validate_device_token_format,
+};
 
 // TG14-001 fixes the crate's agreed dependency surface before the primitive
 // modules consume it in TG14-002 through TG14-004.

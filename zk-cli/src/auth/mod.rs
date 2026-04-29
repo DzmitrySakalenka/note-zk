@@ -3,4 +3,5 @@
 mod issue_token;
 mod login;
 
+pub use crate::cli::IssueTokenArgs;
 pub use issue_token::run_issue_token;

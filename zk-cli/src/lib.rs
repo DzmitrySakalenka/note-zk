@@ -23,7 +23,7 @@ use tracing_subscriber as _;
 use cli::{Cli, Command};
 use error::CliError;
 
-pub use auth::run_issue_token;
+pub use auth::{IssueTokenArgs, run_issue_token};
 pub use bootstrap::{
     ResolvedSyncSettings, build_overrides, load_effective_config, open_index_connection,
     resolve_sync_settings, resolve_vault_root,
