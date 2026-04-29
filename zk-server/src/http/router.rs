@@ -10,7 +10,7 @@ use zk_domain::AuthScope;
 use crate::{
     ServerError, ServerResult,
     auth::{require_auth_layer, require_scope_layer},
-    http::{ApiError, health::health, sync_routes},
+    http::{ApiError, auth_routes, health::health, sync_routes},
     state::ServerState,
 };
 
@@ -26,6 +26,7 @@ pub fn build_router(state: ServerState) -> Router {
                     require_auth_layer,
                 )),
         )
+        .merge(auth_routes(state.clone()))
         .fallback(not_found)
         .layer(
             ServiceBuilder::new()
