@@ -5,6 +5,8 @@
 
 /// Asset metadata and index-facing asset record models.
 pub mod asset;
+/// Authentication users, sessions, tokens, and scope models.
+pub mod auth;
 /// Shared UTC clock abstraction for deterministic tests and production time.
 pub mod clock;
 /// Global, vault, and effective runtime configuration models.
@@ -28,6 +30,7 @@ pub mod write;
 /// Write-request models for trash, restore, and purge operations.
 pub mod write_request;
 
+pub use auth::{AuthScope, DeviceTokenRecord, PasswordUser, WebSessionRecord};
 pub use clock::{Clock, SystemClock};
 pub use sync::ItemType;
 pub use sync_state::{DeleteRecord, DeleteRecordTarget};
