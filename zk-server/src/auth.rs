@@ -1,10 +1,10 @@
 //! Authentication middleware and request extraction for server routes.
 
-use std::{future::Future, pin::Pin};
+use std::{future::Future, io, pin::Pin};
 
 use axum::{
     extract::{FromRequestParts, Request, State},
-    http::{header, request::Parts},
+    http::{Method, header, request::Parts},
     middleware::Next,
     response::Response,
 };
@@ -13,7 +13,7 @@ use chrono::Utc;
 use rusqlite::{OptionalExtension, types::Type};
 use subtle::ConstantTimeEq;
 use zk_auth::{
-    session::{hash_session_id, validate_session_id_format},
+    session::{hash_csrf_token, hash_session_id, validate_session_id_format},
     token::hash_device_token,
 };
 use zk_domain::AuthScope;
@@ -27,6 +27,7 @@ use crate::{
 
 /// Browser session cookie name required by the `__Host-` prefix contract.
 pub const SESSION_COOKIE_NAME: &str = "__Host-zk_session";
+const CSRF_HEADER_NAME: &str = "X-CSRF-Token";
 const DEVICE_TOKENS_EXIST_SQL: &str = "SELECT 1 FROM device_tokens LIMIT 1";
 static STUB_AUTH_TOKEN_WARNING: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 type ScopeMiddlewareFuture = Pin<Box<dyn Future<Output = Result<Response, ApiError>> + Send>>;
@@ -161,6 +162,43 @@ pub async fn require_session_layer(
     );
 
     Ok(next.run(req).await)
+}
+
+/// Middleware that enforces double-submit CSRF protection for browser routes.
+///
+/// This layer is stateless and must run after [`require_session_layer`], so
+/// state-changing requests can compare the caller-supplied CSRF token against
+/// the authenticated session's persisted token hash.
+///
+/// # Errors
+///
+/// Returns [`ApiError`] when the token is missing or invalid. Returns an
+/// internal error when route layers are composed in the wrong order.
+pub async fn require_csrf_layer(mut req: Request, next: Next) -> Result<Response, ApiError> {
+    if csrf_exempt_method(req.method()) {
+        return Ok(next.run(req).await);
+    }
+
+    let Some(expected_csrf_token_sha256_hex) = req
+        .extensions_mut()
+        .get::<AuthenticatedUser>()
+        .map(|authenticated_user| authenticated_user.csrf_token_sha256_hex.clone())
+    else {
+        return Err(ApiError::from(ServerError::Internal(Box::new(
+            io::Error::other("CSRF middleware requires authenticated user context"),
+        ))));
+    };
+
+    let csrf_token = csrf_token_from_headers(req.headers())?;
+    let csrf_token_sha256_hex = hash_csrf_token(csrf_token);
+
+    if hashes_match_constant_time(&csrf_token_sha256_hex, &expected_csrf_token_sha256_hex) {
+        return Ok(next.run(req).await);
+    }
+
+    Err(ApiError::from(ServerError::Forbidden(
+        "invalid CSRF token".to_string(),
+    )))
 }
 
 /// Returns a layer that requires one authorization scope.
@@ -299,6 +337,20 @@ fn session_id_from_cookies(req: &Request) -> Result<String, ApiError> {
         .get(SESSION_COOKIE_NAME)
         .map(|cookie| cookie.value().to_string())
         .ok_or_else(|| ApiError::from(ServerError::Unauthorized))
+}
+
+fn csrf_exempt_method(method: &Method) -> bool {
+    matches!(method, &Method::GET | &Method::HEAD | &Method::OPTIONS)
+}
+
+fn csrf_token_from_headers(headers: &axum::http::HeaderMap) -> Result<&str, ApiError> {
+    let header_value = headers
+        .get(CSRF_HEADER_NAME)
+        .ok_or_else(|| ApiError::from(ServerError::Forbidden("missing CSRF token".to_string())))?;
+
+    header_value
+        .to_str()
+        .map_err(|_| ApiError::from(ServerError::Forbidden("invalid CSRF token".to_string())))
 }
 
 fn hashes_match_constant_time(candidate: &str, expected: &str) -> bool {
