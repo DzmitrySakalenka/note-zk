@@ -23,6 +23,17 @@ pub struct IssuedSession {
     pub expires_at: DateTime<Utc>,
 }
 
+/// Fresh CSRF token material returned at session creation time.
+///
+/// `plaintext` is echoed by the browser in `X-CSRF-Token`. Persist
+/// `sha256_hex`, never the plaintext token.
+pub struct IssuedCsrfToken {
+    /// Plaintext CSRF token for the readable browser cookie or response body.
+    pub plaintext: String,
+    /// Lowercase `SHA-256(plaintext)` hex digest for storage and comparison.
+    pub sha256_hex: String,
+}
+
 /// Maximum age for a newly issued browser session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionLifetime {
@@ -44,13 +55,7 @@ impl Default for SessionLifetime {
 ///
 /// Returns [`AuthError::Internal`] if the operating system random source fails.
 pub fn issue_session(now: DateTime<Utc>, lifetime: SessionLifetime) -> AuthResult<IssuedSession> {
-    let mut random_bytes = [0_u8; SESSION_ID_BYTES];
-    let mut rng = OsRng;
-    rng.try_fill_bytes(&mut random_bytes)
-        .map_err(internal_error)?;
-
-    let plaintext_id = BASE32_NOPAD.encode(&random_bytes);
-    debug_assert_eq!(plaintext_id.len(), SESSION_ID_PLAINTEXT_LEN);
+    let plaintext_id = issue_base32_secret()?;
     let sha256_hex = hash_session_id(&plaintext_id);
     let expires_at = now + lifetime.max_age;
 
@@ -61,10 +66,29 @@ pub fn issue_session(now: DateTime<Utc>, lifetime: SessionLifetime) -> AuthResul
     })
 }
 
+/// Issues a fresh CSRF token and storage hash.
+///
+/// # Errors
+///
+/// Returns [`AuthError::Internal`] if the operating system random source fails.
+pub fn issue_csrf_token() -> AuthResult<IssuedCsrfToken> {
+    let plaintext = issue_base32_secret()?;
+    let sha256_hex = hash_csrf_token(&plaintext);
+
+    Ok(IssuedCsrfToken {
+        plaintext,
+        sha256_hex,
+    })
+}
+
 /// Computes the lowercase `SHA-256(plaintext_id)` hex digest for a session id.
 pub fn hash_session_id(plaintext_id: &str) -> String {
-    let digest = Sha256::digest(plaintext_id.as_bytes());
-    HEXLOWER.encode(&digest)
+    sha256_hex(plaintext_id)
+}
+
+/// Computes the lowercase `SHA-256(plaintext)` hex digest for a CSRF token.
+pub fn hash_csrf_token(plaintext: &str) -> String {
+    sha256_hex(plaintext)
 }
 
 /// Validates that a plaintext session id matches the issuance format.
@@ -85,6 +109,23 @@ pub fn validate_session_id_format(plaintext_id: &str) -> AuthResult<()> {
     }
 
     Err(AuthError::InvalidSessionId)
+}
+
+fn issue_base32_secret() -> AuthResult<String> {
+    let mut random_bytes = [0_u8; SESSION_ID_BYTES];
+    let mut rng = OsRng;
+    rng.try_fill_bytes(&mut random_bytes)
+        .map_err(internal_error)?;
+
+    let plaintext = BASE32_NOPAD.encode(&random_bytes);
+    debug_assert_eq!(plaintext.len(), SESSION_ID_PLAINTEXT_LEN);
+
+    Ok(plaintext)
+}
+
+fn sha256_hex(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    HEXLOWER.encode(&digest)
 }
 
 fn internal_error(error: impl std::fmt::Display) -> AuthError {

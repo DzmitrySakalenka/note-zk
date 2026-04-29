@@ -6,20 +6,22 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use rusqlite::Connection;
 use zk_auth::{
     password::{HashParams, hash_password},
+    session::{hash_csrf_token, hash_session_id},
     token::hash_device_token,
 };
 use zk_domain::AuthScope;
 use zk_server::{
     ServerError,
     migration::ensure_schema,
-    repo::{DeviceTokenRepo, UserRepo},
+    repo::{DeviceTokenRepo, UserRepo, WebSessionInsert, WebSessionRepo},
     service::{
-        IssueTokenSpec, RotateTokenSpec, issue_device_token, register_user, revoke_device_token,
-        rotate_device_token, verify_password,
+        CreateSessionSpec, IssueTokenSpec, RotateTokenSpec, SessionLifetime, create_web_session,
+        issue_device_token, refresh_web_session, register_user, revoke_device_token,
+        revoke_web_session, rotate_device_token, sweep_expired_sessions, verify_password,
     },
 };
 
@@ -62,6 +64,54 @@ fn issue_token_spec(label: &str) -> IssueTokenSpec {
         label: label.to_string(),
         device_id: None,
         scopes: vec![AuthScope::Sync],
+    }
+}
+
+fn create_session_spec(user_id: &str, lifetime: SessionLifetime) -> CreateSessionSpec {
+    CreateSessionSpec {
+        user_id: user_id.to_string(),
+        scopes: vec![AuthScope::Admin],
+        lifetime,
+    }
+}
+
+fn short_session_lifetime() -> SessionLifetime {
+    SessionLifetime {
+        max_age: ChronoDuration::minutes(30),
+    }
+}
+
+fn web_session_count(connection: &Connection) -> u32 {
+    connection
+        .query_row("SELECT COUNT(*) FROM web_sessions", [], |row| row.get(0))
+        .expect("web session count should succeed")
+}
+
+fn insert_web_session_fixture(
+    connection: &Connection,
+    session_hash: &str,
+    user_id: &str,
+    expires_at: DateTime<Utc>,
+    revoked_at: Option<DateTime<Utc>>,
+) {
+    create_user_fixture(connection, user_id, user_id, "correct horse battery");
+    WebSessionRepo::create(
+        connection,
+        &WebSessionInsert {
+            session_id_sha256_hex: session_hash.to_string(),
+            user_id: user_id.to_string(),
+            csrf_token_sha256_hex:
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            scopes: vec![AuthScope::Admin],
+            created_at: parse_timestamp("2026-04-29T12:00:00Z"),
+            expires_at,
+        },
+    )
+    .expect("web session fixture insert should succeed");
+
+    if let Some(revoked_at) = revoked_at {
+        WebSessionRepo::revoke(connection, session_hash, revoked_at)
+            .expect("web session fixture revoke should succeed");
     }
 }
 
@@ -429,4 +479,216 @@ fn rotate_failure_in_issue_rolls_back_revoke() {
     assert_eq!(original.token_id, issued.token_id);
     assert_eq!(active_tokens.len(), 1);
     assert_eq!(active_tokens[0].token_id, issued.token_id);
+}
+
+#[test]
+fn create_session_returns_distinct_plaintexts_each_call() {
+    let connection = setup_connection();
+    create_user_fixture(&connection, "user-1", "alice", "correct horse battery");
+    let now = parse_timestamp("2026-04-29T12:00:00Z");
+    let spec = create_session_spec("user-1", short_session_lifetime());
+
+    let first =
+        create_web_session(&connection, &spec, now).expect("first web session should be created");
+    let second =
+        create_web_session(&connection, &spec, now).expect("second web session should be created");
+
+    assert_ne!(first.plaintext_session_id, second.plaintext_session_id);
+    assert_ne!(first.plaintext_csrf_token, second.plaintext_csrf_token);
+    assert_eq!(first.plaintext_session_id.len(), 52);
+    assert_eq!(first.plaintext_csrf_token.len(), 52);
+    assert_eq!(first.expires_at, now + short_session_lifetime().max_age);
+    assert_eq!(web_session_count(&connection), 2);
+}
+
+#[test]
+fn create_session_writes_only_hashes_to_db() {
+    let connection = setup_connection();
+    create_user_fixture(&connection, "user-1", "alice", "correct horse battery");
+    let now = parse_timestamp("2026-04-29T12:00:00Z");
+    let spec = create_session_spec("user-1", short_session_lifetime());
+
+    let issued =
+        create_web_session(&connection, &spec, now).expect("web session should be created");
+    let session_hash = hash_session_id(&issued.plaintext_session_id);
+    let csrf_hash = hash_csrf_token(&issued.plaintext_csrf_token);
+    let row = WebSessionRepo::get_by_session_hash(&connection, &session_hash, now)
+        .expect("session lookup should succeed")
+        .expect("session row should exist");
+
+    assert_eq!(row.session_id_sha256_hex, session_hash);
+    assert_eq!(row.csrf_token_sha256_hex, csrf_hash);
+    assert_ne!(row.session_id_sha256_hex, issued.plaintext_session_id);
+    assert_ne!(row.csrf_token_sha256_hex, issued.plaintext_csrf_token);
+    assert_eq!(row.user_id, "user-1");
+    assert_eq!(row.scopes, vec![AuthScope::Admin]);
+    assert_eq!(row.expires_at, issued.expires_at);
+}
+
+#[test]
+fn issued_session_debug_redacts_plaintexts() {
+    let connection = setup_connection();
+    create_user_fixture(&connection, "user-1", "alice", "correct horse battery");
+    let issued = create_web_session(
+        &connection,
+        &create_session_spec("user-1", short_session_lifetime()),
+        parse_timestamp("2026-04-29T12:00:00Z"),
+    )
+    .expect("web session should be created");
+
+    let debug = format!("{issued:?}");
+
+    assert!(debug.contains("plaintext_session_id: <REDACTED>"));
+    assert!(debug.contains("plaintext_csrf_token: <REDACTED>"));
+    assert!(!debug.contains(&issued.plaintext_session_id));
+    assert!(!debug.contains(&issued.plaintext_csrf_token));
+}
+
+#[test]
+fn refresh_rotates_session_id_and_csrf() {
+    let mut connection = setup_connection();
+    create_user_fixture(&connection, "user-1", "alice", "correct horse battery");
+    let created_at = parse_timestamp("2026-04-29T12:00:00Z");
+    let refreshed_at = parse_timestamp("2026-04-29T12:10:00Z");
+    let spec = create_session_spec("user-1", short_session_lifetime());
+    let issued =
+        create_web_session(&connection, &spec, created_at).expect("web session should be created");
+    let old_hash = hash_session_id(&issued.plaintext_session_id);
+
+    let refreshed = refresh_web_session(
+        &mut connection,
+        &issued.plaintext_session_id,
+        refreshed_at,
+        short_session_lifetime(),
+    )
+    .expect("web session should refresh");
+    let old_lookup = WebSessionRepo::get_by_session_hash(&connection, &old_hash, refreshed_at)
+        .expect("old session lookup should succeed");
+    let new_hash = hash_session_id(&refreshed.plaintext_session_id);
+    let new_row = WebSessionRepo::get_by_session_hash(&connection, &new_hash, refreshed_at)
+        .expect("new session lookup should succeed")
+        .expect("new session should be active");
+
+    assert!(old_lookup.is_none());
+    assert_ne!(refreshed.plaintext_session_id, issued.plaintext_session_id);
+    assert_ne!(refreshed.plaintext_csrf_token, issued.plaintext_csrf_token);
+    assert_eq!(
+        refreshed.expires_at,
+        refreshed_at + short_session_lifetime().max_age
+    );
+    assert_eq!(new_row.user_id, "user-1");
+    assert_eq!(new_row.scopes, vec![AuthScope::Admin]);
+}
+
+#[test]
+fn refresh_with_revoked_session_returns_unauthorized() {
+    let mut connection = setup_connection();
+    create_user_fixture(&connection, "user-1", "alice", "correct horse battery");
+    let issued = create_web_session(
+        &connection,
+        &create_session_spec("user-1", short_session_lifetime()),
+        parse_timestamp("2026-04-29T12:00:00Z"),
+    )
+    .expect("web session should be created");
+    revoke_web_session(
+        &connection,
+        &issued.plaintext_session_id,
+        parse_timestamp("2026-04-29T12:05:00Z"),
+    )
+    .expect("revoke should succeed");
+
+    let error = refresh_web_session(
+        &mut connection,
+        &issued.plaintext_session_id,
+        parse_timestamp("2026-04-29T12:10:00Z"),
+        short_session_lifetime(),
+    )
+    .expect_err("revoked session should not refresh");
+
+    assert!(matches!(error, ServerError::Unauthorized));
+}
+
+#[test]
+fn refresh_with_expired_session_returns_unauthorized() {
+    let mut connection = setup_connection();
+    create_user_fixture(&connection, "user-1", "alice", "correct horse battery");
+    let lifetime = SessionLifetime {
+        max_age: ChronoDuration::minutes(1),
+    };
+    let issued = create_web_session(
+        &connection,
+        &create_session_spec("user-1", lifetime),
+        parse_timestamp("2026-04-29T12:00:00Z"),
+    )
+    .expect("web session should be created");
+
+    let error = refresh_web_session(
+        &mut connection,
+        &issued.plaintext_session_id,
+        parse_timestamp("2026-04-29T12:02:00Z"),
+        short_session_lifetime(),
+    )
+    .expect_err("expired session should not refresh");
+
+    assert!(matches!(error, ServerError::Unauthorized));
+}
+
+#[test]
+fn revoke_web_session_is_idempotent() {
+    let connection = setup_connection();
+    create_user_fixture(&connection, "user-1", "alice", "correct horse battery");
+    let issued = create_web_session(
+        &connection,
+        &create_session_spec("user-1", short_session_lifetime()),
+        parse_timestamp("2026-04-29T12:00:00Z"),
+    )
+    .expect("web session should be created");
+
+    let first = revoke_web_session(
+        &connection,
+        &issued.plaintext_session_id,
+        parse_timestamp("2026-04-29T12:05:00Z"),
+    )
+    .expect("first revoke should succeed");
+    let second = revoke_web_session(
+        &connection,
+        &issued.plaintext_session_id,
+        parse_timestamp("2026-04-29T12:10:00Z"),
+    )
+    .expect("second revoke should succeed");
+
+    assert!(first);
+    assert!(!second);
+}
+
+#[test]
+fn sweep_returns_count_of_pruned_rows() {
+    let connection = setup_connection();
+    let now = parse_timestamp("2026-04-29T12:00:00Z");
+    insert_web_session_fixture(
+        &connection,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "user-a",
+        now - ChronoDuration::hours(48),
+        None,
+    );
+    insert_web_session_fixture(
+        &connection,
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "user-b",
+        now - ChronoDuration::hours(2),
+        Some(now - ChronoDuration::hours(1)),
+    );
+    insert_web_session_fixture(
+        &connection,
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "user-c",
+        now + ChronoDuration::hours(1),
+        None,
+    );
+
+    let deleted = sweep_expired_sessions(&connection, now).expect("session sweep should succeed");
+
+    assert_eq!(deleted, 2);
+    assert_eq!(web_session_count(&connection), 1);
 }

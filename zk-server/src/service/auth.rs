@@ -2,16 +2,21 @@ use std::{fmt, thread, time::Duration};
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
+pub use zk_auth::session::SessionLifetime;
 use zk_auth::{
     AuthError,
     password::{HashParams, hash_password, verify_password as verify_password_hash},
+    session::{hash_session_id, issue_csrf_token, issue_session},
     token::issue_device_token as issue_raw_device_token,
 };
 use zk_domain::{AuthScope, id::NoteId};
 
 use crate::{
     ServerError, ServerResult,
-    repo::{DeviceTokenInsert, DeviceTokenRepo, UserPasswordRow, UserRepo},
+    repo::{
+        DeviceTokenInsert, DeviceTokenRepo, UserPasswordRow, UserRepo, WebSessionInsert,
+        WebSessionRepo,
+    },
 };
 
 const MISSING_USER_DELAY: Duration = Duration::from_millis(50);
@@ -75,6 +80,38 @@ impl fmt::Debug for IssuedToken {
             formatter,
             "IssuedToken {{ token_id: {:?}, plaintext: <REDACTED>, scopes: {:?}, created_at: {:?} }}",
             self.token_id, self.scopes, self.created_at
+        )
+    }
+}
+
+/// Web-session creation request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateSessionSpec {
+    /// Owning user identifier.
+    pub user_id: String,
+    /// Authorization scopes granted to the session.
+    pub scopes: Vec<AuthScope>,
+    /// Maximum lifetime for the new session.
+    pub lifetime: SessionLifetime,
+}
+
+/// Freshly issued browser session returned once to the caller.
+#[derive(Clone, PartialEq, Eq)]
+pub struct IssuedSession {
+    /// Plaintext session id for the HTTP-only browser cookie.
+    pub plaintext_session_id: String,
+    /// Plaintext CSRF token for the readable browser cookie or response body.
+    pub plaintext_csrf_token: String,
+    /// Session expiry timestamp.
+    pub expires_at: DateTime<Utc>,
+}
+
+impl fmt::Debug for IssuedSession {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "IssuedSession {{ plaintext_session_id: <REDACTED>, plaintext_csrf_token: <REDACTED>, expires_at: {:?} }}",
+            self.expires_at
         )
     }
 }
@@ -210,6 +247,96 @@ pub fn rotate_device_token(
     transaction.commit().map_err(ServerError::Database)?;
 
     Ok(issued)
+}
+
+/// Creates one browser session and its CSRF token.
+///
+/// # Errors
+///
+/// Returns [`ServerError`] if session issuance or persistence fails.
+pub fn create_web_session(
+    conn: &Connection,
+    spec: &CreateSessionSpec,
+    now: DateTime<Utc>,
+) -> ServerResult<IssuedSession> {
+    let raw_session = issue_session(now, spec.lifetime).map_err(map_internal_auth_error)?;
+    let csrf_token = issue_csrf_token().map_err(map_internal_auth_error)?;
+    let expires_at = raw_session.expires_at;
+
+    WebSessionRepo::create(
+        conn,
+        &WebSessionInsert {
+            session_id_sha256_hex: raw_session.sha256_hex,
+            user_id: spec.user_id.clone(),
+            csrf_token_sha256_hex: csrf_token.sha256_hex,
+            scopes: spec.scopes.clone(),
+            created_at: now,
+            expires_at,
+        },
+    )?;
+
+    Ok(IssuedSession {
+        plaintext_session_id: raw_session.plaintext_id,
+        plaintext_csrf_token: csrf_token.plaintext,
+        expires_at,
+    })
+}
+
+/// Rotates one active browser session.
+///
+/// # Errors
+///
+/// Returns [`ServerError::Unauthorized`] for unknown, revoked, or expired
+/// sessions, or [`ServerError`] if issuance or persistence fails.
+pub fn refresh_web_session(
+    conn: &mut Connection,
+    current_session_id: &str,
+    now: DateTime<Utc>,
+    lifetime: SessionLifetime,
+) -> ServerResult<IssuedSession> {
+    let current_session_hash = hash_session_id(current_session_id);
+    let transaction = conn.transaction().map_err(ServerError::Database)?;
+    let Some(row) = WebSessionRepo::get_by_session_hash(&transaction, &current_session_hash, now)?
+    else {
+        return Err(ServerError::Unauthorized);
+    };
+
+    WebSessionRepo::revoke(&transaction, &current_session_hash, now)?;
+    let issued = create_web_session(
+        &transaction,
+        &CreateSessionSpec {
+            user_id: row.user_id,
+            scopes: row.scopes,
+            lifetime,
+        },
+        now,
+    )?;
+
+    transaction.commit().map_err(ServerError::Database)?;
+
+    Ok(issued)
+}
+
+/// Revokes one browser session by plaintext session id.
+///
+/// # Errors
+///
+/// Returns [`ServerError`] if the revocation update fails.
+pub fn revoke_web_session(
+    conn: &Connection,
+    session_id: &str,
+    now: DateTime<Utc>,
+) -> ServerResult<bool> {
+    WebSessionRepo::revoke(conn, &hash_session_id(session_id), now)
+}
+
+/// Deletes expired browser sessions according to repository retention policy.
+///
+/// # Errors
+///
+/// Returns [`ServerError`] if the sweep fails.
+pub fn sweep_expired_sessions(conn: &Connection, now: DateTime<Utc>) -> ServerResult<u32> {
+    WebSessionRepo::sweep_expired(conn, now)
 }
 
 fn verify_active_user_password(row: &UserPasswordRow, password: &str) -> ServerResult<()> {

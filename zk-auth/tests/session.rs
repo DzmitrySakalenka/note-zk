@@ -6,7 +6,10 @@ use std::collections::HashSet;
 use chrono::{Duration, TimeZone, Utc};
 use zk_auth::{
     AuthError,
-    session::{SessionLifetime, hash_session_id, issue_session, validate_session_id_format},
+    session::{
+        SessionLifetime, hash_csrf_token, hash_session_id, issue_csrf_token, issue_session,
+        validate_session_id_format,
+    },
 };
 
 #[test]
@@ -46,6 +49,32 @@ fn default_lifetime_is_twenty_four_hours() {
 fn hash_matches_for_same_plaintext_id() {
     let first = hash_session_id("shared-secret");
     let second = hash_session_id("shared-secret");
+
+    assert_eq!(first, second);
+    assert_eq!(
+        first,
+        "d3046ecc8dd3242adf62801a33ef1004003b01b4c8f558df72e637da30321ccd"
+    );
+}
+
+#[test]
+fn csrf_issue_returns_unique_tokens() {
+    let mut plaintexts = HashSet::with_capacity(1_000);
+
+    for _ in 0..1_000 {
+        let issued = issue_csrf_token().expect("CSRF token should be issued");
+
+        assert_eq!(issued.plaintext.len(), 52);
+        assert_eq!(issued.sha256_hex.len(), 64);
+        assert_eq!(issued.sha256_hex, hash_csrf_token(&issued.plaintext));
+        assert!(plaintexts.insert(issued.plaintext));
+    }
+}
+
+#[test]
+fn csrf_hash_matches_for_same_plaintext() {
+    let first = hash_csrf_token("shared-secret");
+    let second = hash_csrf_token("shared-secret");
 
     assert_eq!(first, second);
     assert_eq!(
