@@ -81,6 +81,12 @@ fn response_parts(error: &ServerError) -> (StatusCode, &'static str, String, boo
             "unauthorized".to_string(),
             false,
         ),
+        ServerError::Forbidden(scope_name) => (
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            scope_name.clone(),
+            false,
+        ),
     }
 }
 

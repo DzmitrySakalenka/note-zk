@@ -84,6 +84,12 @@ async fn server_error_variants_map_to_expected_status_code_and_message() {
             "unauthorized",
         ),
         (
+            ServerError::Forbidden("sync".to_string()),
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "sync",
+        ),
+        (
             ServerError::Internal(Box::new(io::Error::other("sensitive detail"))),
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",

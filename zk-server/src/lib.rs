@@ -57,8 +57,10 @@ fn initialize_tracing(log_filter: &str) -> ServerResult<()> {
 }
 
 fn warn_if_auth_disabled(state: &state::ServerState) -> ServerResult<()> {
-    if state.config().stub_auth_token_sha256_hex.is_none() && !auth::device_tokens_exist(state)? {
-        tracing::warn!("auth disabled: no stub token configured and no device_tokens rows present");
+    if auth::auth_disabled(state)? {
+        tracing::warn!(
+            "auth disabled: no stub token configured and no users or device_tokens rows present"
+        );
     }
 
     Ok(())

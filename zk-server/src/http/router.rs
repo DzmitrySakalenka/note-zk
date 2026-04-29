@@ -5,10 +5,11 @@ use axum::{Router, http::StatusCode, middleware, routing::get};
 use tokio::signal::unix::{SignalKind, signal};
 use tower::ServiceBuilder;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
+use zk_domain::AuthScope;
 
 use crate::{
     ServerError, ServerResult,
-    auth::require_auth_layer,
+    auth::{require_auth_layer, require_scope_layer},
     http::{ApiError, health::health, sync_routes},
     state::ServerState,
 };
@@ -17,10 +18,14 @@ use crate::{
 pub fn build_router(state: ServerState) -> Router {
     Router::new()
         .route("/health", get(health))
-        .merge(sync_routes().route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            require_auth_layer,
-        )))
+        .merge(
+            sync_routes()
+                .route_layer(require_scope_layer(AuthScope::Sync))
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_auth_layer,
+                )),
+        )
         .fallback(not_found)
         .layer(
             ServiceBuilder::new()
