@@ -3,7 +3,7 @@
 use std::{future::Future, io, pin::Pin};
 
 use axum::{
-    extract::{FromRequestParts, Request, State},
+    extract::{FromRequestParts, OptionalFromRequestParts, Request, State},
     http::{Method, header, request::Parts},
     middleware::Next,
     response::Response,
@@ -134,32 +134,32 @@ pub async fn require_session_layer(
     mut req: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
-    let session_id = session_id_from_cookies(&req)?;
-    validate_session_id_format(&session_id)
-        .map_err(|_| ApiError::from(ServerError::Unauthorized))?;
-    let session_id_sha256_hex = hash_session_id(&session_id);
-    let now = Utc::now();
+    let authenticated_user = authenticated_user_from_request(&state, &req)?
+        .ok_or_else(|| ApiError::from(ServerError::Unauthorized))?;
 
-    let Some(session_row) = state.db().with_conn(|connection| {
-        WebSessionRepo::get_by_session_hash(connection, &session_id_sha256_hex, now)
-    })?
-    else {
-        return Err(ApiError::from(ServerError::Unauthorized));
-    };
+    attach_authenticated_user(&mut req, authenticated_user);
 
-    state.db().with_conn(|connection| {
-        WebSessionRepo::refresh_last_seen(connection, &session_id_sha256_hex, now)
-    })?;
+    Ok(next.run(req).await)
+}
 
-    attach_authenticated_user(
-        &mut req,
-        AuthenticatedUser {
-            user_id: session_row.user_id,
-            session_id_sha256_hex: session_row.session_id_sha256_hex,
-            csrf_token_sha256_hex: session_row.csrf_token_sha256_hex,
-            scopes: session_row.scopes,
-        },
-    );
+/// Middleware that attaches browser-session auth when a session cookie exists.
+///
+/// Missing cookies pass through for bootstrap endpoints. Malformed, revoked, or
+/// expired cookies still fail closed so callers cannot hide bad credentials by
+/// falling back to unauthenticated mode.
+///
+/// # Errors
+///
+/// Returns [`ApiError`] when an optional session cookie is present but invalid,
+/// or when the session lookup path hits a database error.
+pub async fn optional_session_layer(
+    State(state): State<ServerState>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    if let Some(authenticated_user) = authenticated_user_from_request(&state, &req)? {
+        attach_authenticated_user(&mut req, authenticated_user);
+    }
 
     Ok(next.run(req).await)
 }
@@ -245,11 +245,29 @@ where
     }
 }
 
+impl<S> OptionalFromRequestParts<S> for AuthenticatedUser
+where
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> Result<Option<Self>, Self::Rejection> {
+        Ok(parts.extensions.get::<AuthenticatedUser>().cloned())
+    }
+}
+
 pub(crate) fn auth_disabled(state: &ServerState) -> ServerResult<bool> {
     if state.config().stub_auth_token_sha256_hex.is_some() {
         return Ok(false);
     }
 
+    is_bootstrap_eligible(state)
+}
+
+pub(crate) fn is_bootstrap_eligible(state: &ServerState) -> ServerResult<bool> {
     Ok(!device_tokens_exist(state)? && users_empty(state)?)
 }
 
@@ -295,6 +313,38 @@ fn users_empty(state: &ServerState) -> ServerResult<bool> {
         .with_conn(|connection| UserRepo::count(connection).map(|count| count == 0))
 }
 
+fn authenticated_user_from_request(
+    state: &ServerState,
+    req: &Request,
+) -> Result<Option<AuthenticatedUser>, ApiError> {
+    let Some(session_id) = optional_session_id_from_cookies(req) else {
+        return Ok(None);
+    };
+
+    validate_session_id_format(&session_id)
+        .map_err(|_| ApiError::from(ServerError::Unauthorized))?;
+    let session_id_sha256_hex = hash_session_id(&session_id);
+    let now = Utc::now();
+
+    let Some(session_row) = state.db().with_conn(|connection| {
+        WebSessionRepo::get_by_session_hash(connection, &session_id_sha256_hex, now)
+    })?
+    else {
+        return Err(ApiError::from(ServerError::Unauthorized));
+    };
+
+    state.db().with_conn(|connection| {
+        WebSessionRepo::refresh_last_seen(connection, &session_id_sha256_hex, now)
+    })?;
+
+    Ok(Some(AuthenticatedUser {
+        user_id: session_row.user_id,
+        session_id_sha256_hex: session_row.session_id_sha256_hex,
+        csrf_token_sha256_hex: session_row.csrf_token_sha256_hex,
+        scopes: session_row.scopes,
+    }))
+}
+
 fn lookup_device_token(
     state: &ServerState,
     token_sha256_hex: &str,
@@ -332,11 +382,10 @@ fn bearer_token_from_headers(headers: &axum::http::HeaderMap) -> Result<&str, Ap
         .ok_or_else(|| ApiError::from(ServerError::Unauthorized))
 }
 
-fn session_id_from_cookies(req: &Request) -> Result<String, ApiError> {
+fn optional_session_id_from_cookies(req: &Request) -> Option<String> {
     CookieJar::from_headers(req.headers())
         .get(SESSION_COOKIE_NAME)
         .map(|cookie| cookie.value().to_string())
-        .ok_or_else(|| ApiError::from(ServerError::Unauthorized))
 }
 
 fn csrf_exempt_method(method: &Method) -> bool {

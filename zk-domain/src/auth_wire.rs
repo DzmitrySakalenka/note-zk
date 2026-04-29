@@ -32,6 +32,26 @@ pub struct RefreshResponse {
     pub expires_at: DateTime<Utc>,
 }
 
+/// Password-user creation request body.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateUserRequest {
+    /// Login username for the new user.
+    pub username: String,
+    /// Plaintext password supplied by the caller.
+    pub password: String,
+}
+
+/// Password-user creation response body.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateUserResponse {
+    /// Stable user identifier.
+    pub user_id: String,
+    /// Login username for the created user.
+    pub username: String,
+    /// Whether this request used unauthenticated bootstrap mode.
+    pub bootstrap: bool,
+}
+
 /// Device-token issue request body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IssueTokenRequest {

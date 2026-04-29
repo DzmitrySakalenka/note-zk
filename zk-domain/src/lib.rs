@@ -34,8 +34,8 @@ pub mod write_request;
 
 pub use auth::{AuthScope, DeviceTokenRecord, PasswordUser, WebSessionRecord};
 pub use auth_wire::{
-    IssueTokenRequest, IssueTokenResponse, ListTokensResponse, ListedToken, LoginRequest,
-    LoginResponse, RefreshResponse,
+    CreateUserRequest, CreateUserResponse, IssueTokenRequest, IssueTokenResponse,
+    ListTokensResponse, ListedToken, LoginRequest, LoginResponse, RefreshResponse,
 };
 pub use clock::{Clock, SystemClock};
 pub use sync::ItemType;

@@ -7,7 +7,9 @@ use cookie::time::Duration as CookieDuration;
 
 use crate::{
     ServerError,
-    auth::{SESSION_COOKIE_NAME, require_csrf_layer, require_session_layer},
+    auth::{
+        SESSION_COOKIE_NAME, optional_session_layer, require_csrf_layer, require_session_layer,
+    },
     http::ApiError,
     service::SessionLifetime,
     state::ServerState,
@@ -28,12 +30,19 @@ pub(crate) fn auth_routes(state: ServerState) -> Router<ServerState> {
         .route("/auth/sessions/refresh", post(refresh::refresh))
         .merge(tokens::routes())
         .route_layer(middleware::from_fn(require_csrf_layer))
-        .route_layer(middleware::from_fn_with_state(state, require_session_layer));
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_session_layer,
+        ));
+    let user_routes = users::routes().route_layer(middleware::from_fn_with_state(
+        state,
+        optional_session_layer,
+    ));
 
     Router::new()
         .route("/auth/login", post(login::login))
         .merge(protected_routes)
-        .merge(users::routes())
+        .merge(user_routes)
 }
 
 fn session_cookie(value: String, max_age: CookieDuration) -> Cookie<'static> {

@@ -7,8 +7,8 @@ use chrono::{TimeZone, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
 use zk_domain::{
-    AuthScope, IssueTokenRequest, IssueTokenResponse, ListTokensResponse, ListedToken,
-    LoginRequest, LoginResponse, RefreshResponse,
+    AuthScope, CreateUserRequest, CreateUserResponse, IssueTokenRequest, IssueTokenResponse,
+    ListTokensResponse, ListedToken, LoginRequest, LoginResponse, RefreshResponse,
 };
 
 fn assert_common_traits<T>()
@@ -23,6 +23,8 @@ fn auth_wire_types_implement_required_common_traits() {
     assert_common_traits::<LoginRequest>();
     assert_common_traits::<LoginResponse>();
     assert_common_traits::<RefreshResponse>();
+    assert_common_traits::<CreateUserRequest>();
+    assert_common_traits::<CreateUserResponse>();
     assert_common_traits::<IssueTokenRequest>();
     assert_common_traits::<IssueTokenResponse>();
     assert_common_traits::<ListedToken>();
@@ -48,6 +50,49 @@ fn login_request_round_trips_json() {
     assert_eq!(
         serde_json::from_value::<LoginRequest>(encoded).expect("login request should deserialize"),
         request
+    );
+}
+
+#[test]
+fn create_user_wire_types_round_trip_json() {
+    let request = CreateUserRequest {
+        username: "alice".to_string(),
+        password: "correct horse battery".to_string(),
+    };
+    let response = CreateUserResponse {
+        user_id: "01HZ3KQBFG9T2R5XJ4N8VW6YMP".to_string(),
+        username: "alice".to_string(),
+        bootstrap: true,
+    };
+
+    assert_eq!(
+        serde_json::to_value(&request).expect("create user request should serialize"),
+        json!({
+            "username": "alice",
+            "password": "correct horse battery",
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<CreateUserRequest>(
+            serde_json::to_value(&request).expect("create user request should serialize")
+        )
+        .expect("create user request should deserialize"),
+        request
+    );
+    assert_eq!(
+        serde_json::to_value(&response).expect("create user response should serialize"),
+        json!({
+            "user_id": "01HZ3KQBFG9T2R5XJ4N8VW6YMP",
+            "username": "alice",
+            "bootstrap": true,
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<CreateUserResponse>(
+            serde_json::to_value(&response).expect("create user response should serialize")
+        )
+        .expect("create user response should deserialize"),
+        response
     );
 }
 
