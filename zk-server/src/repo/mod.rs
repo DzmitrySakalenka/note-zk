@@ -16,5 +16,5 @@ pub use deletes::{DeleteRecordRow, DeleteRecordsRepo};
 pub use devices::{DeviceRepo, DeviceRow};
 pub use events::{NewSyncEvent, SyncEventRow, SyncEventsRepo};
 pub use notes::{NoteRow, NotesRepo};
-pub use tokens::{DeviceTokenRepo, DeviceTokenRow};
+pub use tokens::{DeviceTokenInsert, DeviceTokenRepo, DeviceTokenRow};
 pub use users::{UserPasswordRow, UserRepo, UserRow};
