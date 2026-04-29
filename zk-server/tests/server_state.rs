@@ -35,7 +35,7 @@ fn bootstrap_with_config_succeeds_and_exposes_injected_config_and_db() {
             .db()
             .schema_version()
             .expect("schema lookup should succeed"),
-        1
+        2
     );
     assert!(state.started_at() >= before_bootstrap);
     assert!(state.started_at() <= Utc::now());

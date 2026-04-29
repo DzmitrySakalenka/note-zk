@@ -117,7 +117,7 @@ async fn health_endpoint_returns_expected_body_after_bootstrap() {
     assert_eq!(content_type, "application/json");
     assert_eq!(health_response.status, "ok");
     assert!(health_response.db_ok);
-    assert_eq!(health_response.schema_version, 1);
+    assert_eq!(health_response.schema_version, 2);
     assert!(health_response.uptime_seconds >= 0);
 }
 

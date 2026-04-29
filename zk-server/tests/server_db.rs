@@ -35,14 +35,14 @@ fn database_path(prefix: &str) -> PathBuf {
 }
 
 #[test]
-fn open_in_memory_creates_schema_version_table_with_version_one() {
+fn open_in_memory_creates_schema_version_table_with_current_version() {
     let db = ServerDb::open_in_memory().expect("in-memory database should open");
 
     assert_eq!(query_table_count(&db, "server_schema_version"), 1);
     assert_eq!(
         db.schema_version()
             .expect("schema version query should succeed"),
-        1
+        2
     );
 }
 
@@ -58,7 +58,7 @@ fn ensure_schema_is_idempotent_when_called_twice() {
     assert_eq!(
         db.schema_version()
             .expect("schema version query should succeed"),
-        1
+        2
     );
     let version_row_count: i64 = db
         .with_conn(|conn: &Connection| {
@@ -81,13 +81,13 @@ fn open_file_backed_database_sets_wal_journal_mode() {
 }
 
 #[test]
-fn schema_version_returns_one_for_v1_schema() {
+fn schema_version_returns_current_schema_version() {
     let db = ServerDb::open_in_memory().expect("in-memory database should open");
 
     assert_eq!(
         db.schema_version()
             .expect("schema version query should succeed"),
-        1
+        2
     );
 }
 
@@ -133,7 +133,7 @@ fn with_tx_rolls_back_on_error() {
 }
 
 #[test]
-fn reopening_file_backed_database_keeps_schema_version_one() {
+fn reopening_file_backed_database_keeps_current_schema_version() {
     let path = database_path("db-reopen");
 
     {
@@ -141,7 +141,7 @@ fn reopening_file_backed_database_keeps_schema_version_one() {
         assert_eq!(
             db.schema_version()
                 .expect("first schema version query should succeed"),
-            1
+            2
         );
     }
 
@@ -151,6 +151,6 @@ fn reopening_file_backed_database_keeps_schema_version_one() {
         reopened
             .schema_version()
             .expect("second schema version query should succeed"),
-        1
+        2
     );
 }
