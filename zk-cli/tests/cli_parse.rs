@@ -4,8 +4,8 @@
 use clap::Parser;
 
 use zk_cli::{
-    cli::{Cli, Command, OutputMode},
-    error::{CliError, EXIT_ISSUES, EXIT_OK, EXIT_USAGE, exit_code},
+    cli::{AuthCommand, Cli, Command, OutputMode},
+    error::{CliError, EXIT_ISSUES, EXIT_OK, EXIT_REQUEST, EXIT_USAGE, exit_code},
 };
 
 #[test]
@@ -108,6 +108,64 @@ fn sync_rejects_conflicting_modes() {
         .expect_err("sync should reject conflicting mode flags");
 
     assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
+fn auth_issue_token_parses_command_and_shared_flags() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "auth",
+        "issue-token",
+        "--server-url",
+        "https://zk.example.com",
+        "--username",
+        "admin",
+        "--label",
+        "laptop",
+        "--scopes",
+        "sync,read",
+        "--device-id",
+        "devA",
+    ])
+    .expect("auth issue-token arguments should parse");
+
+    assert_eq!(
+        cli.shared.server_url,
+        Some(url::Url::parse("https://zk.example.com").expect("URL should parse"))
+    );
+    assert_eq!(cli.shared.device_id.as_deref(), Some("devA"));
+
+    match cli.command {
+        Command::Auth(AuthCommand::IssueToken(args)) => {
+            assert_eq!(args.username, "admin");
+            assert_eq!(args.label, "laptop");
+            assert_eq!(args.scopes, "sync,read");
+        }
+        other => panic!("expected auth issue-token command, got {other:?}"),
+    }
+}
+
+#[test]
+fn auth_issue_token_defaults_scopes_to_sync() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "auth",
+        "issue-token",
+        "--server-url",
+        "https://zk.example.com",
+        "--username",
+        "admin",
+        "--label",
+        "laptop",
+    ])
+    .expect("auth issue-token arguments should parse");
+
+    match cli.command {
+        Command::Auth(AuthCommand::IssueToken(args)) => {
+            assert_eq!(args.scopes, "sync");
+        }
+        other => panic!("expected auth issue-token command, got {other:?}"),
+    }
 }
 
 #[test]
@@ -275,6 +333,7 @@ fn exit_code_matches_cli_error_policy() {
     assert_eq!(EXIT_OK, 0);
     assert_eq!(EXIT_ISSUES, 1);
     assert_eq!(EXIT_USAGE, 2);
+    assert_eq!(EXIT_REQUEST, 2);
     assert_eq!(
         exit_code(&CliError::Argument("bad args".to_string())),
         EXIT_USAGE
@@ -287,6 +346,10 @@ fn exit_code_matches_cli_error_policy() {
     assert_eq!(
         exit_code(&CliError::Issue("lifecycle issue".to_string())),
         EXIT_ISSUES
+    );
+    assert_eq!(
+        exit_code(&CliError::Request("unauthorized: unauthorized".to_string())),
+        EXIT_REQUEST
     );
     assert_eq!(
         exit_code(&CliError::Internal(anyhow::anyhow!("internal failure"))),

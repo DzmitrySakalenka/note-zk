@@ -54,6 +54,26 @@ fn auth_scope_deserialize_unknown_returns_error() {
 }
 
 #[test]
+fn auth_scope_parses_stable_lowercase_names() {
+    for (raw, expected) in [
+        ("sync", AuthScope::Sync),
+        ("read", AuthScope::Read),
+        ("admin", AuthScope::Admin),
+    ] {
+        let parsed = raw.parse::<AuthScope>().expect("scope should parse");
+
+        assert_eq!(parsed, expected);
+    }
+}
+
+#[test]
+fn auth_scope_rejects_unknown_names() {
+    let result = "superuser".parse::<AuthScope>();
+
+    assert!(result.is_err());
+}
+
+#[test]
 fn password_user_round_trip_via_serde_json() {
     let user = PasswordUser {
         user_id: "user-1".to_string(),

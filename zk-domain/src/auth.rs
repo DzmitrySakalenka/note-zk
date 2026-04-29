@@ -1,5 +1,7 @@
 //! Authentication record types shared by repositories and services.
 
+use std::{fmt, str::FromStr};
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -81,6 +83,43 @@ impl AuthScope {
             Self::Sync => "sync",
             Self::Read => "read",
             Self::Admin => "admin",
+        }
+    }
+}
+
+/// Error returned when parsing an authorization scope from text fails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthScopeParseError {
+    value: String,
+}
+
+impl AuthScopeParseError {
+    /// Returns the unrecognized scope text.
+    #[must_use]
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+}
+
+impl fmt::Display for AuthScopeParseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "unknown auth scope: {}", self.value)
+    }
+}
+
+impl std::error::Error for AuthScopeParseError {}
+
+impl FromStr for AuthScope {
+    type Err = AuthScopeParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "sync" => Ok(Self::Sync),
+            "read" => Ok(Self::Read),
+            "admin" => Ok(Self::Admin),
+            other => Err(AuthScopeParseError {
+                value: other.to_string(),
+            }),
         }
     }
 }

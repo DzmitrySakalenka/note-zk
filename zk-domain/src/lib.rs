@@ -32,7 +32,7 @@ pub mod write;
 /// Write-request models for trash, restore, and purge operations.
 pub mod write_request;
 
-pub use auth::{AuthScope, DeviceTokenRecord, PasswordUser, WebSessionRecord};
+pub use auth::{AuthScope, AuthScopeParseError, DeviceTokenRecord, PasswordUser, WebSessionRecord};
 pub use auth_wire::{
     CreateUserRequest, CreateUserResponse, IssueTokenRequest, IssueTokenResponse,
     ListTokensResponse, ListedToken, LoginRequest, LoginResponse, RefreshResponse,
