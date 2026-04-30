@@ -3138,6 +3138,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "zk-backup"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "data-encoding",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "zk-cli"
 version = "0.1.0"
 dependencies = [
