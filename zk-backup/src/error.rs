@@ -12,6 +12,9 @@ pub enum BackupError {
     /// A backup manifest could not be decoded or failed structural validation.
     #[error("manifest format invalid")]
     InvalidManifest,
+    /// A backup archive could not be decoded or contained unsafe paths.
+    #[error("archive format invalid: {0}")]
+    InvalidArchive(String),
     /// Archive bytes did not match the manifest integrity metadata.
     #[error("archive integrity check failed")]
     IntegrityCheckFailed,

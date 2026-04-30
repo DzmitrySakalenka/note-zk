@@ -13,6 +13,12 @@ fn backup_error_variants_display_and_are_send_sync_static() {
     let invalid_manifest = BackupError::InvalidManifest;
     assert_eq!(invalid_manifest.to_string(), "manifest format invalid");
 
+    let invalid_archive = BackupError::InvalidArchive("unsafe path".to_string());
+    assert_eq!(
+        invalid_archive.to_string(),
+        "archive format invalid: unsafe path"
+    );
+
     let integrity_check_failed = BackupError::IntegrityCheckFailed;
     assert_eq!(
         integrity_check_failed.to_string(),
