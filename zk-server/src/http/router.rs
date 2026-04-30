@@ -12,7 +12,7 @@ use crate::{
     ServerError, ServerResult,
     auth::{require_auth_layer, require_scope_layer},
     http::{ApiError, auth_routes, health::health, sync_routes},
-    scheduler::backup::spawn_backup_scheduler,
+    scheduler::{backup::spawn_backup_scheduler, purge::spawn_purge_scheduler},
     state::ServerState,
 };
 
@@ -57,7 +57,9 @@ pub async fn serve(state: ServerState) -> ServerResult<()> {
         .map_err(internal_error)?;
     let listener_addr = listener.local_addr().map_err(internal_error)?;
     let shutdown = CancellationToken::new();
-    let backup_scheduler = spawn_backup_scheduler(Arc::new(state), shutdown.clone());
+    let state = Arc::new(state);
+    let backup_scheduler = spawn_backup_scheduler(Arc::clone(&state), shutdown.clone());
+    let purge_scheduler = spawn_purge_scheduler(Arc::clone(&state), shutdown.clone());
     let shutdown_signal = shutdown_signal(shutdown.clone())?;
 
     tracing::info!(addr = %listener_addr, "server listening");
@@ -70,6 +72,7 @@ pub async fn serve(state: ServerState) -> ServerResult<()> {
     if let Some(backup_scheduler) = backup_scheduler {
         backup_scheduler.join().await;
     }
+    purge_scheduler.join().await;
 
     serve_result
 }
