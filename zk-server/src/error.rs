@@ -10,7 +10,7 @@ pub type ServerResult<T> = Result<T, ServerError>;
 #[derive(Debug, Error)]
 pub enum ServerError {
     /// Server configuration failed to load or validate.
-    #[error("config error")]
+    #[error("config error: {0}")]
     Config(#[from] ConfigError),
     /// `SQLite` returned an error while serving a request or bootstrapping.
     #[error("database error")]

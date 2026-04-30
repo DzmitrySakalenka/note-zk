@@ -4038,6 +4038,7 @@ dependencies = [
  "tracing-subscriber",
  "ulid",
  "zk-auth",
+ "zk-backup",
  "zk-domain",
 ]
 

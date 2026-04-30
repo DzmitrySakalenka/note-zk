@@ -55,6 +55,7 @@ fn test_config(database_path: PathBuf, stub_hash: Option<String>) -> ServerConfi
         stub_auth_token_sha256_hex: stub_hash,
         trash_retention_days: 14,
         max_batch_size: 1000,
+        backup: None,
     }
 }
 

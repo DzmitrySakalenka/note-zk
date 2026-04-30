@@ -31,6 +31,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 ulid = "1.2.1"
 zk-auth = { version = "0.1.0", path = "../zk-auth" }
+zk-backup = { version = "0.1.0", path = "../zk-backup" }
 zk-domain = { path = "../zk-domain" }
 
 [dev-dependencies]
