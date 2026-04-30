@@ -280,13 +280,20 @@ The server schema mirrors some local concepts but remains authoritative for shar
 ### `device_tokens`
 
 - `token_id TEXT PRIMARY KEY`
-- `device_id TEXT`
+- `device_id TEXT` (FK to `devices.device_id` ON DELETE SET NULL)
 - `label TEXT NOT NULL`
-- `token_hash TEXT NOT NULL`
-- `scopes_json TEXT NOT NULL`
+- `token_sha256_hex TEXT NOT NULL UNIQUE`
+- `scopes_json TEXT NOT NULL DEFAULT '[]'`
 - `created_at TEXT NOT NULL`
 - `last_used_at TEXT`
 - `revoked_at TEXT`
+
+Indexes:
+
+- `idx_device_tokens_hash` on `token_sha256_hex`
+- `idx_device_tokens_device` on `device_id` where `revoked_at IS NULL`
+
+Last verified against `zk-server/src/schema.rs:71-81,113-122` on 2026-04-30.
 
 ### `users`
 
@@ -298,12 +305,21 @@ The server schema mirrors some local concepts but remains authoritative for shar
 
 ### `web_sessions`
 
-- `session_id TEXT PRIMARY KEY`
-- `user_id TEXT NOT NULL`
+- `session_id_sha256_hex TEXT PRIMARY KEY`
+- `user_id TEXT NOT NULL` (FK to `users.user_id` ON DELETE CASCADE)
+- `csrf_token_sha256_hex TEXT NOT NULL`
+- `scopes_json TEXT NOT NULL DEFAULT '[]'`
 - `created_at TEXT NOT NULL`
 - `expires_at TEXT NOT NULL`
 - `last_seen_at TEXT NOT NULL`
 - `revoked_at TEXT`
+
+Indexes:
+
+- `idx_web_sessions_user` on `user_id` where `revoked_at IS NULL`
+- `idx_web_sessions_expires` on `expires_at` where `revoked_at IS NULL`
+
+Last verified against `zk-server/src/schema.rs:91-101,117-120` on 2026-04-30.
 
 ### `backup_manifests`
 
