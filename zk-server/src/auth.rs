@@ -10,7 +10,7 @@ use axum::{
 };
 use axum_extra::extract::CookieJar;
 use chrono::Utc;
-use rusqlite::{OptionalExtension, types::Type};
+use rusqlite::OptionalExtension;
 use subtle::ConstantTimeEq;
 use zk_auth::{
     session::{hash_csrf_token, hash_session_id, validate_session_id_format},
@@ -354,18 +354,9 @@ fn lookup_device_token(
         .with_conn(|connection| DeviceTokenRepo::lookup_by_hash(connection, token_sha256_hex))
     {
         Ok(token_row) => Ok(token_row),
-        Err(error) if is_malformed_scope_decode_error(&error) => {
-            Err(ApiError::from(ServerError::Unauthorized))
-        }
+        Err(ServerError::ScopeDecode(_)) => Err(ApiError::from(ServerError::Unauthorized)),
         Err(error) => Err(ApiError::from(error)),
     }
-}
-
-fn is_malformed_scope_decode_error(error: &ServerError) -> bool {
-    matches!(
-        error,
-        ServerError::Database(rusqlite::Error::FromSqlConversionFailure(4, Type::Text, _))
-    )
 }
 
 fn bearer_token_from_headers(headers: &axum::http::HeaderMap) -> Result<&str, ApiError> {

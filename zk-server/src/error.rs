@@ -30,6 +30,10 @@ pub enum ServerError {
     /// Request lacks valid authentication credentials.
     #[error("unauthorized")]
     Unauthorized,
+    /// Stored device-token scopes are malformed; HTTP responses map this to
+    /// unauthorized so clients do not receive storage details.
+    #[error("malformed device token scopes: {0}")]
+    ScopeDecode(String),
     /// Request is authenticated but lacks the required authorization scope.
     #[error("forbidden: {0}")]
     Forbidden(String),

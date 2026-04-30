@@ -134,6 +134,17 @@ pub struct DeviceTokenRow {
     pub revoked_at: Option<DateTime<Utc>>,
 }
 
+struct DeviceTokenLookupRow {
+    token_id: String,
+    device_id: Option<String>,
+    label: String,
+    token_sha256_hex: String,
+    scopes_json: String,
+    created_at: DateTime<Utc>,
+    last_used_at: Option<DateTime<Utc>>,
+    revoked_at: Option<DateTime<Utc>>,
+}
+
 /// Narrow repository over the `device_tokens` table.
 ///
 /// TG14-011 owns rotation and other service-layer behavior. This repository
@@ -199,9 +210,11 @@ impl DeviceTokenRepo {
             .map_err(ServerError::Database)?;
 
         statement
-            .query_row([token_sha256_hex], decode_device_token_row)
+            .query_row([token_sha256_hex], decode_device_token_lookup_row)
             .optional()
-            .map_err(ServerError::Database)
+            .map_err(ServerError::Database)?
+            .map(DeviceTokenLookupRow::into_device_token_row)
+            .transpose()
     }
 
     /// Lists active tokens for a specific device, or unbound active tokens.
@@ -301,6 +314,37 @@ impl DeviceTokenRepo {
             .map(|_| ())
             .map_err(ServerError::Database)
     }
+}
+
+impl DeviceTokenLookupRow {
+    fn into_device_token_row(self) -> ServerResult<DeviceTokenRow> {
+        let scopes = serde_json::from_str(&self.scopes_json)
+            .map_err(|_| ServerError::ScopeDecode(self.token_id.clone()))?;
+
+        Ok(DeviceTokenRow {
+            token_id: self.token_id,
+            device_id: self.device_id,
+            label: self.label,
+            token_sha256_hex: self.token_sha256_hex,
+            scopes,
+            created_at: self.created_at,
+            last_used_at: self.last_used_at,
+            revoked_at: self.revoked_at,
+        })
+    }
+}
+
+fn decode_device_token_lookup_row(row: &Row<'_>) -> rusqlite::Result<DeviceTokenLookupRow> {
+    Ok(DeviceTokenLookupRow {
+        token_id: row.get(0)?,
+        device_id: row.get(1)?,
+        label: row.get(2)?,
+        token_sha256_hex: row.get(3)?,
+        scopes_json: row.get(4)?,
+        created_at: decode_timestamp(row, 5)?,
+        last_used_at: decode_optional_timestamp(row, 6)?,
+        revoked_at: decode_optional_timestamp(row, 7)?,
+    })
 }
 
 fn decode_device_token_row(row: &Row<'_>) -> rusqlite::Result<DeviceTokenRow> {

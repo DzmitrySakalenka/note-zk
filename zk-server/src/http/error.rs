@@ -75,7 +75,7 @@ fn response_parts(error: &ServerError) -> (StatusCode, &'static str, String, boo
         ServerError::Conflict(message) => {
             (StatusCode::CONFLICT, "conflict", message.clone(), false)
         }
-        ServerError::Unauthorized => (
+        ServerError::Unauthorized | ServerError::ScopeDecode(_) => (
             StatusCode::UNAUTHORIZED,
             "unauthorized",
             "unauthorized".to_string(),

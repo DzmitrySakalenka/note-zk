@@ -84,6 +84,12 @@ async fn server_error_variants_map_to_expected_status_code_and_message() {
             "unauthorized",
         ),
         (
+            ServerError::ScopeDecode("token-a".to_string()),
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "unauthorized",
+        ),
+        (
             ServerError::Forbidden("sync".to_string()),
             StatusCode::FORBIDDEN,
             "forbidden",

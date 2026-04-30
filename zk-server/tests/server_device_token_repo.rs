@@ -465,7 +465,7 @@ fn revoke_hides_token_from_lookup_by_hash() {
 }
 
 #[test]
-fn decoder_rejects_malformed_scopes_json() {
+fn malformed_scopes_json_returns_typed_error() {
     let connection = setup_connection();
     let token_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     insert_token_row(
@@ -485,5 +485,5 @@ fn decoder_rejects_malformed_scopes_json() {
     let error = DeviceTokenRepo::lookup_by_hash(&connection, token_hash)
         .expect_err("malformed scopes JSON should fail row decoding");
 
-    assert!(matches!(error, ServerError::Database(_)));
+    assert!(matches!(error, ServerError::ScopeDecode(token_id) if token_id == "token-a"));
 }
