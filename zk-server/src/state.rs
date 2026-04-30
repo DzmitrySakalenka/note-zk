@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use tokio::sync::Mutex;
 
 use crate::{
     ServerError, ServerResult, config::ServerConfig, db::ServerDb, service::sweep_expired_sessions,
@@ -18,6 +19,7 @@ struct StateInner {
     config: ServerConfig,
     db: ServerDb,
     started_at: DateTime<Utc>,
+    in_flight_backup_id: Mutex<Option<String>>,
 }
 
 impl ServerState {
@@ -39,12 +41,19 @@ impl ServerState {
         self.inner.started_at
     }
 
+    /// Returns the shared single-flight backup marker.
+    #[must_use]
+    pub(crate) fn in_flight_backup_id(&self) -> &Mutex<Option<String>> {
+        &self.inner.in_flight_backup_id
+    }
+
     fn from_parts(config: ServerConfig, db: ServerDb, started_at: DateTime<Utc>) -> Self {
         Self {
             inner: Arc::new(StateInner {
                 config,
                 db,
                 started_at,
+                in_flight_backup_id: Mutex::new(None),
             }),
         }
     }

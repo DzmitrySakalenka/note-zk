@@ -11,7 +11,7 @@ use zk_domain::AuthScope;
 use crate::{
     ServerError, ServerResult,
     auth::{require_auth_layer, require_scope_layer},
-    http::{ApiError, auth_routes, health::health, sync_routes},
+    http::{ApiError, admin_routes, auth_routes, health::health, sync_routes},
     scheduler::{backup::spawn_backup_scheduler, purge::spawn_purge_scheduler},
     state::ServerState,
 };
@@ -29,6 +29,9 @@ pub fn build_router(state: ServerState) -> Router {
                 )),
         )
         .merge(auth_routes(&state))
+        // `/admin/*` handlers use `AuthenticatedAdmin`; every route requires
+        // the admin scope for either a device token or a browser session.
+        .merge(admin_routes())
         .fallback(not_found)
         .layer(
             ServiceBuilder::new()

@@ -78,6 +78,12 @@ async fn server_error_variants_map_to_expected_status_code_and_message() {
             "stale write",
         ),
         (
+            ServerError::ServiceUnavailable("backup already in flight".to_string()),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "service_unavailable",
+            "backup already in flight",
+        ),
+        (
             ServerError::Unauthorized,
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -161,4 +167,22 @@ async fn database_errors_are_redacted_and_return_json() {
     assert!(body.contains("\"error\""));
     assert!(!body.contains("rusqlite"));
     assert!(!body.contains("invalid query"));
+}
+
+#[tokio::test]
+async fn service_unavailable_can_attach_retry_after_header() {
+    let response = ApiError::with_retry_after(
+        ServerError::ServiceUnavailable("backup already in flight".to_string()),
+        60,
+    )
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::RETRY_AFTER)
+            .expect("retry-after header should be present"),
+        "60"
+    );
 }

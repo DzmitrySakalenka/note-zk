@@ -31,6 +31,15 @@ pub struct BackupService {
     id_generator: Mutex<Generator>,
 }
 
+/// Reserved backup run metadata used when callers need the id before work starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupRun {
+    /// Stable backup identifier assigned to the run.
+    pub backup_id: String,
+    /// Timestamp recorded in the manifest when the run completes.
+    pub started_at: DateTime<Utc>,
+}
+
 /// Configuration needed to run one backup service instance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackupServiceConfig {
@@ -94,7 +103,33 @@ impl BackupService {
     /// from the backup pipeline. Retention prune failures are logged and do
     /// not fail the completed backup.
     pub fn run_now(&self, now: DateTime<Utc>) -> BackupResult<BackupManifest> {
-        let result = self.run_now_inner(now);
+        let reserved = self.reserve_run(now)?;
+
+        self.run_reserved(reserved)
+    }
+
+    /// Reserves a backup id for a future run without touching the filesystem.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BackupError::Internal`] if the id generator cannot produce
+    /// an id for the supplied timestamp.
+    pub fn reserve_run(&self, started_at: DateTime<Utc>) -> BackupResult<BackupRun> {
+        Ok(BackupRun {
+            backup_id: self.next_backup_id(started_at)?,
+            started_at,
+        })
+    }
+
+    /// Runs one synchronous backup using already-reserved run metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns filesystem, archive, encryption, manifest, or internal errors
+    /// from the backup pipeline. Retention prune failures are logged and do
+    /// not fail the completed backup.
+    pub fn run_reserved(&self, reserved: BackupRun) -> BackupResult<BackupManifest> {
+        let result = self.run_reserved_inner(reserved);
         if result.is_err() {
             cleanup_partial_files(&self.config.output_dir);
         }
@@ -102,8 +137,8 @@ impl BackupService {
         result
     }
 
-    fn run_now_inner(&self, now: DateTime<Utc>) -> BackupResult<BackupManifest> {
-        let backup_id = self.next_backup_id(now)?;
+    fn run_reserved_inner(&self, reserved: BackupRun) -> BackupResult<BackupManifest> {
+        let backup_id = reserved.backup_id;
         let plaintext_partial_path = self
             .config
             .output_dir
@@ -127,7 +162,7 @@ impl BackupService {
         let manifest = BackupManifest {
             schema_version: MANIFEST_SCHEMA_VERSION,
             backup_id,
-            created_at: now,
+            created_at: reserved.started_at,
             source_summary: BackupSourceSummary {
                 vault_path: self.config.vault_path.clone(),
                 note_count: archive_summary.note_count,

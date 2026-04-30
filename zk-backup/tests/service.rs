@@ -34,6 +34,29 @@ fn consecutive_runs_with_same_timestamp_have_increasing_backup_ids() {
 }
 
 #[test]
+fn reserved_run_uses_reserved_backup_id() {
+    let fixture = ServiceFixture::new();
+    let service = service(&fixture, BackupEncryption::None, true);
+    let now = utc_datetime(2026, 4, 30, 12, 0);
+    let reserved = service
+        .reserve_run(now)
+        .expect("backup id reservation should succeed");
+
+    let manifest = service
+        .run_reserved(reserved.clone())
+        .expect("reserved backup should run");
+
+    assert_eq!(manifest.backup_id, reserved.backup_id);
+    assert_eq!(manifest.created_at, reserved.started_at);
+    assert!(
+        fixture
+            .output_dir
+            .join(format!("backup-{}.manifest.json", reserved.backup_id))
+            .exists()
+    );
+}
+
+#[test]
 fn plain_backup_archive_decompresses_directly() {
     let fixture = ServiceFixture::new();
     let service = service(&fixture, BackupEncryption::None, true);

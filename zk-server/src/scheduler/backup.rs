@@ -5,14 +5,9 @@ use std::{sync::Arc, time::Duration};
 use chrono::{DateTime, Utc};
 use tokio::{task::JoinHandle, time::Instant};
 use tokio_util::sync::CancellationToken;
-use zk_backup::{
-    manifest::BackupManifest,
-    retention::RetentionPolicy,
-    schedule::CronSchedule,
-    service::{BackupService, BackupServiceConfig},
-};
+use zk_backup::{manifest::BackupManifest, schedule::CronSchedule};
 
-use crate::state::ServerState;
+use crate::{service::BackupStartError, state::ServerState};
 
 const LOG_TARGET: &str = "zk_server::backup";
 const SHA256_LOG_TAIL_LEN: usize = 12;
@@ -88,11 +83,25 @@ async fn run_backup_scheduler(
 }
 
 async fn run_backup_once(state: Arc<ServerState>) {
-    let result = tokio::task::spawn_blocking(move || {
-        let service = build_backup_service(&state);
-        service.run_now(Utc::now())
-    })
-    .await;
+    let reserved = match crate::service::reserve_backup(&state, Utc::now()).await {
+        Ok(reserved) => reserved,
+        Err(BackupStartError::InFlight) => {
+            tracing::info!(target: LOG_TARGET, "scheduled backup skipped because a backup is already in flight");
+            return;
+        }
+        Err(error) => {
+            tracing::error!(
+                target: LOG_TARGET,
+                error = %error.into_server_error(),
+                "scheduled backup failed to start"
+            );
+            return;
+        }
+    };
+    let backup_id = reserved.backup_id().to_string();
+    let state_for_cleanup = Arc::clone(&state);
+    let result = tokio::task::spawn_blocking(move || reserved.run()).await;
+    crate::service::clear_in_flight_backup(&state_for_cleanup, &backup_id).await;
 
     match result {
         Ok(Ok(manifest)) => log_backup_success(&manifest),
@@ -107,26 +116,6 @@ async fn run_backup_once(state: Arc<ServerState>) {
             );
         }
     }
-}
-
-fn build_backup_service(state: &ServerState) -> BackupService {
-    let config = state.config();
-    let backup = config
-        .backup
-        .as_ref()
-        .expect("scheduled backup requires backup config");
-    let service_config = BackupServiceConfig {
-        vault_path: config.vault_path.clone(),
-        server_db_path: Some(config.database_path.clone()),
-        effective_config_toml: None,
-        output_dir: backup.output_dir.clone(),
-        include_attachments: backup.include_attachments,
-        include_server_db: backup.include_server_db,
-        encryption: backup.encryption.clone(),
-    };
-    let retention = RetentionPolicy::new(backup.retention_count);
-
-    BackupService::new(service_config, retention).expect("validated backup config should build")
 }
 
 fn tokio_instant_for(now: DateTime<Utc>, next_after: DateTime<Utc>) -> Instant {
