@@ -26,7 +26,7 @@ pub fn build_router(state: ServerState) -> Router {
                     require_auth_layer,
                 )),
         )
-        .merge(auth_routes(state.clone()))
+        .merge(auth_routes(&state))
         .fallback(not_found)
         .layer(
             ServiceBuilder::new()

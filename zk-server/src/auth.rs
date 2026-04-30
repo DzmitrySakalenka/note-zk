@@ -142,28 +142,6 @@ pub async fn require_session_layer(
     Ok(next.run(req).await)
 }
 
-/// Middleware that attaches browser-session auth when a session cookie exists.
-///
-/// Missing cookies pass through for bootstrap endpoints. Malformed, revoked, or
-/// expired cookies still fail closed so callers cannot hide bad credentials by
-/// falling back to unauthenticated mode.
-///
-/// # Errors
-///
-/// Returns [`ApiError`] when an optional session cookie is present but invalid,
-/// or when the session lookup path hits a database error.
-pub async fn optional_session_layer(
-    State(state): State<ServerState>,
-    mut req: Request,
-    next: Next,
-) -> Result<Response, ApiError> {
-    if let Some(authenticated_user) = authenticated_user_from_request(&state, &req)? {
-        attach_authenticated_user(&mut req, authenticated_user);
-    }
-
-    Ok(next.run(req).await)
-}
-
 /// Middleware that enforces double-submit CSRF protection for browser routes.
 ///
 /// This layer is stateless and must run after [`require_session_layer`], so
@@ -245,17 +223,18 @@ where
     }
 }
 
-impl<S> OptionalFromRequestParts<S> for AuthenticatedUser
-where
-    S: Send + Sync,
-{
+impl OptionalFromRequestParts<ServerState> for AuthenticatedUser {
     type Rejection = ApiError;
 
     async fn from_request_parts(
         parts: &mut Parts,
-        _state: &S,
+        state: &ServerState,
     ) -> Result<Option<Self>, Self::Rejection> {
-        Ok(parts.extensions.get::<AuthenticatedUser>().cloned())
+        if let Some(authenticated_user) = parts.extensions.get::<AuthenticatedUser>() {
+            return Ok(Some(authenticated_user.clone()));
+        }
+
+        authenticated_user_from_headers(state, &parts.headers)
     }
 }
 
@@ -317,7 +296,14 @@ fn authenticated_user_from_request(
     state: &ServerState,
     req: &Request,
 ) -> Result<Option<AuthenticatedUser>, ApiError> {
-    let Some(session_id) = optional_session_id_from_cookies(req) else {
+    authenticated_user_from_headers(state, req.headers())
+}
+
+fn authenticated_user_from_headers(
+    state: &ServerState,
+    headers: &axum::http::HeaderMap,
+) -> Result<Option<AuthenticatedUser>, ApiError> {
+    let Some(session_id) = optional_session_id_from_cookies(headers) else {
         return Ok(None);
     };
 
@@ -373,8 +359,8 @@ fn bearer_token_from_headers(headers: &axum::http::HeaderMap) -> Result<&str, Ap
         .ok_or_else(|| ApiError::from(ServerError::Unauthorized))
 }
 
-fn optional_session_id_from_cookies(req: &Request) -> Option<String> {
-    CookieJar::from_headers(req.headers())
+fn optional_session_id_from_cookies(headers: &axum::http::HeaderMap) -> Option<String> {
+    CookieJar::from_headers(headers)
         .get(SESSION_COOKIE_NAME)
         .map(|cookie| cookie.value().to_string())
 }
