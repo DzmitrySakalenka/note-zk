@@ -18,6 +18,7 @@ pub use error::{BackupError, BackupResult};
 // modules consume it in TG15-003 through TG15-009.
 use chrono as _;
 use data_encoding as _;
+use secrecy as _;
 use serde as _;
 use serde_json as _;
 use sha2 as _;
