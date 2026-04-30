@@ -6,7 +6,7 @@ pub use zk_vault::{NormalizationResult, TitleSource, VaultScanResult, analyze_bo
 
 #[allow(dead_code)]
 mod validate_impl {
-    include!("../src/validate.rs");
+    include!("../src/validate/mod.rs");
 }
 
 use zk_domain::{
@@ -125,7 +125,7 @@ fn summary_counts_match_manual_counting_of_findings() {
         &scan_result,
         &parsed_indexes,
         &config,
-        rules,
+        &rules,
     );
 
     assert_eq!(report.summary.error_count, 2);
@@ -190,7 +190,7 @@ fn rules_triggered_vector_is_sorted_by_rule_id_for_determinism() {
         &scan_result,
         &parsed_indexes,
         &config,
-        rules,
+        &rules,
     );
 
     assert_eq!(
@@ -219,7 +219,7 @@ fn empty_findings_produce_zero_counts_and_empty_rules_triggered() {
         &scan_result,
         &parsed_indexes,
         &config,
-        rules,
+        &rules,
     );
 
     assert_eq!(report.summary.error_count, 0);
