@@ -1,8 +1,9 @@
-use std::{future::Future, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use axum::{Router, http::StatusCode, middleware, routing::get};
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
+use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use zk_domain::AuthScope;
@@ -11,6 +12,7 @@ use crate::{
     ServerError, ServerResult,
     auth::{require_auth_layer, require_scope_layer},
     http::{ApiError, auth_routes, health::health, sync_routes},
+    scheduler::backup::spawn_backup_scheduler,
     state::ServerState,
 };
 
@@ -54,17 +56,27 @@ pub async fn serve(state: ServerState) -> ServerResult<()> {
         .await
         .map_err(internal_error)?;
     let listener_addr = listener.local_addr().map_err(internal_error)?;
-    let shutdown_signal = shutdown_signal()?;
+    let shutdown = CancellationToken::new();
+    let backup_scheduler = spawn_backup_scheduler(Arc::new(state), shutdown.clone());
+    let shutdown_signal = shutdown_signal(shutdown.clone())?;
 
     tracing::info!(addr = %listener_addr, "server listening");
 
-    axum::serve(listener, router)
+    let serve_result = axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal)
         .await
-        .map_err(internal_error)
+        .map_err(internal_error);
+    shutdown.cancel();
+    if let Some(backup_scheduler) = backup_scheduler {
+        backup_scheduler.join().await;
+    }
+
+    serve_result
 }
 
-fn shutdown_signal() -> ServerResult<impl Future<Output = ()> + Send + 'static> {
+fn shutdown_signal(
+    shutdown: CancellationToken,
+) -> ServerResult<impl Future<Output = ()> + Send + 'static> {
     #[cfg(unix)]
     {
         let mut terminate = signal(SignalKind::terminate()).map_err(internal_error)?;
@@ -81,6 +93,7 @@ fn shutdown_signal() -> ServerResult<impl Future<Output = ()> + Send + 'static> 
             }
 
             tracing::info!("received shutdown signal");
+            shutdown.cancel();
         })
     }
 
@@ -93,6 +106,7 @@ fn shutdown_signal() -> ServerResult<impl Future<Output = ()> + Send + 'static> 
             }
 
             tracing::info!("received shutdown signal");
+            shutdown.cancel();
         })
     }
 }

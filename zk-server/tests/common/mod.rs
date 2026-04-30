@@ -40,6 +40,7 @@ pub fn write_text(path: &Path, text: &str) {
 pub struct EnvGuard {
     env_lock_guard: MutexGuard<'static, ()>,
     zk_server_config: Option<OsString>,
+    zk_server_vault_path: Option<OsString>,
     zk_server_database_path: Option<OsString>,
     zk_server_listen_addr: Option<OsString>,
     zk_server_log_filter: Option<OsString>,
@@ -65,6 +66,7 @@ impl EnvGuard {
         Self {
             env_lock_guard: lock,
             zk_server_config: std::env::var_os("ZK_SERVER_CONFIG"),
+            zk_server_vault_path: std::env::var_os("ZK_SERVER_VAULT_PATH"),
             zk_server_database_path: std::env::var_os("ZK_SERVER_DATABASE_PATH"),
             zk_server_listen_addr: std::env::var_os("ZK_SERVER_LISTEN_ADDR"),
             zk_server_log_filter: std::env::var_os("ZK_SERVER_LOG_FILTER"),
@@ -113,6 +115,7 @@ impl EnvGuard {
 impl Drop for EnvGuard {
     fn drop(&mut self) {
         restore_env_var("ZK_SERVER_CONFIG", self.zk_server_config.as_ref());
+        restore_env_var("ZK_SERVER_VAULT_PATH", self.zk_server_vault_path.as_ref());
         restore_env_var(
             "ZK_SERVER_DATABASE_PATH",
             self.zk_server_database_path.as_ref(),

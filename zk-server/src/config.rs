@@ -13,12 +13,14 @@ use thiserror::Error;
 use zk_domain::{BackupConfig, BackupConfigError, BackupEncryption, BackupSchedule};
 
 const DEFAULT_DATABASE_PATH: &str = "./zk-server.db";
+const DEFAULT_VAULT_PATH: &str = ".";
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:7878";
 const DEFAULT_LOG_FILTER: &str = "info,zk_server=debug";
 const DEFAULT_TRASH_RETENTION_DAYS: u32 = 14;
 const DEFAULT_MAX_BATCH_SIZE: u32 = 1000;
 const MAX_BATCH_SIZE_LIMIT: u32 = 100_000;
 const ENV_CONFIG_PATH: &str = "ZK_SERVER_CONFIG";
+const ENV_VAULT_PATH: &str = "ZK_SERVER_VAULT_PATH";
 const ENV_DATABASE_PATH: &str = "ZK_SERVER_DATABASE_PATH";
 const ENV_LISTEN_ADDR: &str = "ZK_SERVER_LISTEN_ADDR";
 const ENV_LOG_FILTER: &str = "ZK_SERVER_LOG_FILTER";
@@ -69,6 +71,12 @@ pub enum ConfigError {
     #[error("invalid database path: parent directory '{path}' does not exist or is not writable")]
     InvalidDatabasePath {
         /// Parent directory that failed validation.
+        path: PathBuf,
+    },
+    /// The configured vault path does not point at an existing directory.
+    #[error("invalid vault path '{path}': expected an existing directory")]
+    InvalidVaultPath {
+        /// Vault directory path that failed validation.
         path: PathBuf,
     },
     /// The configured token hash was present but empty.
@@ -170,6 +178,8 @@ pub enum ConfigError {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerConfig {
+    /// Vault directory whose canonical files are backed up by server jobs.
+    pub vault_path: PathBuf,
     /// File-backed `SQLite` database path for the server.
     pub database_path: PathBuf,
     /// Socket address the HTTP server listens on.
@@ -190,6 +200,7 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
+            vault_path: PathBuf::from(DEFAULT_VAULT_PATH),
             database_path: PathBuf::from(DEFAULT_DATABASE_PATH),
             listen_addr: DEFAULT_LISTEN_ADDR
                 .parse()
@@ -237,6 +248,7 @@ impl ServerConfig {
     /// Returns [`ConfigError`] when database, auth, sync, or backup
     /// configuration fails validation.
     pub fn validate(&self) -> ConfigResult<()> {
+        validate_vault_path(&self.vault_path)?;
         validate_database_parent(&self.database_path)?;
         validate_token_hash(self.stub_auth_token_sha256_hex.as_deref())?;
         validate_trash_retention_days(self.trash_retention_days)?;
@@ -250,6 +262,9 @@ impl ServerConfig {
     fn apply_raw_config(&mut self, raw_config: RawServerConfig) -> ConfigResult<()> {
         if let Some(database_path) = raw_config.database_path {
             self.database_path = expand_tilde(database_path);
+        }
+        if let Some(vault_path) = raw_config.vault_path {
+            self.vault_path = expand_tilde(vault_path);
         }
         if let Some(listen_addr) = raw_config.listen_addr {
             self.listen_addr = parse_listen_addr(&listen_addr)?;
@@ -276,6 +291,9 @@ impl ServerConfig {
     fn apply_env_overrides(&mut self) -> ConfigResult<()> {
         if let Some(database_path) = std::env::var_os(ENV_DATABASE_PATH) {
             self.database_path = expand_tilde(PathBuf::from(database_path));
+        }
+        if let Some(vault_path) = std::env::var_os(ENV_VAULT_PATH) {
+            self.vault_path = expand_tilde(PathBuf::from(vault_path));
         }
         if let Ok(listen_addr) = std::env::var(ENV_LISTEN_ADDR) {
             self.listen_addr = parse_listen_addr(&listen_addr)?;
@@ -307,6 +325,7 @@ impl ServerConfig {
 
 #[derive(Debug, Default, Deserialize)]
 struct RawServerConfig {
+    vault_path: Option<PathBuf>,
     database_path: Option<PathBuf>,
     listen_addr: Option<String>,
     log_filter: Option<String>,
@@ -475,6 +494,16 @@ fn expand_tilde(path: PathBuf) -> PathBuf {
     }
 
     path
+}
+
+fn validate_vault_path(vault_path: &Path) -> ConfigResult<()> {
+    if vault_path.is_dir() {
+        return Ok(());
+    }
+
+    Err(ConfigError::InvalidVaultPath {
+        path: vault_path.to_path_buf(),
+    })
 }
 
 fn validate_database_parent(database_path: &Path) -> ConfigResult<()> {

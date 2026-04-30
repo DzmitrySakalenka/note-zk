@@ -18,6 +18,7 @@ fn sample_age_recipient() -> &'static str {
 }
 
 fn clear_backup_env(env: &EnvGuard) {
+    env.remove("ZK_SERVER_VAULT_PATH");
     env.remove("ZK_SERVER_BACKUP_OUTPUT_DIR");
     env.remove("ZK_SERVER_BACKUP_RETENTION_COUNT");
     env.remove("ZK_SERVER_BACKUP_SCHEDULE_CRON");
@@ -53,6 +54,7 @@ fn load_defaults_when_no_file_and_no_env_are_present() {
     );
     assert_eq!(config.log_filter, "info,zk_server=debug");
     assert_eq!(config.stub_auth_token_sha256_hex, None);
+    assert_eq!(config.vault_path, PathBuf::from("."));
     assert_eq!(config.trash_retention_days, 14);
     assert_eq!(config.max_batch_size, 1000);
     assert_eq!(config.backup, None);
@@ -110,6 +112,47 @@ max_batch_size = 500
     assert_eq!(config.trash_retention_days, 21);
     assert_eq!(config.max_batch_size, 500);
     assert_eq!(config.backup, None);
+}
+
+#[test]
+fn load_reads_vault_path_from_toml_and_env_override() {
+    let env = EnvGuard::new();
+    env.remove("ZK_SERVER_DATABASE_PATH");
+    env.remove("ZK_SERVER_LISTEN_ADDR");
+    env.remove("ZK_SERVER_LOG_FILTER");
+    env.remove("ZK_SERVER_TOKEN_SHA256");
+    env.remove("ZK_SERVER_TRASH_RETENTION_DAYS");
+    env.remove("ZK_SERVER_MAX_BATCH_SIZE");
+    env.remove("XDG_CONFIG_HOME");
+    clear_backup_env(&env);
+
+    let root = unique_test_dir("server-config-vault-path");
+    let database_dir = root.join("db");
+    let file_vault = root.join("file-vault");
+    let env_vault = root.join("env-vault");
+    let config_path = root.join("server.toml");
+    std::fs::create_dir_all(&database_dir).expect("create database dir");
+    std::fs::create_dir_all(&file_vault).expect("create file vault dir");
+    std::fs::create_dir_all(&env_vault).expect("create env vault dir");
+
+    write_text(
+        &config_path,
+        &format!(
+            r#"
+vault_path = "{file_vault}"
+database_path = "{database_path}"
+"#,
+            file_vault = file_vault.display(),
+            database_path = database_dir.join("server.sqlite").display()
+        ),
+    );
+
+    env.set("ZK_SERVER_CONFIG", &config_path);
+    env.set("ZK_SERVER_VAULT_PATH", &env_vault);
+
+    let config = ServerConfig::load().expect("vault path config should load");
+
+    assert_eq!(config.vault_path, env_vault);
 }
 
 #[test]
@@ -740,6 +783,28 @@ fn validate_rejects_nonexistent_database_parent() {
             assert_eq!(path, PathBuf::from("tmp/zk-server/missing-parent"));
         }
         other => panic!("expected InvalidDatabasePath, got {other:?}"),
+    }
+}
+
+#[test]
+fn validate_rejects_missing_vault_path() {
+    let root = unique_test_dir("server-config-missing-vault");
+    std::fs::create_dir_all(root.join("db")).expect("create db dir");
+    let vault_path = root.join("missing-vault");
+
+    let config = ServerConfig {
+        database_path: root.join("db").join("server.sqlite"),
+        vault_path: vault_path.clone(),
+        ..ServerConfig::default()
+    };
+
+    let err = config
+        .validate()
+        .expect_err("missing vault path should fail validation");
+
+    match err {
+        ConfigError::InvalidVaultPath { path } => assert_eq!(path, vault_path),
+        other => panic!("expected InvalidVaultPath, got {other:?}"),
     }
 }
 

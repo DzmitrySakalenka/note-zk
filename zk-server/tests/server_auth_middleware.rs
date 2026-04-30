@@ -47,6 +47,7 @@ INSERT INTO device_tokens (
 
 fn test_config(database_path: PathBuf, stub_hash: Option<String>) -> ServerConfig {
     ServerConfig {
+        vault_path: PathBuf::from("."),
         database_path,
         listen_addr: "127.0.0.1:7878"
             .parse::<SocketAddr>()
