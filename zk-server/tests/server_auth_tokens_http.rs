@@ -166,6 +166,29 @@ fn revoke_token_request(token_id: &str, session: &SessionFixture) -> Request<Bod
     )
 }
 
+fn rotate_token_request(
+    token_id: &str,
+    label: &str,
+    device_id: Option<&str>,
+    scopes: &[AuthScope],
+    session: &SessionFixture,
+) -> Request<Body> {
+    json_request(
+        Method::PATCH,
+        &format!("/auth/tokens/{token_id}/rotate"),
+        &json!({
+            "label": label,
+            "device_id": device_id,
+            "scopes": scopes,
+        }),
+        RequestAuth {
+            cookie_header: Some(&session.cookie_header),
+            csrf_token: Some(&session.csrf_token),
+            bearer_token: None,
+        },
+    )
+}
+
 fn register_device_request(device_id: &str, bearer_token: &str) -> Request<Body> {
     json_request(
         Method::POST,
@@ -473,6 +496,54 @@ async fn revoke_returns_204_and_token_no_longer_authenticates() {
         .await
         .expect("register device request should succeed");
     assert_eq!(post_revoke_auth_response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn rotate_token_returns_new_plaintext_and_revokes_old() {
+    let harness = build_harness();
+    insert_user(&harness.state);
+    let session = admin_session(&harness.state);
+    let issue_response = build_router(harness.state.clone())
+        .oneshot(issue_token_request(
+            "Sync token",
+            None,
+            &[AuthScope::Sync],
+            Some(&session),
+            Some(&session.csrf_token),
+        ))
+        .await
+        .expect("issue token request should succeed");
+    let issued: IssueTokenResponse = response_body(issue_response).await;
+
+    let rotate_response = build_router(harness.state.clone())
+        .oneshot(rotate_token_request(
+            &issued.token_id,
+            "Sync token replacement",
+            None,
+            &[AuthScope::Sync],
+            &session,
+        ))
+        .await
+        .expect("rotate token request should succeed");
+
+    assert_eq!(rotate_response.status(), StatusCode::OK);
+    let rotated: IssueTokenResponse = response_body(rotate_response).await;
+
+    assert_ne!(rotated.token_id, issued.token_id);
+    assert_ne!(rotated.plaintext, issued.plaintext);
+    assert_eq!(rotated.scopes, vec![AuthScope::Sync]);
+
+    let old_token_response = build_router(harness.state.clone())
+        .oneshot(register_device_request("device-a", &issued.plaintext))
+        .await
+        .expect("register device request should succeed");
+    assert_eq!(old_token_response.status(), StatusCode::UNAUTHORIZED);
+
+    let new_token_response = build_router(harness.state)
+        .oneshot(register_device_request("device-b", &rotated.plaintext))
+        .await
+        .expect("register device request should succeed");
+    assert_eq!(new_token_response.status(), StatusCode::OK);
 }
 
 #[tokio::test]

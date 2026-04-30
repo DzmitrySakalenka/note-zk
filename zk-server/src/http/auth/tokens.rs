@@ -4,12 +4,13 @@ use axum::{
     Json, Router,
     extract::{Path, State},
     http::StatusCode,
-    routing::{delete, post},
+    routing::{delete, patch, post},
 };
 use chrono::Utc;
 use ulid::Ulid;
 use zk_domain::{
     AuthScope, IssueTokenRequest, IssueTokenResponse, ListTokensResponse, ListedToken,
+    RotateTokenRequest,
 };
 
 use crate::{
@@ -17,7 +18,7 @@ use crate::{
     auth::AuthenticatedUser,
     http::ApiError,
     repo::{DeviceTokenRepo, DeviceTokenRow},
-    service::{self, IssueTokenSpec},
+    service::{self, IssueTokenSpec, RotateTokenSpec},
     state::ServerState,
 };
 
@@ -25,6 +26,7 @@ pub(super) fn routes() -> Router<ServerState> {
     Router::new()
         .route("/auth/tokens", post(issue).get(list))
         .route("/auth/tokens/{token_id}", delete(revoke))
+        .route("/auth/tokens/{token_id}/rotate", patch(rotate))
 }
 
 async fn issue(
@@ -80,6 +82,36 @@ async fn revoke(
         .with_conn(|connection| service::revoke_device_token(connection, &token_id, Utc::now()))?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn rotate(
+    State(state): State<ServerState>,
+    AuthenticatedUser { scopes, .. }: AuthenticatedUser,
+    Path(token_id): Path<String>,
+    Json(request): Json<RotateTokenRequest>,
+) -> Result<Json<IssueTokenResponse>, ApiError> {
+    require_admin_scope(&scopes)?;
+    validate_token_id(&token_id)?;
+
+    let issued = state.db().with_conn_mut(|connection| {
+        service::rotate_device_token(
+            connection,
+            &RotateTokenSpec {
+                current_token_id: token_id,
+                label: request.label,
+                device_id: request.device_id,
+                scopes: request.scopes,
+            },
+            Utc::now(),
+        )
+    })?;
+
+    Ok(Json(IssueTokenResponse {
+        token_id: issued.token_id,
+        plaintext: issued.plaintext,
+        scopes: issued.scopes,
+        created_at: issued.created_at,
+    }))
 }
 
 fn listed_token(row: DeviceTokenRow) -> ListedToken {

@@ -9,6 +9,7 @@ use serde_json::json;
 use zk_domain::{
     AuthScope, CreateUserRequest, CreateUserResponse, IssueTokenRequest, IssueTokenResponse,
     ListTokensResponse, ListedToken, LoginRequest, LoginResponse, RefreshResponse,
+    RotateTokenRequest,
 };
 
 fn assert_common_traits<T>()
@@ -26,6 +27,7 @@ fn auth_wire_types_implement_required_common_traits() {
     assert_common_traits::<CreateUserRequest>();
     assert_common_traits::<CreateUserResponse>();
     assert_common_traits::<IssueTokenRequest>();
+    assert_common_traits::<RotateTokenRequest>();
     assert_common_traits::<IssueTokenResponse>();
     assert_common_traits::<ListedToken>();
     assert_common_traits::<ListTokensResponse>();
@@ -148,6 +150,31 @@ fn issue_token_request_round_trips_json() {
     assert_eq!(
         serde_json::from_value::<IssueTokenRequest>(encoded)
             .expect("issue token request should deserialize"),
+        request
+    );
+}
+
+#[test]
+fn rotate_token_request_round_trips_json() {
+    let request = RotateTokenRequest {
+        label: "Laptop replacement".to_string(),
+        device_id: Some("device-a".to_string()),
+        scopes: vec![AuthScope::Sync, AuthScope::Read],
+    };
+
+    let encoded = serde_json::to_value(&request).expect("rotate token request should serialize");
+
+    assert_eq!(
+        encoded,
+        json!({
+            "label": "Laptop replacement",
+            "device_id": "device-a",
+            "scopes": ["sync", "read"],
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<RotateTokenRequest>(encoded)
+            .expect("rotate token request should deserialize"),
         request
     );
 }

@@ -63,6 +63,17 @@ pub struct IssueTokenRequest {
     pub scopes: Vec<AuthScope>,
 }
 
+/// Device-token rotation request body.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RotateTokenRequest {
+    /// Human-readable operator label for the replacement token.
+    pub label: String,
+    /// Optional owning sync device identifier for the replacement token.
+    pub device_id: Option<String>,
+    /// Authorization scopes granted to the replacement token.
+    pub scopes: Vec<AuthScope>,
+}
+
 /// Device-token issue response body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IssueTokenResponse {
