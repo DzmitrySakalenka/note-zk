@@ -94,6 +94,10 @@ fn listed_token(row: DeviceTokenRow) -> ListedToken {
 }
 
 fn require_admin_scope(scopes: &[AuthScope]) -> Result<(), ApiError> {
+    // V1 password-login sessions all carry admin
+    // scope because users have no persisted role column. This rejection branch
+    // is kept as the forward-compatible gate for token management once roles
+    // make non-admin browser sessions possible.
     if scopes.contains(&AuthScope::Admin) {
         return Ok(());
     }

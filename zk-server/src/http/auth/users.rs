@@ -54,6 +54,10 @@ fn authorize_create_user(
         return Err(ApiError::from(ServerError::Unauthorized));
     };
 
+    // V1 password-login sessions all carry admin
+    // scope because users have no persisted role column. This rejection branch
+    // is kept as the forward-compatible gate for user management once roles
+    // make non-admin browser sessions possible.
     if authenticated_user.scopes.contains(&AuthScope::Admin) {
         return Ok(false);
     }

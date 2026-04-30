@@ -30,6 +30,10 @@ pub(super) async fn login(
                 connection,
                 &CreateSessionSpec {
                     user_id: verified_user.user_id,
+                    // V1 has no per-user role
+                    // column, so every password login intentionally receives
+                    // admin scope. Keep this mapping explicit so persisted
+                    // roles can later narrow session scopes in one place.
                     scopes: vec![AuthScope::Admin],
                     lifetime,
                 },
