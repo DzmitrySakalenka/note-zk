@@ -1,10 +1,7 @@
 // Integration tests are separate crates; each uses only a subset of package dependencies.
 #![allow(unused_crate_dependencies)]
 
-use std::{
-    thread,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use rusqlite::Connection;
@@ -47,8 +44,18 @@ fn parse_timestamp(value: &str) -> DateTime<Utc> {
 }
 
 fn create_user_fixture(connection: &Connection, user_id: &str, username: &str, password: &str) {
+    create_user_fixture_with_params(connection, user_id, username, password, TEST_HASH_PARAMS);
+}
+
+fn create_user_fixture_with_params(
+    connection: &Connection,
+    user_id: &str,
+    username: &str,
+    password: &str,
+    hash_params: HashParams,
+) {
     let password_hash =
-        hash_password(password, TEST_HASH_PARAMS).expect("fixture password hash should succeed");
+        hash_password(password, hash_params).expect("fixture password hash should succeed");
     UserRepo::create(
         connection,
         user_id,
@@ -229,25 +236,54 @@ fn verify_with_disabled_user_returns_unauthorized() {
 }
 
 #[test]
-#[ignore = "timing-sensitive characterization; run manually on an idle machine"]
-fn verify_timing_for_missing_and_wrong_are_within_tolerance() {
+fn verify_password_timing_does_not_leak_user_existence() {
     let connection = setup_connection();
-    create_user_fixture(&connection, "user-1", "alice", "correct horse battery");
+    create_user_fixture_with_params(
+        &connection,
+        "user-1",
+        "alice",
+        "correct horse battery",
+        HashParams::default(),
+    );
 
-    let wrong_start = Instant::now();
-    let wrong = verify_password(&connection, "alice", "wrong password");
-    let wrong_elapsed = wrong_start.elapsed();
+    assert!(matches!(
+        verify_password(&connection, "alice", "wrong password"),
+        Err(ServerError::Unauthorized)
+    ));
+    assert!(matches!(
+        verify_password(&connection, "missing", "wrong password"),
+        Err(ServerError::Unauthorized)
+    ));
 
-    thread::sleep(Duration::from_millis(20));
+    let wrong_timings = verify_timings(&connection, "alice");
+    let missing_timings = verify_timings(&connection, "missing");
+    let wrong_median = median_duration(wrong_timings);
+    let missing_median = median_duration(missing_timings);
+    let tolerance = wrong_median.max(missing_median).mul_f64(0.30);
 
-    let missing_start = Instant::now();
-    let missing = verify_password(&connection, "missing", "wrong password");
-    let missing_elapsed = missing_start.elapsed();
+    // This is a cargo-test-grade timing guard, not a benchmark. A 30% band
+    // catches the missing-user fast path while allowing shared-runner noise.
+    assert!(
+        wrong_median.abs_diff(missing_median) <= tolerance,
+        "verify timing differs too much: wrong={wrong_median:?}, missing={missing_median:?}, tolerance={tolerance:?}"
+    );
+}
 
-    assert!(matches!(wrong, Err(ServerError::Unauthorized)));
-    assert!(matches!(missing, Err(ServerError::Unauthorized)));
-    assert!(missing_elapsed >= Duration::from_millis(45));
-    assert!(wrong_elapsed.abs_diff(missing_elapsed) <= Duration::from_millis(80));
+fn verify_timings(connection: &Connection, username: &str) -> [Duration; 5] {
+    std::array::from_fn(|_| {
+        let started_at = Instant::now();
+        let result = verify_password(connection, username, "wrong password");
+        let elapsed = started_at.elapsed();
+
+        assert!(matches!(result, Err(ServerError::Unauthorized)));
+
+        elapsed
+    })
+}
+
+fn median_duration(mut durations: [Duration; 5]) -> Duration {
+    durations.sort();
+    durations[durations.len() / 2]
 }
 
 #[test]

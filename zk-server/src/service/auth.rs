@@ -1,4 +1,4 @@
-use std::{fmt, thread, time::Duration};
+use std::{fmt, sync::OnceLock};
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
@@ -19,7 +19,9 @@ use crate::{
     },
 };
 
-const MISSING_USER_DELAY: Duration = Duration::from_millis(50);
+static MISSING_USER_DUMMY_HASH: OnceLock<String> = OnceLock::new();
+
+const MISSING_USER_DUMMY_PASSWORD: &str = "zk-server::missing-user::dummy";
 
 /// User returned after successful registration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,7 +159,7 @@ pub fn verify_password(
     password: &str,
 ) -> ServerResult<VerifiedUser> {
     let Some(row) = UserRepo::get_password_hash_for_login(conn, username)? else {
-        thread::sleep(MISSING_USER_DELAY);
+        let _ = verify_password_hash(password, missing_user_dummy_hash());
         return Err(ServerError::Unauthorized);
     };
 
@@ -346,6 +348,15 @@ fn verify_active_user_password(row: &UserPasswordRow, password: &str) -> ServerR
     }
 
     verify_password_hash(password, &row.password_hash).map_err(map_verify_error)
+}
+
+fn missing_user_dummy_hash() -> &'static str {
+    MISSING_USER_DUMMY_HASH
+        .get_or_init(|| {
+            hash_password(MISSING_USER_DUMMY_PASSWORD, HashParams::default())
+                .expect("default dummy hash params should be valid")
+        })
+        .as_str()
 }
 
 fn validate_username(username: &str) -> ServerResult<()> {
