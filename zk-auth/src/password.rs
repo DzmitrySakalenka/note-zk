@@ -6,7 +6,7 @@ use argon2::{
 };
 use rand::rngs::OsRng;
 
-use crate::{AuthError, AuthResult};
+use crate::{AuthError, AuthResult, secret};
 
 /// Tunable Argon2id password hashing parameters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +43,7 @@ pub fn hash_password(password: &str, params: HashParams) -> AuthResult<String> {
     argon2
         .hash_password(password.as_bytes(), &salt)
         .map(|hash| hash.to_string())
-        .map_err(internal_error)
+        .map_err(secret::internal_error)
 }
 
 /// Verifies a plaintext password against a PHC-format Argon2id hash.
@@ -67,15 +67,11 @@ fn argon2_with_params(params: HashParams) -> AuthResult<Argon2<'static>> {
         params.parallelism,
         None,
     )
-    .map_err(internal_error)?;
+    .map_err(secret::internal_error)?;
 
     Ok(Argon2::new(Algorithm::Argon2id, Version::V0x13, params))
 }
 
 fn generate_salt() -> SaltString {
     SaltString::generate(&mut OsRng)
-}
-
-fn internal_error(error: impl std::fmt::Display) -> AuthError {
-    AuthError::Internal(error.to_string())
 }

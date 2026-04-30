@@ -8,6 +8,8 @@ pub mod password;
 pub mod session;
 pub mod token;
 
+mod secret;
+
 pub use error::{AuthError, AuthResult};
 pub use password::{HashParams, hash_password, verify_password};
 pub use session::{

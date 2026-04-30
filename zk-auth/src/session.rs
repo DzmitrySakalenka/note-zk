@@ -1,14 +1,8 @@
 //! Web-session id issuance and validation primitives.
 
 use chrono::{DateTime, Duration, Utc};
-use data_encoding::{BASE32_NOPAD, HEXLOWER};
-use rand::{RngCore, rngs::OsRng};
-use sha2::{Digest, Sha256};
 
-use crate::{AuthError, AuthResult};
-
-const SESSION_ID_BYTES: usize = 32;
-const SESSION_ID_PLAINTEXT_LEN: usize = 52;
+use crate::{AuthError, AuthResult, secret};
 
 /// Fresh web-session material returned at session creation time.
 ///
@@ -55,7 +49,7 @@ impl Default for SessionLifetime {
 ///
 /// Returns [`AuthError::Internal`] if the operating system random source fails.
 pub fn issue_session(now: DateTime<Utc>, lifetime: SessionLifetime) -> AuthResult<IssuedSession> {
-    let plaintext_id = issue_base32_secret()?;
+    let plaintext_id = secret::issue_id()?;
     let sha256_hex = hash_session_id(&plaintext_id);
     let expires_at = now + lifetime.max_age;
 
@@ -72,7 +66,7 @@ pub fn issue_session(now: DateTime<Utc>, lifetime: SessionLifetime) -> AuthResul
 ///
 /// Returns [`AuthError::Internal`] if the operating system random source fails.
 pub fn issue_csrf_token() -> AuthResult<IssuedCsrfToken> {
-    let plaintext = issue_base32_secret()?;
+    let plaintext = secret::issue_id()?;
     let sha256_hex = hash_csrf_token(&plaintext);
 
     Ok(IssuedCsrfToken {
@@ -83,12 +77,12 @@ pub fn issue_csrf_token() -> AuthResult<IssuedCsrfToken> {
 
 /// Computes the lowercase `SHA-256(plaintext_id)` hex digest for a session id.
 pub fn hash_session_id(plaintext_id: &str) -> String {
-    sha256_hex(plaintext_id)
+    secret::sha256_hex(plaintext_id)
 }
 
 /// Computes the lowercase `SHA-256(plaintext)` hex digest for a CSRF token.
 pub fn hash_csrf_token(plaintext: &str) -> String {
-    sha256_hex(plaintext)
+    secret::sha256_hex(plaintext)
 }
 
 /// Validates that a plaintext session id matches the issuance format.
@@ -97,37 +91,5 @@ pub fn hash_csrf_token(plaintext: &str) -> String {
 ///
 /// Returns [`AuthError::InvalidSessionId`] when the id length or alphabet is invalid.
 pub fn validate_session_id_format(plaintext_id: &str) -> AuthResult<()> {
-    if plaintext_id.len() != SESSION_ID_PLAINTEXT_LEN {
-        return Err(AuthError::InvalidSessionId);
-    }
-
-    if plaintext_id
-        .bytes()
-        .all(|byte| matches!(byte, b'A'..=b'Z' | b'2'..=b'7'))
-    {
-        return Ok(());
-    }
-
-    Err(AuthError::InvalidSessionId)
-}
-
-fn issue_base32_secret() -> AuthResult<String> {
-    let mut random_bytes = [0_u8; SESSION_ID_BYTES];
-    let mut rng = OsRng;
-    rng.try_fill_bytes(&mut random_bytes)
-        .map_err(internal_error)?;
-
-    let plaintext = BASE32_NOPAD.encode(&random_bytes);
-    debug_assert_eq!(plaintext.len(), SESSION_ID_PLAINTEXT_LEN);
-
-    Ok(plaintext)
-}
-
-fn sha256_hex(value: &str) -> String {
-    let digest = Sha256::digest(value.as_bytes());
-    HEXLOWER.encode(&digest)
-}
-
-fn internal_error(error: impl std::fmt::Display) -> AuthError {
-    AuthError::Internal(error.to_string())
+    secret::validate_format(plaintext_id).map_err(|_| AuthError::InvalidSessionId)
 }
