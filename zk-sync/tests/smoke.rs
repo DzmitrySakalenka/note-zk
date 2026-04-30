@@ -47,6 +47,13 @@ fn sync_error_variants_have_expected_display_and_sources() {
     );
     assert!(unsupported.source().is_none());
 
+    let protocol = SyncError::Protocol("accepted push result missing revision".to_string());
+    assert_eq!(
+        protocol.to_string(),
+        "protocol failure: accepted push result missing revision"
+    );
+    assert!(protocol.source().is_none());
+
     let vault_write = SyncError::VaultWrite(VaultError::Io {
         path: PathBuf::from("vault/alpha.md"),
         source: io::Error::other("disk failed"),

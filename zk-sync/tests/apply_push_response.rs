@@ -193,8 +193,15 @@ fn fetch_delete_record(conn: &Connection, note_id: &str) -> DeleteRecord {
         .expect("delete-record should exist")
 }
 
-fn assert_transport_error(result: &Result<(), SyncError>) {
-    assert!(matches!(result, Err(SyncError::Transport(_))));
+fn assert_protocol_error(result: &Result<(), SyncError>) {
+    assert!(matches!(result, Err(SyncError::Protocol(_))));
+}
+
+fn assert_protocol_error_message(result: &Result<(), SyncError>, expected: &str) {
+    match result {
+        Err(SyncError::Protocol(message)) => assert_eq!(message, expected),
+        other => panic!("expected protocol error {expected:?}, got {other:?}"),
+    }
 }
 
 #[test]
@@ -492,6 +499,37 @@ fn accepted_delete_updates_delete_revision_without_touching_cursor() {
 }
 
 #[test]
+fn accepted_push_without_revision_fails_protocol() {
+    let mut connection = open_sync_connection();
+    let note_id = "01TG11006NOREVISION00000001";
+    let planned = vec![note_operation(
+        note_id,
+        "notes/no-revision.md",
+        PlannedOp::Update,
+        b"missing revision body",
+        Some(7),
+    )];
+
+    let result = apply_push_response(
+        &mut connection,
+        &device_id(),
+        &planned,
+        &response(vec![PushItemResult {
+            item_id: note_id.to_string(),
+            accepted: true,
+            conflict: false,
+            new_server_revision: None,
+            canonical_path: None,
+            message: None,
+        }]),
+        &fixed_clock(),
+    )
+    .map(|_| ());
+
+    assert_protocol_error_message(&result, "accepted push result missing revision");
+}
+
+#[test]
 fn strict_response_validation_rejects_duplicate_missing_extra_and_revisionless_results() {
     let mut connection = open_sync_connection();
     let note_id = "01TG11006NOTEPROTOCOL000001";
@@ -503,7 +541,7 @@ fn strict_response_validation_rejects_duplicate_missing_extra_and_revisionless_r
         Some(7),
     )];
 
-    assert_transport_error(
+    assert_protocol_error(
         &apply_push_response(
             &mut connection,
             &device_id(),
@@ -516,7 +554,7 @@ fn strict_response_validation_rejects_duplicate_missing_extra_and_revisionless_r
         )
         .map(|_| ()),
     );
-    assert_transport_error(
+    assert_protocol_error(
         &apply_push_response(
             &mut connection,
             &device_id(),
@@ -526,7 +564,7 @@ fn strict_response_validation_rejects_duplicate_missing_extra_and_revisionless_r
         )
         .map(|_| ()),
     );
-    assert_transport_error(
+    assert_protocol_error(
         &apply_push_response(
             &mut connection,
             &device_id(),
@@ -539,7 +577,7 @@ fn strict_response_validation_rejects_duplicate_missing_extra_and_revisionless_r
         )
         .map(|_| ()),
     );
-    assert_transport_error(
+    assert_protocol_error(
         &apply_push_response(
             &mut connection,
             &device_id(),
@@ -563,7 +601,7 @@ fn strict_response_validation_rejects_duplicate_planned_item_ids_across_item_typ
     let mut connection = open_sync_connection();
     let shared_id = "shared-id";
 
-    assert_transport_error(
+    assert_protocol_error(
         &apply_push_response(
             &mut connection,
             &device_id(),

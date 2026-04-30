@@ -1,6 +1,6 @@
 //! Push request building and response application scaffolding.
 
-use std::{collections::HashMap, io};
+use std::collections::{HashMap, hash_map::Entry};
 
 use chrono::SecondsFormat;
 use rusqlite::Connection;
@@ -74,6 +74,19 @@ struct ApplyFields<'a, Id> {
     current_path: &'a RelativePath,
 }
 
+enum PushItemOutcome<'a> {
+    Accepted {
+        new_server_revision: ServerRevision,
+        canonical_path: Option<&'a str>,
+    },
+    Conflicted {
+        message: Option<&'a str>,
+    },
+    Rejected {
+        message: Option<&'a str>,
+    },
+}
+
 /// Builds a deterministic push request from planned local operations.
 ///
 /// # Errors
@@ -109,7 +122,7 @@ pub fn build_push_request(
 ///
 /// # Errors
 ///
-/// Returns [`SyncError::Transport`] for malformed server responses,
+/// Returns [`SyncError::Protocol`] for malformed server responses,
 /// [`SyncError::ItemMissing`] for impossible local-state gaps, and
 /// [`SyncError::Index`] when transaction or repository writes fail.
 pub fn apply_push_response(
@@ -137,7 +150,7 @@ pub fn apply_push_response(
 
     for planned_operation in planned {
         let item_id = planned_item_id(planned_operation);
-        let result = result_lookup.get(item_id).copied().ok_or_else(|| {
+        let result = result_lookup.get(item_id).ok_or_else(|| {
             protocol_error(format!(
                 "validated push response lookup is missing planned item_id {item_id:?}"
             ))
@@ -301,28 +314,28 @@ fn build_planned_lookup(
 fn build_result_lookup<'a>(
     response: &'a SyncPushResponse,
     planned_lookup: &HashMap<String, &'a PlannedOperation>,
-) -> SyncResult<HashMap<&'a str, &'a PushItemResult>> {
+) -> SyncResult<HashMap<&'a str, PushItemOutcome<'a>>> {
     let mut result_lookup = HashMap::with_capacity(response.results.len());
 
     for result in &response.results {
-        if result_lookup
-            .insert(result.item_id.as_str(), result)
-            .is_some()
-        {
-            return Err(protocol_error(format!(
-                "duplicate push response item_id {:?}",
-                result.item_id
-            )));
-        }
+        match result_lookup.entry(result.item_id.as_str()) {
+            Entry::Occupied(_) => {
+                return Err(protocol_error(format!(
+                    "duplicate push response item_id {:?}",
+                    result.item_id
+                )));
+            }
+            Entry::Vacant(entry) => {
+                if !planned_lookup.contains_key(&result.item_id) {
+                    return Err(protocol_error(format!(
+                        "unexpected push response item_id {:?}",
+                        result.item_id
+                    )));
+                }
 
-        if !planned_lookup.contains_key(&result.item_id) {
-            return Err(protocol_error(format!(
-                "unexpected push response item_id {:?}",
-                result.item_id
-            )));
+                entry.insert(push_item_outcome(result)?);
+            }
         }
-
-        validate_result_shape(result)?;
     }
 
     for item_id in planned_lookup.keys() {
@@ -336,7 +349,7 @@ fn build_result_lookup<'a>(
     Ok(result_lookup)
 }
 
-fn validate_result_shape(result: &PushItemResult) -> SyncResult<()> {
+fn push_item_outcome(result: &PushItemResult) -> SyncResult<PushItemOutcome<'_>> {
     if result.accepted && result.conflict {
         return Err(protocol_error(format!(
             "push response item {:?} cannot be both accepted and conflicted",
@@ -344,20 +357,31 @@ fn validate_result_shape(result: &PushItemResult) -> SyncResult<()> {
         )));
     }
 
-    if result.accepted && result.new_server_revision.is_none() {
-        return Err(protocol_error(format!(
-            "accepted push response item {:?} is missing new_server_revision",
-            result.item_id
-        )));
+    if result.accepted {
+        let revision = result
+            .new_server_revision
+            .ok_or_else(|| protocol_error("accepted push result missing revision"))?;
+        return Ok(PushItemOutcome::Accepted {
+            new_server_revision: ServerRevision::new(revision),
+            canonical_path: result.canonical_path.as_deref(),
+        });
     }
 
-    Ok(())
+    if result.conflict {
+        return Ok(PushItemOutcome::Conflicted {
+            message: result.message.as_deref(),
+        });
+    }
+
+    Ok(PushItemOutcome::Rejected {
+        message: result.message.as_deref(),
+    })
 }
 
 fn apply_note_result(
     shared: &ApplyShared<'_>,
     planned: &NotePlannedOperation,
-    result: &PushItemResult,
+    result: &PushItemOutcome<'_>,
     outcome: &mut PushApplyOutcome,
 ) -> SyncResult<()> {
     let existing_state = SyncStateRepo::get_note_sync_state(shared.conn, &planned.note_id)?
@@ -377,18 +401,19 @@ fn apply_note_result(
     )?;
     SyncStateRepo::upsert_note_sync_state(shared.conn, &next_state)?;
 
-    if result.accepted && matches!(planned.op, PlannedOp::Delete) {
-        let revision = ServerRevision::new(
-            result
-                .new_server_revision
-                .expect("validated accepted push result should include a revision"),
-        );
-        update_delete_revision(
-            shared.conn,
-            planned.note_id.as_str(),
-            ItemType::Note,
-            &revision,
-        )?;
+    if matches!(planned.op, PlannedOp::Delete) {
+        if let PushItemOutcome::Accepted {
+            new_server_revision,
+            ..
+        } = result
+        {
+            update_delete_revision(
+                shared.conn,
+                planned.note_id.as_str(),
+                ItemType::Note,
+                new_server_revision,
+            )?;
+        }
     }
 
     record_outcome(outcome, ItemType::Note, planned.note_id.as_str(), result);
@@ -398,7 +423,7 @@ fn apply_note_result(
 fn apply_asset_result(
     shared: &ApplyShared<'_>,
     planned: &AssetPlannedOperation,
-    result: &PushItemResult,
+    result: &PushItemOutcome<'_>,
     outcome: &mut PushApplyOutcome,
 ) -> SyncResult<()> {
     let existing_state = SyncStateRepo::get_asset_sync_state(shared.conn, &planned.asset_id)?
@@ -418,18 +443,19 @@ fn apply_asset_result(
     )?;
     SyncStateRepo::upsert_asset_sync_state(shared.conn, &next_state)?;
 
-    if result.accepted && matches!(planned.op, PlannedOp::Delete) {
-        let revision = ServerRevision::new(
-            result
-                .new_server_revision
-                .expect("validated accepted push result should include a revision"),
-        );
-        update_delete_revision(
-            shared.conn,
-            planned.asset_id.as_str(),
-            ItemType::Asset,
-            &revision,
-        )?;
+    if matches!(planned.op, PlannedOp::Delete) {
+        if let PushItemOutcome::Accepted {
+            new_server_revision,
+            ..
+        } = result
+        {
+            update_delete_revision(
+                shared.conn,
+                planned.asset_id.as_str(),
+                ItemType::Asset,
+                new_server_revision,
+            )?;
+        }
     }
 
     record_outcome(outcome, ItemType::Asset, planned.asset_id.as_str(), result);
@@ -440,7 +466,7 @@ fn next_sync_state<Id: Clone>(
     existing_state: Option<SyncState<Id>>,
     fields: &ApplyFields<'_, Id>,
     device_id: &DeviceId,
-    result: &PushItemResult,
+    result: &PushItemOutcome<'_>,
     attempted_at: &str,
 ) -> SyncResult<SyncState<Id>> {
     let mut state = match existing_state {
@@ -463,40 +489,36 @@ fn next_sync_state<Id: Clone>(
     state.device_id = device_id.clone();
     let attempted_at = Some(attempted_at.to_string());
 
-    if result.accepted {
-        let new_revision = ServerRevision::new(result.new_server_revision.ok_or_else(|| {
-            protocol_error(format!(
-                "accepted push response item {:?} is missing new_server_revision",
-                fields.item_id_str
-            ))
-        })?);
-
-        state.last_local_hash = Some(fields.local_hash.clone());
-        state.last_synced_hash = Some(fields.local_hash.clone());
-        state.last_synced_path = Some(fields.current_path.clone());
-        state.last_known_server_revision = Some(new_revision);
-        state.sync_status =
-            if has_canonical_rewrite(result.canonical_path.as_deref(), fields.current_path) {
+    match result {
+        PushItemOutcome::Accepted {
+            new_server_revision,
+            canonical_path,
+        } => {
+            state.last_local_hash = Some(fields.local_hash.clone());
+            state.last_synced_hash = Some(fields.local_hash.clone());
+            state.last_synced_path = Some(fields.current_path.clone());
+            state.last_known_server_revision = Some(new_server_revision.clone());
+            state.sync_status = if has_canonical_rewrite(*canonical_path, fields.current_path) {
                 SyncStatus::PendingDownload
             } else {
                 SyncStatus::Synced
             };
-        state.pending_operation = None;
-        state.last_sync_attempt_at = attempted_at;
-        state.last_sync_error = None;
-        return Ok(state);
+            state.pending_operation = None;
+            state.last_sync_attempt_at = attempted_at;
+            state.last_sync_error = None;
+        }
+        PushItemOutcome::Conflicted { message } => {
+            state.sync_status = SyncStatus::Conflict;
+            state.last_sync_attempt_at = attempted_at;
+            state.last_sync_error = message.map(str::to_string);
+        }
+        PushItemOutcome::Rejected { message } => {
+            state.sync_status = SyncStatus::Error;
+            state.last_sync_attempt_at = attempted_at;
+            state.last_sync_error = message.map(str::to_string);
+        }
     }
 
-    if result.conflict {
-        state.sync_status = SyncStatus::Conflict;
-        state.last_sync_attempt_at = attempted_at;
-        state.last_sync_error.clone_from(&result.message);
-        return Ok(state);
-    }
-
-    state.sync_status = SyncStatus::Error;
-    state.last_sync_attempt_at = attempted_at;
-    state.last_sync_error.clone_from(&result.message);
     Ok(state)
 }
 
@@ -518,27 +540,23 @@ fn record_outcome(
     outcome: &mut PushApplyOutcome,
     item_type: ItemType,
     item_id: &str,
-    result: &PushItemResult,
+    result: &PushItemOutcome<'_>,
 ) {
-    if result.accepted {
-        outcome.accepted += 1;
-        return;
-    }
-
-    if result.conflict {
-        outcome.conflicts.push(ConflictedItem {
+    match result {
+        PushItemOutcome::Accepted { .. } => {
+            outcome.accepted += 1;
+        }
+        PushItemOutcome::Conflicted { message } => outcome.conflicts.push(ConflictedItem {
             item_type,
             item_id: item_id.to_string(),
-            message: result.message.clone(),
-        });
-        return;
+            message: message.map(str::to_string),
+        }),
+        PushItemOutcome::Rejected { message } => outcome.errors.push(FailedItem {
+            item_type,
+            item_id: item_id.to_string(),
+            message: message.map(str::to_string),
+        }),
     }
-
-    outcome.errors.push(FailedItem {
-        item_type,
-        item_id: item_id.to_string(),
-        message: result.message.clone(),
-    });
 }
 
 fn planned_item_id(planned: &PlannedOperation) -> &str {
@@ -565,6 +583,6 @@ fn format_attempt_timestamp(clock: &dyn Clock) -> String {
     clock.now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
-fn protocol_error(message: String) -> SyncError {
-    SyncError::Transport(Box::new(io::Error::other(message)))
+fn protocol_error(message: impl Into<String>) -> SyncError {
+    SyncError::Protocol(message.into())
 }

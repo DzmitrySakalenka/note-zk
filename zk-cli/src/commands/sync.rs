@@ -88,6 +88,7 @@ pub fn run(args: &SyncArgs, shared: &SharedFlags) -> Result<i32, CliError> {
 fn map_sync_workflow_error(error: AppError) -> CliError {
     match error {
         AppError::Sync(SyncError::Transport(source)) => CliError::Request(source.to_string()),
+        AppError::Sync(SyncError::Protocol(message)) => CliError::Request(message),
         other => CliError::Internal(
             anyhow::Error::new(other).context("while attempting to run sync workflow"),
         ),
