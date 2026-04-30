@@ -447,7 +447,7 @@ fn rotate_with_unknown_token_id_returns_not_found_and_does_not_issue() {
 }
 
 #[test]
-fn rotate_failure_in_issue_rolls_back_revoke() {
+fn rotate_with_unknown_device_id_rolls_back_revoke() {
     let mut connection = setup_connection();
     let issued = issue_device_token(
         &connection,
@@ -468,14 +468,14 @@ fn rotate_failure_in_issue_rolls_back_revoke() {
         &spec,
         parse_timestamp("2026-04-29T13:00:00Z"),
     )
-    .expect_err("foreign-key failure should roll back rotation");
+    .expect_err("unknown device id should roll back rotation");
     let original = DeviceTokenRepo::lookup_by_hash(&connection, &old_hash)
         .expect("original lookup should succeed")
         .expect("original token should remain active");
     let active_tokens =
         DeviceTokenRepo::list_all_active(&connection).expect("active token list should succeed");
 
-    assert!(matches!(error, ServerError::Database(_)));
+    assert!(matches!(error, ServerError::NotFound(message) if message == "device id"));
     assert_eq!(original.token_id, issued.token_id);
     assert_eq!(active_tokens.len(), 1);
     assert_eq!(active_tokens[0].token_id, issued.token_id);

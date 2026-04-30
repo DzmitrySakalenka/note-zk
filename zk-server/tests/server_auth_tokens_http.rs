@@ -289,6 +289,37 @@ async fn issue_returns_plaintext_once_and_persists_hash() {
 }
 
 #[tokio::test]
+async fn issue_token_with_unknown_device_id_returns_404() {
+    let harness = build_harness();
+    insert_user(&harness.state);
+    let session = admin_session(&harness.state);
+
+    let response = build_router(harness.state)
+        .oneshot(issue_token_request(
+            "Laptop",
+            Some("01K6F7D0Z9Q0Y8X7W6V5T4S3R2"),
+            &[AuthScope::Sync],
+            Some(&session),
+            Some(&session.csrf_token),
+        ))
+        .await
+        .expect("issue token request should succeed");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let json_body = response_json(response).await;
+    let body_text = json_body.to_string();
+
+    assert_eq!(
+        json_body,
+        json!({"error": {"code": "not_found", "message": "device id"}})
+    );
+    assert!(!body_text.contains("FOREIGN KEY"));
+    assert!(!body_text.contains("foreign key"));
+    assert!(!body_text.contains("database"));
+    assert!(!body_text.contains("internal"));
+}
+
+#[tokio::test]
 async fn issue_without_admin_scope_returns_403() {
     let harness = build_harness();
     insert_user(&harness.state);

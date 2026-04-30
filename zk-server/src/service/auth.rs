@@ -14,8 +14,8 @@ use zk_domain::{AuthScope, id::NoteId};
 use crate::{
     ServerError, ServerResult,
     repo::{
-        DeviceTokenInsert, DeviceTokenRepo, UserPasswordRow, UserRepo, WebSessionInsert,
-        WebSessionRepo,
+        DeviceRepo, DeviceTokenInsert, DeviceTokenRepo, UserPasswordRow, UserRepo,
+        WebSessionInsert, WebSessionRepo,
     },
 };
 
@@ -173,13 +173,14 @@ pub fn verify_password(
 /// # Errors
 ///
 /// Returns [`ServerError::InvalidRequest`] for invalid label or empty scopes,
-/// or [`ServerError`] if token issuance or persistence fails.
+/// [`ServerError::NotFound`] for an unknown device id, or [`ServerError`] if
+/// token issuance or persistence fails.
 pub fn issue_device_token(
     conn: &Connection,
     spec: &IssueTokenSpec,
     now: DateTime<Utc>,
 ) -> ServerResult<IssuedToken> {
-    validate_issue_token_spec(spec)?;
+    validate_issue_token_spec(conn, spec)?;
 
     let raw_token = issue_raw_device_token().map_err(map_internal_auth_error)?;
     let token_id = NoteId::generate().to_string();
@@ -370,9 +371,22 @@ fn validate_password(password: &str) -> ServerResult<()> {
     Ok(())
 }
 
-fn validate_issue_token_spec(spec: &IssueTokenSpec) -> ServerResult<()> {
+fn validate_issue_token_spec(conn: &Connection, spec: &IssueTokenSpec) -> ServerResult<()> {
     validate_token_label(&spec.label)?;
-    validate_token_scopes(&spec.scopes)
+    validate_token_scopes(&spec.scopes)?;
+    validate_device_id_exists(conn, spec.device_id.as_deref())
+}
+
+fn validate_device_id_exists(conn: &Connection, device_id: Option<&str>) -> ServerResult<()> {
+    let Some(device_id) = device_id else {
+        return Ok(());
+    };
+
+    if DeviceRepo::exists(conn, device_id)? {
+        return Ok(());
+    }
+
+    Err(ServerError::NotFound("device id".to_string()))
 }
 
 fn validate_token_label(label: &str) -> ServerResult<()> {
