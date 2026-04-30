@@ -115,6 +115,41 @@ async fn server_error_variants_map_to_expected_status_code_and_message() {
 }
 
 #[tokio::test]
+async fn internal_error_response_redacts_inner_message() {
+    let secret = "secret-database-path-or-credential";
+
+    let (status, content_type, code, message, body) =
+        response_tuple(ServerError::Internal(Box::new(io::Error::other(secret)))).await;
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(content_type, "application/json");
+    assert_eq!(code, "internal_error");
+    assert_eq!(message, "internal error");
+    assert!(body.contains("\"error\""));
+    assert!(!body.contains(secret));
+}
+
+#[tokio::test]
+async fn database_error_response_redacts_inner_message() {
+    let sql_fragment = "SELECT * FROM secrets WHERE api_key = 'secret-sql-fragment'";
+    let database_error = rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+        Some(sql_fragment.to_string()),
+    );
+
+    let (status, content_type, code, message, body) =
+        response_tuple(ServerError::Database(database_error)).await;
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(content_type, "application/json");
+    assert_eq!(code, "internal_error");
+    assert_eq!(message, "internal error");
+    assert!(body.contains("\"error\""));
+    assert!(!body.contains(sql_fragment));
+    assert!(!body.contains("secret-sql-fragment"));
+}
+
+#[tokio::test]
 async fn database_errors_are_redacted_and_return_json() {
     let (status, content_type, code, message, body) =
         response_tuple(ServerError::Database(rusqlite::Error::InvalidQuery)).await;
