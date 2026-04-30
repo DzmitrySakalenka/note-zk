@@ -21,7 +21,9 @@ sha2 = "0.11.0"
 tar = "0.4.45"
 thiserror = "2.0.18"
 tracing = "0.1.44"
+ulid = { version = "1.2.1", features = ["serde"] }
 walkdir = "2.5.0"
+zk-domain = { version = "0.1.0", path = "../zk-domain" }
 zstd = "0.13.3"
 
 [dev-dependencies]

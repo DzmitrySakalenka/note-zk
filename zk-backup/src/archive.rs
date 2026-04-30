@@ -24,6 +24,8 @@ pub struct ArchiveSpec {
     pub effective_config_toml: Option<String>,
     /// Final `.tar.zst` archive path.
     pub output_path: PathBuf,
+    /// Whether non-markdown vault files are included as assets.
+    pub include_attachments: bool,
 }
 
 /// Counts and integrity metadata for one completed archive build.
@@ -73,7 +75,7 @@ fn build_archive_to_temp(
     spec: &ArchiveSpec,
     temp_archive_path: &Path,
 ) -> BackupResult<ArchiveBuildSummary> {
-    let vault_entries = collect_vault_entries(&spec.vault_path)?;
+    let vault_entries = collect_vault_entries(&spec.vault_path, spec.include_attachments)?;
     let temp_file = fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -124,7 +126,10 @@ fn build_archive_to_temp(
     })
 }
 
-fn collect_vault_entries(vault_path: &Path) -> BackupResult<Vec<VaultArchiveEntry>> {
+fn collect_vault_entries(
+    vault_path: &Path,
+    include_attachments: bool,
+) -> BackupResult<Vec<VaultArchiveEntry>> {
     let mut entries = Vec::new();
     for entry_result in WalkDir::new(vault_path)
         .into_iter()
@@ -139,15 +144,19 @@ fn collect_vault_entries(vault_path: &Path) -> BackupResult<Vec<VaultArchiveEntr
             .path()
             .strip_prefix(vault_path)
             .map_err(|error| BackupError::Io(io::Error::other(error)))?;
+        let is_note = entry
+            .path()
+            .extension()
+            .and_then(|extension| extension.to_str())
+            == Some("md");
+        if !include_attachments && !is_note {
+            continue;
+        }
         let archive_path = Path::new("vault").join(relative_path);
         entries.push(VaultArchiveEntry {
             source_path: entry.path().to_path_buf(),
             archive_path,
-            is_note: entry
-                .path()
-                .extension()
-                .and_then(|extension| extension.to_str())
-                == Some("md"),
+            is_note,
         });
     }
 

@@ -155,6 +155,7 @@ fn spec(vault_path: &Path, output_path: &Path) -> ArchiveSpec {
         server_db_path: None,
         effective_config_toml: None,
         output_path: output_path.to_path_buf(),
+        include_attachments: true,
     }
 }
 
