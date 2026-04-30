@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 age = "0.11.3"
 chrono = { version = "0.4.44", features = ["serde"] }
+cron = "0.16.0"
 data-encoding = "2.11.0"
 rusqlite = "0.39.0"
 secrecy = "0.10.3"
