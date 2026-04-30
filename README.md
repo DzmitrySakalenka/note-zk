@@ -114,6 +114,9 @@ Put the 64-character output in `stub_auth_token_sha256_hex` or
 `ZK_SERVER_TOKEN_SHA256`. Put the original bearer token, not the hash,
 in the client environment variable.
 
+Deprecated; use `zk-server admin create-user` + `zk-cli auth issue-token` instead.
+The stub path will be removed.
+
 Configure a vault client in `<vault>/.zk/config.toml`:
 
 ```toml
@@ -132,6 +135,34 @@ ZK_DEVICE_TOKEN=<bearer-token> zk-cli sync --vault <path>
 
 `--server-url` and `--device-id` can override the client config for a
 single invocation.
+
+### Authentication
+
+The auth contract: Argon2id password users with browser session cookies
+(`__Host-zk_session`, HTTP-only, SameSite=Lax) and revocable scoped
+device tokens for sync clients. `stub_auth_token_sha256_hex` config
+path remains as a deprecated dev escape hatch and emits a startup warning.
+
+Bootstrap a fresh deployment with:
+
+```bash
+zk-server admin create-user --username admin
+# password is read from stdin
+```
+
+Issue a sync device token from any operator workstation:
+
+```bash
+zk-cli auth issue-token \
+    --server-url https://zk.example.com \
+    --username admin \
+    --label laptop \
+    --scopes sync
+```
+
+Store the printed plaintext in `ZK_DEVICE_TOKEN` on the device. The
+server only keeps the SHA-256 hash; the plaintext cannot be retrieved
+later.
 
 ## Main Commands
 

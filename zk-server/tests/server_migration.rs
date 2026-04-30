@@ -4,6 +4,8 @@
 use rusqlite::Connection;
 use zk_server::{ServerError, migration::ensure_schema};
 
+const CURRENT_SCHEMA_VERSION: i64 = 2;
+
 const EXPECTED_V1_TABLES: &[&str] = &[
     "devices",
     "notes",
@@ -21,6 +23,15 @@ const EXPECTED_V1_INDEXES: &[&str] = &[
     "idx_assets_path",
     "idx_delete_records_retention",
     "idx_device_tokens_hash",
+];
+
+const EXPECTED_V2_TABLES: &[&str] = &["users", "web_sessions"];
+
+const EXPECTED_V2_INDEXES: &[&str] = &[
+    "idx_users_username",
+    "idx_web_sessions_user",
+    "idx_web_sessions_expires",
+    "idx_device_tokens_device",
 ];
 
 fn query_table_count(connection: &Connection, table_name: &str) -> i64 {
@@ -51,6 +62,64 @@ fn query_pragma_int(connection: &Connection, pragma_name: &str) -> i64 {
         .expect("pragma query should succeed")
 }
 
+fn query_schema_version(connection: &Connection) -> i64 {
+    connection
+        .query_row(
+            "SELECT version FROM server_schema_version WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("schema version query should succeed")
+}
+
+fn create_v1_device_token_schema(connection: &Connection) {
+    connection
+        .execute(
+            "CREATE TABLE server_schema_version (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                version INTEGER NOT NULL
+            )",
+            [],
+        )
+        .expect("schema version table should be created");
+    connection
+        .execute(
+            "CREATE TABLE devices (
+                device_id TEXT PRIMARY KEY,
+                device_name TEXT NOT NULL,
+                platform TEXT,
+                app_version TEXT,
+                capabilities_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL
+            )",
+            [],
+        )
+        .expect("devices table should be created");
+    connection
+        .execute(
+            "CREATE TABLE device_tokens (
+                token_id TEXT PRIMARY KEY,
+                device_id TEXT,
+                label TEXT NOT NULL,
+                token_sha256_hex TEXT NOT NULL UNIQUE,
+                scopes_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                last_used_at TEXT,
+                revoked_at TEXT,
+                FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE SET NULL
+            )",
+            [],
+        )
+        .expect("device tokens table should be created");
+    connection
+        .execute(
+            "INSERT INTO server_schema_version (id, version) VALUES (1, 1)",
+            [],
+        )
+        .expect("V1 schema version should be inserted");
+}
+
 #[test]
 fn ensure_schema_creates_v1_tables_and_version_row() {
     let connection = Connection::open_in_memory().expect("in-memory database should open");
@@ -69,14 +138,7 @@ fn ensure_schema_creates_v1_tables_and_version_row() {
     }
     assert_eq!(query_table_count(&connection, "server_schema_version"), 1);
 
-    let schema_version: i64 = connection
-        .query_row(
-            "SELECT version FROM server_schema_version WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )
-        .expect("schema version query should succeed");
-    assert_eq!(schema_version, 1);
+    assert_eq!(query_schema_version(&connection), CURRENT_SCHEMA_VERSION);
 }
 
 #[test]
@@ -98,7 +160,32 @@ fn ensure_schema_creates_v1_indexes() {
 }
 
 #[test]
-fn ensure_schema_is_idempotent_for_v1_schema() {
+fn ensure_schema_creates_v2_tables_and_indexes() {
+    let connection = Connection::open_in_memory().expect("in-memory database should open");
+    connection
+        .pragma_update(None, "foreign_keys", true)
+        .expect("foreign keys pragma should be enabled");
+
+    ensure_schema(&connection).expect("schema migration should succeed");
+
+    for table_name in EXPECTED_V2_TABLES {
+        assert_eq!(
+            query_table_count(&connection, table_name),
+            1,
+            "expected table {table_name} to exist",
+        );
+    }
+    for index_name in EXPECTED_V2_INDEXES {
+        assert_eq!(
+            query_index_count(&connection, index_name),
+            1,
+            "expected index {index_name} to exist",
+        );
+    }
+}
+
+#[test]
+fn ensure_schema_is_idempotent_for_current_schema() {
     let connection = Connection::open_in_memory().expect("in-memory database should open");
     connection
         .pragma_update(None, "foreign_keys", true)
@@ -122,7 +209,7 @@ fn ensure_schema_is_idempotent_for_v1_schema() {
         )
         .expect("schema version row count query should succeed");
 
-    assert_eq!(schema_version, 1);
+    assert_eq!(schema_version, CURRENT_SCHEMA_VERSION);
     assert_eq!(version_row_count, 1);
 }
 
@@ -206,6 +293,107 @@ fn sync_events_event_seq_autoincrements_monotonically() {
 }
 
 #[test]
+fn migrating_from_v1_creates_users_table() {
+    let connection = Connection::open_in_memory().expect("in-memory database should open");
+    create_v1_device_token_schema(&connection);
+
+    ensure_schema(&connection).expect("V1 to V2 migration should succeed");
+
+    assert_eq!(query_schema_version(&connection), CURRENT_SCHEMA_VERSION);
+    for table_name in EXPECTED_V2_TABLES {
+        assert_eq!(
+            query_table_count(&connection, table_name),
+            1,
+            "expected table {table_name} to exist",
+        );
+    }
+    for index_name in EXPECTED_V2_INDEXES {
+        assert_eq!(
+            query_index_count(&connection, index_name),
+            1,
+            "expected index {index_name} to exist",
+        );
+    }
+}
+
+#[test]
+fn migrating_v1_db_with_data_preserves_rows() {
+    let connection = Connection::open_in_memory().expect("in-memory database should open");
+    create_v1_device_token_schema(&connection);
+    connection
+        .execute(
+            "INSERT INTO devices (
+                device_id,
+                device_name,
+                platform,
+                app_version,
+                created_at,
+                last_seen_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            (
+                "device-1",
+                "Laptop",
+                "macos",
+                "0.1.0",
+                "2026-04-29T12:00:00Z",
+                "2026-04-29T12:00:00Z",
+            ),
+        )
+        .expect("device fixture should be inserted");
+    connection
+        .execute(
+            "INSERT INTO device_tokens (
+                token_id,
+                device_id,
+                label,
+                token_sha256_hex,
+                scopes_json,
+                created_at,
+                last_used_at,
+                revoked_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            (
+                "token-1",
+                "device-1",
+                "Laptop token",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                r#"["sync"]"#,
+                "2026-04-29T12:00:00Z",
+                Option::<String>::None,
+                Option::<String>::None,
+            ),
+        )
+        .expect("device token fixture should be inserted");
+
+    ensure_schema(&connection).expect("V1 to V2 migration should succeed");
+
+    let token_rows: Vec<(String, String, String)> = {
+        let mut statement = connection
+            .prepare(
+                "SELECT token_id, device_id, token_sha256_hex
+                 FROM device_tokens
+                 ORDER BY token_id",
+            )
+            .expect("device token query should prepare");
+        let rows = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .expect("device token query should execute");
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .expect("device token rows should decode")
+    };
+
+    assert_eq!(
+        token_rows,
+        vec![(
+            "token-1".to_string(),
+            "device-1".to_string(),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+        )]
+    );
+}
+
+#[test]
 fn ensure_schema_rejects_future_server_schema_versions() {
     let connection = Connection::open_in_memory().expect("in-memory database should open");
 
@@ -220,7 +408,7 @@ fn ensure_schema_rejects_future_server_schema_versions() {
         .expect("schema version table should be created");
     connection
         .execute(
-            "INSERT INTO server_schema_version (id, version) VALUES (1, 2)",
+            "INSERT INTO server_schema_version (id, version) VALUES (1, 3)",
             [],
         )
         .expect("future schema version should be inserted");

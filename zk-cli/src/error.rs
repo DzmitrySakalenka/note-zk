@@ -8,6 +8,8 @@ pub const EXIT_OK: i32 = 0;
 pub const EXIT_ISSUES: i32 = 1;
 /// CLI exit code for usage and bootstrap failures.
 pub const EXIT_USAGE: i32 = 2;
+/// CLI exit code for expected request failures.
+pub const EXIT_REQUEST: i32 = 2;
 
 /// Error categories surfaced by the CLI entry point.
 #[derive(Debug)]
@@ -20,6 +22,8 @@ pub enum CliError {
     Issues,
     /// The command failed for an expected user-facing lifecycle reason.
     Issue(String),
+    /// An outbound request failed or returned an expected API error.
+    Request(String),
     /// The command failed unexpectedly.
     Internal(anyhow::Error),
 }
@@ -28,6 +32,7 @@ impl fmt::Display for CliError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Argument(message) | Self::Issue(message) => formatter.write_str(message),
+            Self::Request(message) => write!(formatter, "Error: {message}"),
             Self::Bootstrap(source) => {
                 formatter.write_str("bootstrap error: ")?;
                 for (index, cause) in source.chain().enumerate() {
@@ -49,6 +54,7 @@ impl fmt::Display for CliError {
 pub fn exit_code(error: &CliError) -> i32 {
     match error {
         CliError::Argument(_) | CliError::Bootstrap(_) => EXIT_USAGE,
+        CliError::Request(_) => EXIT_REQUEST,
         CliError::Issues | CliError::Issue(_) | CliError::Internal(_) => EXIT_ISSUES,
     }
 }

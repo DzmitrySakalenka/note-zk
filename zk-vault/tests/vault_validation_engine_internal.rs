@@ -11,14 +11,14 @@ pub use zk_vault::{
 
 #[allow(dead_code)]
 mod validate_impl {
-    include!("../src/validate.rs");
+    include!("../src/validate/mod.rs");
 
     pub(crate) fn tg8_016_rules() -> Vec<Box<dyn ValidationRule>> {
         vec![
-            Box::new(InvalidFrontmatterRule),
-            Box::new(UnresolvedLinkRule),
-            Box::new(AmbiguousLinkRule),
-            Box::new(BrokenAssetRefRule),
+            Box::new(rules::invalid_frontmatter::Rule),
+            Box::new(rules::unresolved_link::Rule),
+            Box::new(rules::ambiguous_link::Rule),
+            Box::new(rules::broken_asset_ref::Rule),
         ]
     }
 }
@@ -180,7 +180,7 @@ fn disabled_rule_is_skipped_using_stub_rule() {
         &scan_result,
         &parsed_indexes,
         &config,
-        rules,
+        &rules,
     );
 
     assert!(report.findings.is_empty());
@@ -212,7 +212,7 @@ fn severity_override_changes_finding_level_using_stub_rule() {
         &scan_result,
         &parsed_indexes,
         &config,
-        rules,
+        &rules,
     );
 
     assert_eq!(report.findings.len(), 1);
@@ -247,7 +247,7 @@ fn engine_runs_note_rules_per_note_and_vault_rules_once() {
         &scan_result,
         &parsed_indexes,
         &config,
-        rules,
+        &rules,
     );
 
     assert_eq!(report.findings.len(), 3);
@@ -319,7 +319,7 @@ fn tg8_016_rules_emit_expected_findings_for_each_new_rule() {
         &scan_result,
         &parsed_indexes,
         &config,
-        validate_impl::tg8_016_rules(),
+        &validate_impl::tg8_016_rules(),
     );
 
     assert!(report.findings.iter().any(|finding| {
@@ -403,7 +403,7 @@ fn tg8_016_rules_respect_severity_overrides() {
         &scan_result,
         &parsed_indexes,
         &config,
-        validate_impl::tg8_016_rules(),
+        &validate_impl::tg8_016_rules(),
     );
 
     assert!(report.findings.iter().any(|finding| {

@@ -80,6 +80,26 @@ const CREATE_TABLE_DEVICE_TOKENS: &str = r"CREATE TABLE device_tokens (
   FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE SET NULL
 )";
 
+const CREATE_TABLE_USERS: &str = r"CREATE TABLE users (
+  user_id TEXT PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  disabled_at TEXT
+)";
+
+const CREATE_TABLE_WEB_SESSIONS: &str = r"CREATE TABLE web_sessions (
+  session_id_sha256_hex TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  csrf_token_sha256_hex TEXT NOT NULL,
+  scopes_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  revoked_at TEXT,
+  FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
+)";
+
 const CREATE_INDEX_SYNC_EVENTS_SEQ: &str =
     "CREATE INDEX idx_sync_events_seq ON sync_events(event_seq)";
 const CREATE_INDEX_SYNC_EVENTS_ITEM: &str =
@@ -92,6 +112,14 @@ const CREATE_INDEX_DELETE_RECORDS_RETENTION: &str =
     "CREATE INDEX idx_delete_records_retention ON delete_records(retention_until)";
 const CREATE_INDEX_DEVICE_TOKENS_HASH: &str =
     "CREATE INDEX idx_device_tokens_hash ON device_tokens(token_sha256_hex)";
+const CREATE_INDEX_USERS_USERNAME: &str =
+    "CREATE UNIQUE INDEX idx_users_username ON users(username)";
+const CREATE_INDEX_WEB_SESSIONS_USER: &str =
+    "CREATE INDEX idx_web_sessions_user ON web_sessions(user_id) WHERE revoked_at IS NULL";
+const CREATE_INDEX_WEB_SESSIONS_EXPIRES: &str =
+    "CREATE INDEX idx_web_sessions_expires ON web_sessions(expires_at) WHERE revoked_at IS NULL";
+const CREATE_INDEX_DEVICE_TOKENS_DEVICE: &str =
+    "CREATE INDEX idx_device_tokens_device ON device_tokens(device_id) WHERE revoked_at IS NULL";
 
 pub(crate) const V1_TABLE_DDL: &[&str] = &[
     CREATE_TABLE_DEVICES,
@@ -110,4 +138,13 @@ pub(crate) const V1_INDEX_DDL: &[&str] = &[
     CREATE_INDEX_ASSETS_PATH,
     CREATE_INDEX_DELETE_RECORDS_RETENTION,
     CREATE_INDEX_DEVICE_TOKENS_HASH,
+];
+
+pub(crate) const V2_TABLE_DDL: &[&str] = &[CREATE_TABLE_USERS, CREATE_TABLE_WEB_SESSIONS];
+
+pub(crate) const V2_INDEX_DDL: &[&str] = &[
+    CREATE_INDEX_USERS_USERNAME,
+    CREATE_INDEX_WEB_SESSIONS_USER,
+    CREATE_INDEX_WEB_SESSIONS_EXPIRES,
+    CREATE_INDEX_DEVICE_TOKENS_DEVICE,
 ];

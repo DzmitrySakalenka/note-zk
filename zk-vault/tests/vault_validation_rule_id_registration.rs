@@ -10,7 +10,7 @@ pub use zk_vault::{
 
 #[allow(dead_code)]
 mod validate_impl {
-    include!("../src/validate.rs");
+    include!("../src/validate/mod.rs");
 }
 
 use zk_domain::{
@@ -134,7 +134,7 @@ fn disabled_rules_parse_new_rule_ids() {
         &scan_result,
         &parsed_indexes,
         &config,
-        rules,
+        &rules,
     );
 
     assert!(report.findings.is_empty());
@@ -186,7 +186,7 @@ fn severity_overrides_parse_new_rule_ids() {
         &scan_result,
         &parsed_indexes,
         &config,
-        rules,
+        &rules,
     );
 
     assert_eq!(report.findings.len(), 5);
@@ -243,7 +243,7 @@ fn summary_sort_order_places_new_rule_ids_after_id_format_suspicious() {
         &scan_result,
         &parsed_indexes,
         &config,
-        rules,
+        &rules,
     );
 
     assert_eq!(

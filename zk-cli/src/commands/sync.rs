@@ -5,11 +5,12 @@ use std::{io, path::Path};
 use anyhow::Context;
 use rusqlite::Connection;
 use zk_app::{
-    BootstrapOutcome, Clock, DeviceId, PullApplyOutcome, PushApplyOutcome, RegisterDeviceRequest,
-    SyncContext, bootstrap, get_device_sync_status, plan_and_push, pull_and_apply, register_device,
+    AppError, BootstrapOutcome, Clock, DeviceId, PullApplyOutcome, PushApplyOutcome,
+    RegisterDeviceRequest, SyncContext, bootstrap, get_device_sync_status, plan_and_push,
+    pull_and_apply, register_device,
 };
 use zk_app::{RelativePath, SystemClock};
-use zk_sync::HttpTransport;
+use zk_sync::{HttpTransport, SyncError};
 
 use crate::{
     bootstrap::{
@@ -65,8 +66,7 @@ pub fn run(args: &SyncArgs, shared: &SharedFlags) -> Result<i32, CliError> {
             !device_status.registered,
             should_bootstrap,
         ))
-        .context("while attempting to run sync workflow")
-        .map_err(CliError::Internal)?;
+        .map_err(map_sync_workflow_error)?;
 
     match OutputMode::from(args.json) {
         OutputMode::Human => {
@@ -83,6 +83,16 @@ pub fn run(args: &SyncArgs, shared: &SharedFlags) -> Result<i32, CliError> {
     .map_err(CliError::Internal)?;
 
     Ok(exit_code_for(&payload))
+}
+
+fn map_sync_workflow_error(error: AppError) -> CliError {
+    match error {
+        AppError::Sync(SyncError::Transport(source)) => CliError::Request(source.to_string()),
+        AppError::Sync(SyncError::Protocol(message)) => CliError::Request(message),
+        other => CliError::Internal(
+            anyhow::Error::new(other).context("while attempting to run sync workflow"),
+        ),
+    }
 }
 
 struct SyncRunContext<'a> {

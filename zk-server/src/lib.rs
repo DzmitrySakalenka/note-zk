@@ -3,7 +3,9 @@
 #![cfg_attr(test, allow(unused_crate_dependencies))]
 #![doc = "HTTP server for the filesystem-first knowledge system. Hosts sync endpoints and supporting services."]
 
+mod admin;
 pub mod auth;
+mod cli;
 pub mod config;
 pub mod db;
 pub mod error;
@@ -29,6 +31,17 @@ pub use state::{bootstrap, bootstrap_with_config, ServerState};
 /// Returns [`ServerError`] when config loading, tracing setup, bootstrap, or
 /// HTTP serving fails.
 pub fn run() -> ServerResult<()> {
+    use clap::Parser;
+
+    let cli = cli::Cli::parse();
+
+    match cli.command_or_default() {
+        cli::Command::Serve => run_serve(),
+        cli::Command::Admin(command) => admin::dispatch(command),
+    }
+}
+
+fn run_serve() -> ServerResult<()> {
     let config = config::ServerConfig::load()?;
     initialize_tracing(&config.log_filter)?;
 
@@ -57,8 +70,10 @@ fn initialize_tracing(log_filter: &str) -> ServerResult<()> {
 }
 
 fn warn_if_auth_disabled(state: &state::ServerState) -> ServerResult<()> {
-    if state.config().stub_auth_token_sha256_hex.is_none() && !auth::device_tokens_exist(state)? {
-        tracing::warn!("auth disabled: no stub token configured and no device_tokens rows present");
+    if auth::auth_disabled(state)? {
+        tracing::warn!(
+            "auth disabled: no stub token configured and no users or device_tokens rows present"
+        );
     }
 
     Ok(())

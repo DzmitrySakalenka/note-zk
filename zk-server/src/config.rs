@@ -78,11 +78,23 @@ pub enum ConfigError {
         /// Raw retention-day value that failed validation.
         value: u32,
     },
+    /// The trash-retention env override was not a valid unsigned integer.
+    #[error("invalid trash retention days '{raw}': not a valid number")]
+    MalformedTrashRetentionDaysEnv {
+        /// Raw env override value that failed to parse.
+        raw: String,
+    },
     /// The configured maximum sync batch size was outside the accepted range.
     #[error("invalid max batch size '{value}': expected a value from 1 to 100000")]
     InvalidMaxBatchSize {
         /// Raw max-batch-size value that failed validation.
         value: u32,
+    },
+    /// The max-batch-size env override was not a valid unsigned integer.
+    #[error("invalid max batch size '{raw}': not a valid number")]
+    MalformedMaxBatchSizeEnv {
+        /// Raw env override value that failed to parse.
+        raw: String,
     },
 }
 
@@ -269,13 +281,17 @@ fn parse_listen_addr(value: &str) -> ConfigResult<SocketAddr> {
 fn parse_trash_retention_days(value: &str) -> ConfigResult<u32> {
     value
         .parse::<u32>()
-        .map_err(|_| ConfigError::InvalidTrashRetentionDays { value: 0 })
+        .map_err(|_| ConfigError::MalformedTrashRetentionDaysEnv {
+            raw: value.to_string(),
+        })
 }
 
 fn parse_max_batch_size(value: &str) -> ConfigResult<u32> {
     value
         .parse::<u32>()
-        .map_err(|_| ConfigError::InvalidMaxBatchSize { value: 0 })
+        .map_err(|_| ConfigError::MalformedMaxBatchSizeEnv {
+            raw: value.to_string(),
+        })
 }
 
 fn expand_tilde(path: PathBuf) -> PathBuf {

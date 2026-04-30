@@ -20,6 +20,9 @@ pub struct Cli {
 /// Phase 1 command set exposed by the CLI.
 #[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
 pub enum Command {
+    /// Authenticate against a running server for operator tasks.
+    #[command(subcommand)]
+    Auth(AuthCommand),
     /// Scan the vault and optionally normalize it.
     Scan(ScanArgs),
     /// Summarize vault and index health (full vault scan + DB read; run scan --write to refresh DB-side counts).
@@ -36,6 +39,27 @@ pub enum Command {
     Sync(SyncArgs),
     /// Resolve one server-side sync conflict explicitly.
     ResolveConflict(ResolveConflictArgs),
+}
+
+/// Authentication command set exposed by the CLI.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum AuthCommand {
+    /// Log in with an admin password and issue a one-time device token.
+    IssueToken(IssueTokenArgs),
+}
+
+/// Arguments for `auth issue-token`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct IssueTokenArgs {
+    /// Admin login username.
+    #[arg(long)]
+    pub username: String,
+    /// Operator-visible label for the issued token.
+    #[arg(long)]
+    pub label: String,
+    /// Comma-separated authorization scopes for the issued token.
+    #[arg(long, default_value = "sync")]
+    pub scopes: String,
 }
 
 /// Shared per-invocation flags that later map onto `CliOverrides`.

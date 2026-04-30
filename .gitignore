@@ -24,7 +24,8 @@ target
 .env
 tmp/
 .vscode/*
-.tasks/*
+.tasks/.local/
+!.tasks/*.md
 
 # App-generated
 *.pending-snap

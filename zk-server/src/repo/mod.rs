@@ -6,7 +6,10 @@ mod deletes;
 mod devices;
 mod events;
 mod notes;
+mod sessions;
+mod timestamps;
 mod tokens;
+mod users;
 
 pub use assets::{AssetRow, AssetsRepo};
 pub use cursors::DeviceCursorRepo;
@@ -14,4 +17,6 @@ pub use deletes::{DeleteRecordRow, DeleteRecordsRepo};
 pub use devices::{DeviceRepo, DeviceRow};
 pub use events::{NewSyncEvent, SyncEventRow, SyncEventsRepo};
 pub use notes::{NoteRow, NotesRepo};
-pub use tokens::{DeviceTokenRepo, DeviceTokenRow};
+pub use sessions::{WebSessionInsert, WebSessionRepo, WebSessionRow};
+pub use tokens::{DeviceTokenInsert, DeviceTokenRepo, DeviceTokenRow};
+pub use users::{UserPasswordRow, UserRepo, UserRow};

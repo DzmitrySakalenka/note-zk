@@ -153,6 +153,62 @@ max_batch_size = 500
 }
 
 #[test]
+fn malformed_trash_retention_env_reports_raw_value() {
+    let env = EnvGuard::new();
+    env.remove("ZK_SERVER_CONFIG");
+    env.remove("ZK_SERVER_DATABASE_PATH");
+    env.remove("ZK_SERVER_LISTEN_ADDR");
+    env.remove("ZK_SERVER_LOG_FILTER");
+    env.remove("ZK_SERVER_TOKEN_SHA256");
+    env.remove("ZK_SERVER_MAX_BATCH_SIZE");
+    env.remove("XDG_CONFIG_HOME");
+
+    let root = unique_test_dir("server-config-malformed-trash-retention-env");
+    let home_dir = root.join("home");
+    std::fs::create_dir_all(&home_dir).expect("create HOME dir");
+
+    env.set("HOME", &home_dir);
+    env.set("ZK_SERVER_TRASH_RETENTION_DAYS", "abc");
+
+    let err = ServerConfig::load().expect_err("malformed trash retention env should fail");
+    let message = err.to_string();
+
+    assert!(message.contains("'abc'"), "message was: {message}");
+    assert!(
+        message.contains("not a valid number"),
+        "message was: {message}"
+    );
+}
+
+#[test]
+fn malformed_max_batch_size_env_reports_raw_value() {
+    let env = EnvGuard::new();
+    env.remove("ZK_SERVER_CONFIG");
+    env.remove("ZK_SERVER_DATABASE_PATH");
+    env.remove("ZK_SERVER_LISTEN_ADDR");
+    env.remove("ZK_SERVER_LOG_FILTER");
+    env.remove("ZK_SERVER_TOKEN_SHA256");
+    env.remove("ZK_SERVER_TRASH_RETENTION_DAYS");
+    env.remove("XDG_CONFIG_HOME");
+
+    let root = unique_test_dir("server-config-malformed-max-batch-size-env");
+    let home_dir = root.join("home");
+    std::fs::create_dir_all(&home_dir).expect("create HOME dir");
+
+    env.set("HOME", &home_dir);
+    env.set("ZK_SERVER_MAX_BATCH_SIZE", "not-a-number");
+
+    let err = ServerConfig::load().expect_err("malformed max batch size env should fail");
+    let message = err.to_string();
+
+    assert!(message.contains("'not-a-number'"), "message was: {message}");
+    assert!(
+        message.contains("not a valid number"),
+        "message was: {message}"
+    );
+}
+
+#[test]
 fn load_uses_xdg_search_path_when_explicit_path_is_unset() {
     let env = EnvGuard::new();
     env.remove("ZK_SERVER_CONFIG");

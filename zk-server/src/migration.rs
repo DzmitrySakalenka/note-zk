@@ -1,10 +1,8 @@
 //! Server-side schema migration runner.
 
-use std::cmp::Ordering;
-
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::schema::{V1_INDEX_DDL, V1_TABLE_DDL};
+use crate::schema::{V1_INDEX_DDL, V1_TABLE_DDL, V2_INDEX_DDL, V2_TABLE_DDL};
 use crate::{ServerError, ServerResult};
 
 const CREATE_SERVER_SCHEMA_VERSION_TABLE: &str = r"CREATE TABLE IF NOT EXISTS server_schema_version (
@@ -15,16 +13,36 @@ const SELECT_SERVER_SCHEMA_VERSION: &str = "SELECT version FROM server_schema_ve
 const DELETE_SERVER_SCHEMA_VERSION_ROWS: &str = "DELETE FROM server_schema_version";
 const INSERT_SERVER_SCHEMA_VERSION: &str =
     "INSERT INTO server_schema_version (id, version) VALUES (1, ?1)";
-const V1_SCHEMA_VERSION: i64 = 1;
+const CURRENT_VERSION: i64 = 2;
+
+struct Migration {
+    target_version: i64,
+    tables: &'static [&'static str],
+    indexes: &'static [&'static str],
+}
+
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        target_version: 1,
+        tables: V1_TABLE_DDL,
+        indexes: V1_INDEX_DDL,
+    },
+    Migration {
+        target_version: 2,
+        tables: V2_TABLE_DDL,
+        indexes: V2_INDEX_DDL,
+    },
+];
 
 /// Ensures the server schema exists and is migrated to the latest version.
 ///
-/// TG12-004 installs the V1 authoritative server schema.
+/// Applies each missing schema migration in target-version order.
 ///
 /// # Errors
 ///
 /// Returns [`ServerError`] when `SQLite` cannot create or read the version
-/// table, when V1 DDL fails, or when the existing version is unsupported.
+/// table, when a migration step fails, or when the existing version is
+/// unsupported.
 pub fn ensure_schema(connection: &Connection) -> ServerResult<()> {
     connection
         .execute(CREATE_SERVER_SCHEMA_VERSION_TABLE, [])
@@ -36,41 +54,50 @@ pub fn ensure_schema(connection: &Connection) -> ServerResult<()> {
         .map_err(ServerError::Database)?
         .unwrap_or(0);
 
-    match current_version.cmp(&V1_SCHEMA_VERSION) {
-        Ordering::Equal => Ok(()),
-        Ordering::Greater => Err(ServerError::Migration(format!(
-            "unsupported server schema version: expected <= {V1_SCHEMA_VERSION}, found {current_version}"
-        ))),
-        Ordering::Less => migrate_to_v1(connection),
+    if current_version > CURRENT_VERSION {
+        return Err(ServerError::Migration(format!(
+            "unsupported server schema version: expected <= {CURRENT_VERSION}, found {current_version}"
+        )));
     }
+
+    for migration in MIGRATIONS
+        .iter()
+        .filter(|migration| migration.target_version > current_version)
+    {
+        apply_migration(connection, migration)?;
+    }
+
+    Ok(())
 }
 
-fn migrate_to_v1(connection: &Connection) -> ServerResult<()> {
+fn apply_migration(connection: &Connection, migration: &Migration) -> ServerResult<()> {
     let transaction = connection
         .unchecked_transaction()
         .map_err(ServerError::Database)?;
+    let table_context = format!("apply V{} table DDL", migration.target_version);
+    let index_context = format!("apply V{} index DDL", migration.target_version);
 
-    for statement in V1_TABLE_DDL {
+    for statement in migration.tables {
         transaction
             .execute(statement, [])
-            .map_err(|source| migration_error("apply V1 table DDL", &source))?;
+            .map_err(|source| migration_error(&table_context, &source))?;
     }
 
-    for statement in V1_INDEX_DDL {
+    for statement in migration.indexes {
         transaction
             .execute(statement, [])
-            .map_err(|source| migration_error("apply V1 index DDL", &source))?;
+            .map_err(|source| migration_error(&index_context, &source))?;
     }
 
     transaction
         .execute(DELETE_SERVER_SCHEMA_VERSION_ROWS, [])
         .map_err(|source| migration_error("delete old schema version rows", &source))?;
     transaction
-        .execute(INSERT_SERVER_SCHEMA_VERSION, [V1_SCHEMA_VERSION])
-        .map_err(|source| migration_error("insert V1 schema version row", &source))?;
+        .execute(INSERT_SERVER_SCHEMA_VERSION, [migration.target_version])
+        .map_err(|source| migration_error("insert schema version row", &source))?;
     transaction
         .commit()
-        .map_err(|source| migration_error("commit V1 schema migration", &source))?;
+        .map_err(|source| migration_error("commit schema migration", &source))?;
 
     Ok(())
 }

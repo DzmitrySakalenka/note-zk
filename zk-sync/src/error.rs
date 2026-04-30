@@ -35,6 +35,9 @@ pub enum SyncError {
     /// The selected transport does not support this operation.
     #[error("unsupported sync operation: {0}")]
     Unsupported(&'static str),
+    /// Remote payload violated the sync protocol after decoding.
+    #[error("protocol failure: {0}")]
+    Protocol(String),
     /// Writing bytes or metadata to the local vault failed.
     #[error("vault write failed")]
     VaultWrite(#[from] VaultError),

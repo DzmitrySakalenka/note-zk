@@ -63,6 +63,20 @@ impl ServerDb {
         f(&connection)
     }
 
+    /// Mutably borrows the shared connection for a single closure invocation.
+    ///
+    /// # Errors
+    ///
+    /// Returns the closure error, or [`ServerError::Internal`] if the mutex is
+    /// poisoned.
+    pub fn with_conn_mut<R>(
+        &self,
+        f: impl FnOnce(&mut Connection) -> ServerResult<R>,
+    ) -> ServerResult<R> {
+        let mut connection = self.lock_connection()?;
+        f(&mut connection)
+    }
+
     /// Runs a closure inside a deferred `SQLite` transaction.
     ///
     /// Successful closures commit their changes. Error returns rely on

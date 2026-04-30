@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
-use crate::{ServerError, ServerResult, config::ServerConfig, db::ServerDb};
+use crate::{
+    ServerError, ServerResult, config::ServerConfig, db::ServerDb, service::sweep_expired_sessions,
+};
 
 /// Cheap-to-clone server state shared across HTTP handlers.
 #[derive(Clone)]
@@ -68,6 +70,8 @@ pub fn bootstrap() -> ServerResult<ServerState> {
 pub fn bootstrap_with_config(config: ServerConfig) -> ServerResult<ServerState> {
     config.validate().map_err(ServerError::Config)?;
     let database = ServerDb::open(&config.database_path)?;
+    let started_at = Utc::now();
+    database.with_conn(|connection| sweep_expired_sessions(connection, started_at))?;
 
-    Ok(ServerState::from_parts(config, database, Utc::now()))
+    Ok(ServerState::from_parts(config, database, started_at))
 }

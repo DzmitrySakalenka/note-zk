@@ -5,6 +5,10 @@
 
 /// Asset metadata and index-facing asset record models.
 pub mod asset;
+/// Authentication users, sessions, tokens, and scope models.
+pub mod auth;
+/// Browser-auth wire DTOs shared by clients and server handlers.
+pub mod auth_wire;
 /// Shared UTC clock abstraction for deterministic tests and production time.
 pub mod clock;
 /// Global, vault, and effective runtime configuration models.
@@ -28,6 +32,12 @@ pub mod write;
 /// Write-request models for trash, restore, and purge operations.
 pub mod write_request;
 
+pub use auth::{AuthScope, AuthScopeParseError, DeviceTokenRecord, PasswordUser, WebSessionRecord};
+pub use auth_wire::{
+    CreateUserRequest, CreateUserResponse, IssueTokenRequest, IssueTokenResponse,
+    ListTokensResponse, ListedToken, LoginRequest, LoginResponse, RefreshResponse,
+    RotateTokenRequest,
+};
 pub use clock::{Clock, SystemClock};
 pub use sync::ItemType;
 pub use sync_state::{DeleteRecord, DeleteRecordTarget};
