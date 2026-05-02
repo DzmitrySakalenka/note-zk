@@ -4024,6 +4024,7 @@ dependencies = [
  "cookie",
  "dirs",
  "hex",
+ "reqwest",
  "rpassword",
  "rusqlite",
  "secrecy",
