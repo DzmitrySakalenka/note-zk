@@ -36,6 +36,8 @@ pub(crate) enum AdminCommand {
     /// Run and inspect local backup jobs without using HTTP.
     #[command(subcommand)]
     Backup(BackupCommand),
+    /// Restore one local backup into an operator-selected target directory.
+    Restore(RestoreArgs),
 }
 
 /// Arguments for creating a password user.
@@ -89,4 +91,29 @@ pub(crate) struct BackupShowArgs {
     /// Render compact JSON to stdout.
     #[arg(long)]
     pub(crate) json: bool,
+}
+
+/// Arguments for restoring one backup locally.
+#[derive(Debug, Args)]
+pub(crate) struct RestoreArgs {
+    /// Backup ID prefix. Must uniquely match one completed backup manifest.
+    pub(crate) backup_id_prefix: String,
+    /// Empty or non-existent directory where restored files are written.
+    #[arg(long)]
+    pub(crate) target: PathBuf,
+    /// Explicit server config path. `ZK_SERVER_CONFIG` wins when both are set.
+    #[arg(long)]
+    pub(crate) config: Option<PathBuf>,
+    /// Age identity file path, or discouraged string:AGE-SECRET-KEY-... env form.
+    #[arg(long)]
+    pub(crate) age_identity: Option<String>,
+    /// Validate and summarize without writing restored entries.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+    /// Skip the interactive restore confirmation prompt.
+    #[arg(long)]
+    pub(crate) yes: bool,
+    /// Allow restoring into a non-empty target directory.
+    #[arg(long)]
+    pub(crate) overwrite_target: bool,
 }

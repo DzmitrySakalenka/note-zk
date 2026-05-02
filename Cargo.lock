@@ -4014,6 +4014,7 @@ dependencies = [
 name = "zk-server"
 version = "0.1.0"
 dependencies = [
+ "age",
  "assert_cmd",
  "axum",
  "axum-extra",
@@ -4024,6 +4025,7 @@ dependencies = [
  "hex",
  "rpassword",
  "rusqlite",
+ "secrecy",
  "serde",
  "serde_json",
  "sha2 0.11.0",
