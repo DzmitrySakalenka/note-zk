@@ -192,6 +192,13 @@ This keeps the feature useful without turning the app into a backup platform.
 
 ## Restore Strategy
 
+### Disaster Recovery Procedures
+
+Operator-run disaster recovery steps live in
+[`backup-and-restore.md`](backup-and-restore.md). This section keeps the
+architecture-level recovery model; the dedicated runbook keeps
+copy-paste procedures and failure remediation.
+
 Design restore in tiers.
 
 ### Tier 1: Fast service restore
