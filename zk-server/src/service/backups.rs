@@ -1,6 +1,6 @@
 //! Backup service helpers shared by HTTP handlers and the scheduler.
 
-use std::io;
+use std::{io, path::Path};
 
 use chrono::{DateTime, Utc};
 use ulid::Ulid;
@@ -11,7 +11,7 @@ use zk_backup::{
     service::{BackupRun, BackupService, BackupServiceConfig},
 };
 
-use crate::{ServerError, ServerResult, state::ServerState};
+use crate::{ServerError, ServerResult, config::ServerConfig, state::ServerState};
 
 const BACKUP_DISABLED_MESSAGE: &str = "backup config is disabled";
 const BACKUP_IN_FLIGHT_MESSAGE: &str = "backup already in flight";
@@ -56,7 +56,7 @@ pub(crate) async fn reserve_backup(
     state: &ServerState,
     started_at: DateTime<Utc>,
 ) -> Result<ReservedBackup, BackupStartError> {
-    let service = build_backup_service(state)?;
+    let service = backup_service_from_config(state.config())?;
     let run = service
         .reserve_run(started_at)
         .map_err(BackupStartError::Failed)?;
@@ -109,8 +109,9 @@ pub(crate) fn read_backup_manifest(
     })
 }
 
-fn build_backup_service(state: &ServerState) -> Result<BackupService, BackupStartError> {
-    let config = state.config();
+pub(crate) fn backup_service_from_config(
+    config: &ServerConfig,
+) -> Result<BackupService, BackupStartError> {
     let backup = config.backup.as_ref().ok_or(BackupStartError::Disabled)?;
     let service_config = BackupServiceConfig {
         vault_path: config.vault_path.clone(),
@@ -126,13 +127,16 @@ fn build_backup_service(state: &ServerState) -> Result<BackupService, BackupStar
     BackupService::new(service_config, retention).map_err(BackupStartError::Failed)
 }
 
-fn backup_output_dir(state: &ServerState) -> ServerResult<&std::path::Path> {
-    state
-        .config()
+pub(crate) fn backup_output_dir_from_config(config: &ServerConfig) -> ServerResult<&Path> {
+    config
         .backup
         .as_ref()
         .map(|backup| backup.output_dir.as_path())
         .ok_or_else(|| ServerError::Conflict(BACKUP_DISABLED_MESSAGE.to_string()))
+}
+
+fn backup_output_dir(state: &ServerState) -> ServerResult<&Path> {
+    backup_output_dir_from_config(state.config())
 }
 
 fn backup_not_found() -> ServerError {

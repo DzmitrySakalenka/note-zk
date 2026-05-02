@@ -228,9 +228,13 @@ impl ServerConfig {
     /// when `TOML` parsing fails, when one listen address is invalid, or when
     /// the final config fails validation.
     pub fn load() -> ConfigResult<Self> {
+        Self::load_with_config_path(None)
+    }
+
+    pub(crate) fn load_with_config_path(config_path: Option<&Path>) -> ConfigResult<Self> {
         let mut config = Self::default();
 
-        if let Some(config_path) = resolve_config_path() {
+        if let Some(config_path) = resolve_config_path(config_path) {
             let raw_config = load_from_path(&config_path)?;
             config.apply_raw_config(raw_config)?;
         }
@@ -375,9 +379,12 @@ impl RawBackupConfig {
     }
 }
 
-fn resolve_config_path() -> Option<PathBuf> {
+fn resolve_config_path(config_path: Option<&Path>) -> Option<PathBuf> {
     if let Some(config_path) = std::env::var_os(ENV_CONFIG_PATH) {
         return Some(expand_tilde(PathBuf::from(config_path)));
+    }
+    if let Some(config_path) = config_path {
+        return Some(expand_tilde(config_path.to_path_buf()));
     }
 
     let mut candidates = Vec::new();
