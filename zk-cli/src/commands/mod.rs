@@ -4,6 +4,8 @@ use std::path::Path;
 
 use zk_app::{AppError, ItemKind, RelativePath, TargetSelector};
 
+/// Handles remote operator administration subcommands.
+pub mod admin;
 /// Handles the `doctor` subcommand.
 pub mod doctor;
 /// Handles the `purge` subcommand.

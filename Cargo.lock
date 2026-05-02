@@ -3974,6 +3974,7 @@ dependencies = [
  "tokio",
  "tracing-subscriber",
  "url",
+ "wiremock",
  "zk-app",
  "zk-domain",
  "zk-index",

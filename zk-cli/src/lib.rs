@@ -38,6 +38,7 @@ pub fn run(cli: Cli) -> Result<i32, CliError> {
     let Cli { command, shared } = cli;
 
     match command {
+        Command::Admin(command) => commands::admin::run(command, &shared),
         Command::Auth(cli::AuthCommand::IssueToken(args)) => auth::run_issue_token(&args, &shared),
         Command::Scan(args) => commands::scan::run(&args, &shared),
         Command::Status(args) => commands::status::run(&args, &shared),
