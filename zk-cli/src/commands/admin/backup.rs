@@ -114,7 +114,9 @@ fn resolve_backup_id_prefix(
 
     match matches.len() {
         0 => Err(CliError::Issue("backup not found".to_string())),
-        1 => Ok(matches.pop().expect("one backup id match should exist")),
+        1 => matches
+            .pop()
+            .ok_or_else(|| CliError::Issue("backup not found".to_string())),
         _ => Err(CliError::Issue(format!(
             "backup id prefix is ambiguous; candidates: {}",
             matches.join(", ")

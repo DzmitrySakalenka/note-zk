@@ -190,6 +190,30 @@ fn ambiguous_backup_prefix_returns_candidates() {
 }
 
 #[test]
+fn missing_backup_prefix_returns_not_found() {
+    let fixture = RestoreCliHarness::new("admin-restore-cli-missing-prefix", None);
+    fixture.run_backup();
+    let target_dir = fixture.root.join("restore-missing-prefix");
+
+    let assert = fixture
+        .command()
+        .arg("admin")
+        .arg("restore")
+        .arg("02H")
+        .arg("--target")
+        .arg(&target_dir)
+        .arg("--config")
+        .arg(&fixture.config_path)
+        .arg("--yes")
+        .assert()
+        .failure();
+    let stderr = stderr_text(assert.get_output());
+
+    assert!(stderr.contains("backup not found"));
+    assert!(!target_dir.exists());
+}
+
+#[test]
 fn dry_run_prints_summary_without_restoring_files() {
     let fixture = RestoreCliHarness::new("admin-restore-cli-dry-run", None);
     let manifest = fixture.run_backup();

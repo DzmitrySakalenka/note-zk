@@ -170,9 +170,7 @@ fn resolve_backup_manifest(
 
     match matches.len() {
         0 => Err(backup_not_found()),
-        1 => Ok(matches
-            .pop()
-            .expect("one matched manifest should be present")),
+        1 => matches.pop().ok_or_else(backup_not_found),
         _ => {
             let candidates = matches
                 .into_iter()

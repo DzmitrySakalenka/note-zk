@@ -181,6 +181,23 @@ async fn show_rejects_ambiguous_prefix_without_fetching_manifest() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn show_rejects_missing_prefix_without_fetching_manifest() {
+    let server = MockServer::start().await;
+
+    mount_list(&server, &[listed_backup(BACKUP_ID)], &[], 1).await;
+
+    let assert = admin_backup_command(&server)
+        .arg("show")
+        .arg("02H")
+        .assert()
+        .code(1);
+    let stderr = stderr_text(assert.get_output());
+
+    assert!(stderr.contains("backup not found"));
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn trigger_posts_empty_body_and_prints_backup_id() {
     let server = MockServer::start().await;
 
