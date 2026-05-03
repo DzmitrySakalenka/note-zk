@@ -65,6 +65,17 @@ Keep the age identity separate from the backup archive and manifest.
 An encrypted archive plus a copied identity is not a useful disaster
 recovery boundary.
 
+## What V1 Backup Does Not Provide
+
+V1 backup does not provide application-layer signatures for backup
+manifests or archives. Encrypted `.tar.zst.age` archives rely on age's
+authenticated encryption during restore, while the manifest SHA-256 is an
+integrity check, not proof of provenance. The signed recovery bundle
+question is closed as deferred V1 in
+[`reliability-and-security.md`](reliability-and-security.md). Operators
+who need independent provenance should sign the produced manifest and
+archive pair outside the application.
+
 ## Tier 1 -- Service Crash
 
 If only the server process crashed, restart it. The SQLite WAL replay
