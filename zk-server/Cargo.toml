@@ -43,3 +43,4 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 secrecy = "0.10.3"
 sha2 = "0.11.0"
 tempfile = "3.27.0"
+tokio = { version = "1.52.1", features = ["test-util"] }

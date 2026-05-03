@@ -1,6 +1,6 @@
 //! Tokio task that runs configured backup jobs on a cron schedule.
 
-use std::{sync::Arc, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use tokio::{task::JoinHandle, time::Instant};
@@ -42,11 +42,55 @@ pub fn spawn_backup_scheduler(
     Some(BackupSchedulerHandle { join })
 }
 
+/// Spawns a backup scheduler tick runner with injected time and work.
+///
+/// Production callers should use [`spawn_backup_scheduler`]. This hidden entry
+/// point lets integration tests exercise cron-to-Tokio timing without
+/// bootstrapping a full backup service.
+#[doc(hidden)]
+#[must_use]
+pub fn spawn_backup_scheduler_tick_runner<NowUtc, OnTick, TickFuture>(
+    cron_expression: String,
+    shutdown: CancellationToken,
+    now_utc: NowUtc,
+    on_tick: OnTick,
+) -> BackupSchedulerHandle
+where
+    NowUtc: Fn() -> DateTime<Utc> + Send + 'static,
+    OnTick: FnMut() -> TickFuture + Send + 'static,
+    TickFuture: Future<Output = ()> + Send + 'static,
+{
+    let join = tokio::spawn(async move {
+        run_backup_scheduler_ticks(cron_expression, shutdown, now_utc, on_tick).await;
+    });
+
+    BackupSchedulerHandle { join }
+}
+
 async fn run_backup_scheduler(
     state: Arc<ServerState>,
     shutdown: CancellationToken,
     cron_expression: String,
 ) {
+    run_backup_scheduler_ticks(cron_expression, shutdown, Utc::now, move || {
+        let state = Arc::clone(&state);
+        async move {
+            run_backup_once(state).await;
+        }
+    })
+    .await;
+}
+
+async fn run_backup_scheduler_ticks<NowUtc, OnTick, TickFuture>(
+    cron_expression: String,
+    shutdown: CancellationToken,
+    now_utc: NowUtc,
+    mut on_tick: OnTick,
+) where
+    NowUtc: Fn() -> DateTime<Utc> + Send + 'static,
+    OnTick: FnMut() -> TickFuture + Send + 'static,
+    TickFuture: Future<Output = ()> + Send + 'static,
+{
     loop {
         let schedule = match CronSchedule::parse(&cron_expression) {
             Ok(schedule) => schedule,
@@ -60,7 +104,7 @@ async fn run_backup_scheduler(
                 return;
             }
         };
-        let now = Utc::now();
+        let now = now_utc();
         let Some(next_after) = schedule.next_after(now) else {
             tracing::error!(
                 target: LOG_TARGET,
@@ -75,7 +119,7 @@ async fn run_backup_scheduler(
             () = shutdown.cancelled() => return,
         }
 
-        run_backup_once(Arc::clone(&state)).await;
+        on_tick().await;
         if shutdown.is_cancelled() {
             return;
         }
