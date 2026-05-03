@@ -173,23 +173,12 @@ Key columns:
 - `deleted_at TEXT`
 - `delete_revision INTEGER`
 
-### `sync_log`
+## Local Derived/AI Tables (reserved for TG16+; not present in the V1 schema)
 
-Optional but recommended for debugging.
+The following draft tables are future AI-layer planning notes. They are
+not shipped in `zk-index/src/schema.rs`.
 
-Key columns:
-
-- `event_id INTEGER PRIMARY KEY AUTOINCREMENT`
-- `item_id TEXT`
-- `item_type TEXT`
-- `direction TEXT NOT NULL`
-- `status TEXT NOT NULL`
-- `message TEXT`
-- `created_at TEXT NOT NULL`
-
-## Local Derived/AI Tables
-
-### `note_chunks`
+### `note_chunks` (reserved for TG16+; not present in V1)
 
 - `chunk_id TEXT PRIMARY KEY`
 - `note_id TEXT NOT NULL`
@@ -197,7 +186,7 @@ Key columns:
 - `markdown_text TEXT NOT NULL`
 - `token_count INTEGER`
 
-### `chunk_embeddings`
+### `chunk_embeddings` (reserved for TG16+; not present in V1)
 
 - `chunk_id TEXT NOT NULL`
 - `embedding_model TEXT NOT NULL`
@@ -208,7 +197,7 @@ Composite unique:
 
 - `(chunk_id, embedding_model)`
 
-### `semantic_edges`
+### `semantic_edges` (reserved for TG16+; not present in V1)
 
 - `source_note_id TEXT NOT NULL`
 - `target_note_id TEXT NOT NULL`
@@ -320,17 +309,6 @@ Indexes:
 - `idx_web_sessions_expires` on `expires_at` where `revoked_at IS NULL`
 
 Last verified against `zk-server/src/schema.rs:91-101,117-120` on 2026-04-30.
-
-### `backup_manifests`
-
-- `backup_id TEXT PRIMARY KEY`
-- `created_at TEXT NOT NULL`
-- `includes_notes INTEGER NOT NULL`
-- `includes_assets INTEGER NOT NULL`
-- `includes_sync_db INTEGER NOT NULL`
-- `includes_derived_db INTEGER NOT NULL`
-- `archive_path TEXT NOT NULL`
-- `checksum TEXT`
 
 ### `sync_events`
 
