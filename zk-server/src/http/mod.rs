@@ -1,5 +1,6 @@
 //! HTTP router, handlers, and response mapping.
 
+mod admin;
 mod auth;
 mod error;
 pub mod extract;
@@ -7,6 +8,8 @@ mod health;
 mod router;
 mod sync;
 
+#[doc(hidden)]
+pub(crate) use admin::admin_routes;
 #[doc(hidden)]
 pub(crate) use auth::auth_routes;
 pub use error::ApiError;

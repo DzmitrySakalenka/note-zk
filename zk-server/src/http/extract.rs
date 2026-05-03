@@ -35,5 +35,5 @@ pub fn parse_content_hash(raw: &str) -> Result<ContentHash, ApiError> {
 }
 
 fn map_id_format_error(error: &IdFormatError) -> ApiError {
-    ApiError(ServerError::InvalidRequest(error.to_string()))
+    ApiError::from(ServerError::InvalidRequest(error.to_string()))
 }

@@ -20,6 +20,9 @@ pub struct Cli {
 /// Phase 1 command set exposed by the CLI.
 #[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
 pub enum Command {
+    /// Remote operator administration commands.
+    #[command(subcommand)]
+    Admin(AdminCommand),
     /// Authenticate against a running server for operator tasks.
     #[command(subcommand)]
     Auth(AuthCommand),
@@ -48,6 +51,25 @@ pub enum AuthCommand {
     IssueToken(IssueTokenArgs),
 }
 
+/// Remote operator administration command set exposed by the CLI.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum AdminCommand {
+    /// Inspect and trigger backups through the server admin HTTP API.
+    #[command(subcommand)]
+    Backup(AdminBackupCommand),
+}
+
+/// Remote backup administration command set exposed by the CLI.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum AdminBackupCommand {
+    /// List completed and in-flight backups.
+    List(AdminBackupListArgs),
+    /// Show one backup manifest. Short ID prefixes are resolved client-side.
+    Show(AdminBackupShowArgs),
+    /// Trigger one server-side backup run.
+    Trigger(AdminBackupTriggerArgs),
+}
+
 /// Arguments for `auth issue-token`.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub struct IssueTokenArgs {
@@ -60,6 +82,44 @@ pub struct IssueTokenArgs {
     /// Comma-separated authorization scopes for the issued token.
     #[arg(long, default_value = "sync")]
     pub scopes: String,
+}
+
+/// Arguments for `admin backup list`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AdminBackupListArgs {
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+    /// Environment variable that stores the bearer token.
+    #[arg(long = "token-env", default_value = "ZK_DEVICE_TOKEN")]
+    pub token_env: String,
+}
+
+/// Arguments for `admin backup show`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AdminBackupShowArgs {
+    /// Full backup ID or unique backup ID prefix.
+    pub backup_id: String,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+    /// Environment variable that stores the bearer token.
+    #[arg(long = "token-env", default_value = "ZK_DEVICE_TOKEN")]
+    pub token_env: String,
+}
+
+/// Arguments for `admin backup trigger`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AdminBackupTriggerArgs {
+    /// Wait until the triggered backup manifest becomes available.
+    #[arg(long)]
+    pub wait: bool,
+    /// Maximum seconds to wait for a triggered backup.
+    #[arg(long = "timeout-secs", default_value_t = 600)]
+    pub timeout_secs: u64,
+    /// Environment variable that stores the bearer token.
+    #[arg(long = "token-env", default_value = "ZK_DEVICE_TOKEN")]
+    pub token_env: String,
 }
 
 /// Shared per-invocation flags that later map onto `CliOverrides`.

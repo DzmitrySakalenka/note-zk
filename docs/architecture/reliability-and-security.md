@@ -192,6 +192,13 @@ This keeps the feature useful without turning the app into a backup platform.
 
 ## Restore Strategy
 
+### Disaster Recovery Procedures
+
+Operator-run disaster recovery steps live in
+[`backup-and-restore.md`](backup-and-restore.md). This section keeps the
+architecture-level recovery model; the dedicated runbook keeps
+copy-paste procedures and failure remediation.
+
 Design restore in tiers.
 
 ### Tier 1: Fast service restore
@@ -463,4 +470,12 @@ If disaster happens, recover in this order:
 
 ## Open Questions
 
-- whether to support signed export/import recovery bundles
+- ~~whether to support signed export/import recovery bundles~~
+  (deferred V1 - 2026-05-03)
+
+  V1 defers application-layer signatures for recovery bundles. Encrypted
+  `.tar.zst.age` archives rely on age's authenticated encryption during
+  restore, while the manifest SHA-256 detects archive-byte changes but is
+  not independent provenance because the manifest is unsigned. Operators
+  who need provenance for off-host storage can sign the produced manifest
+  and archive pair outside the application.

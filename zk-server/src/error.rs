@@ -10,7 +10,7 @@ pub type ServerResult<T> = Result<T, ServerError>;
 #[derive(Debug, Error)]
 pub enum ServerError {
     /// Server configuration failed to load or validate.
-    #[error("config error")]
+    #[error("config error: {0}")]
     Config(#[from] ConfigError),
     /// `SQLite` returned an error while serving a request or bootstrapping.
     #[error("database error")]
@@ -27,6 +27,9 @@ pub enum ServerError {
     /// Requested mutation conflicts with current server state.
     #[error("conflict: {0}")]
     Conflict(String),
+    /// Requested operation is temporarily unavailable.
+    #[error("service unavailable: {0}")]
+    ServiceUnavailable(String),
     /// Request lacks valid authentication credentials.
     #[error("unauthorized")]
     Unauthorized,

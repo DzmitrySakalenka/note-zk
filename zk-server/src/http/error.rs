@@ -2,7 +2,7 @@ use std::error::Error;
 
 use axum::{
     Json,
-    http::StatusCode,
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
@@ -11,7 +11,10 @@ use crate::ServerError;
 
 /// HTTP response adapter for one server error.
 #[derive(Debug)]
-pub struct ApiError(pub ServerError);
+pub struct ApiError {
+    error: Box<ServerError>,
+    retry_after_seconds: Option<u64>,
+}
 
 #[derive(Serialize)]
 struct ErrorEnvelope<'a> {
@@ -26,29 +29,55 @@ struct ErrorBody<'a> {
 
 impl From<ServerError> for ApiError {
     fn from(error: ServerError) -> Self {
-        Self(error)
+        Self {
+            error: Box::new(error),
+            retry_after_seconds: None,
+        }
+    }
+}
+
+impl ApiError {
+    /// Builds an error response with a `Retry-After` header in seconds.
+    #[must_use]
+    pub fn with_retry_after(error: ServerError, seconds: u64) -> Self {
+        Self {
+            error: Box::new(error),
+            retry_after_seconds: Some(seconds),
+        }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let (status, code, message, should_log_internal) = response_parts(&self.0);
+        let (status, code, message, should_log_internal) = response_parts(&self.error);
 
         if should_log_internal {
             tracing::error!(
-                error = %self.0,
-                source_chain = %source_chain(&self.0),
+                error = %self.error,
+                source_chain = %source_chain(&*self.error),
                 "server request failed"
             );
         }
 
-        (
+        let mut response = (
             status,
             Json(ErrorEnvelope {
                 error: ErrorBody { code, message },
             }),
         )
-            .into_response()
+            .into_response();
+
+        if let Some(seconds) = self.retry_after_seconds {
+            response.headers_mut().insert(
+                header::RETRY_AFTER,
+                seconds
+                    .to_string()
+                    .parse()
+                    .expect("retry-after seconds should form a valid header"),
+            );
+        }
+
+        response
     }
 }
 
@@ -75,6 +104,12 @@ fn response_parts(error: &ServerError) -> (StatusCode, &'static str, String, boo
         ServerError::Conflict(message) => {
             (StatusCode::CONFLICT, "conflict", message.clone(), false)
         }
+        ServerError::ServiceUnavailable(message) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "service_unavailable",
+            message.clone(),
+            false,
+        ),
         ServerError::Unauthorized | ServerError::ScopeDecode(_) => (
             StatusCode::UNAUTHORIZED,
             "unauthorized",

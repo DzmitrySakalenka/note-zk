@@ -171,9 +171,6 @@ fn upsert_delete_record_if_needed(
     clock: &dyn Clock,
     stats: &mut ReconciliationStats,
 ) -> Result<(), AppError> {
-    let effective_trashed_at = resolve_trashed_at(request.trashed_at, clock)?;
-    let retention_until =
-        compute_retention_until(Some(&effective_trashed_at), request.retention_days, clock)?;
     let target = delete_record_target(request.item_id, request.item_type);
     let existing_record = get_delete_record_with_context(
         conn,
@@ -181,6 +178,14 @@ fn upsert_delete_record_if_needed(
         request.item_type,
         "during rebuild reconciliation",
     )?;
+    // Existing delete records preserve the retention lifecycle start; scan timestamps can
+    // drift with filesystem metadata after the item has already been trashed.
+    let effective_trashed_at = existing_record.as_ref().map_or_else(
+        || resolve_trashed_at(request.trashed_at, clock),
+        |record| Ok(record.trashed_at.clone()),
+    )?;
+    let retention_until =
+        compute_retention_until(Some(&effective_trashed_at), request.retention_days, clock)?;
     let preserved_original_path = existing_record.as_ref().map_or_else(
         || request.original_path.clone(),
         |record| record.original_path.clone(),

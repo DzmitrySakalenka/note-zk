@@ -216,6 +216,62 @@ fn reconcile_delete_records_skips_refresh_when_retention_is_unchanged() {
 }
 
 #[test]
+fn reconcile_delete_records_preserves_existing_trash_timestamp_when_scan_timestamp_differs() {
+    let mut connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    let initial_note_inputs = vec![note_input(
+        "01TRASHRECONCILENOTE0000009",
+        "99_trash/drift.md",
+        true,
+        Some("2026-04-20T10:00:00Z"),
+    )];
+
+    index_rebuild(&mut connection, &initial_note_inputs, &[]).expect("rebuild should succeed");
+    reconcile_delete_records(
+        &connection,
+        &initial_note_inputs,
+        &[],
+        14,
+        &fixed_clock("2026-04-20T12:00:00Z"),
+    )
+    .expect("initial reconciliation should succeed");
+
+    let scanned_note_inputs = vec![note_input(
+        "01TRASHRECONCILENOTE0000009",
+        "99_trash/drift.md",
+        true,
+        Some("2026-04-20T10:00:01Z"),
+    )];
+    index_rebuild(&mut connection, &scanned_note_inputs, &[]).expect("rebuild should succeed");
+    let stats = reconcile_delete_records(
+        &connection,
+        &scanned_note_inputs,
+        &[],
+        14,
+        &fixed_clock("2026-04-20T12:00:00Z"),
+    )
+    .expect("drift reconciliation should succeed");
+
+    assert_eq!(
+        stats,
+        ReconciliationStats {
+            inserted: 0u32,
+            refreshed: 0u32,
+            cleared: 0u32,
+            orphans_warned: 0u32,
+        }
+    );
+    let record = DeleteRecordRepo::get_delete_record(
+        &connection,
+        &DeleteRecordTarget::Note(initial_note_inputs[0].note_id.clone()),
+    )
+    .expect("note delete-record query should succeed")
+    .expect("note delete record should exist");
+    assert_eq!(record.trashed_at, "2026-04-20T10:00:00Z");
+    assert_eq!(record.retention_until, "2026-05-04T10:00:00Z");
+}
+
+#[test]
 fn reconcile_delete_records_refreshes_rows_when_retention_days_change() {
     let mut connection = open_memory().expect("in-memory database should open");
     ensure_schema(&connection).expect("schema should be ready");

@@ -9,6 +9,8 @@ pub mod asset;
 pub mod auth;
 /// Browser-auth wire DTOs shared by clients and server handlers.
 pub mod auth_wire;
+/// Backup configuration models shared by server, CLI, and backup primitives.
+pub mod backup;
 /// Shared UTC clock abstraction for deterministic tests and production time.
 pub mod clock;
 /// Global, vault, and effective runtime configuration models.
@@ -38,6 +40,7 @@ pub use auth_wire::{
     ListTokensResponse, ListedToken, LoginRequest, LoginResponse, RefreshResponse,
     RotateTokenRequest,
 };
+pub use backup::{BackupConfig, BackupConfigError, BackupEncryption, BackupSchedule};
 pub use clock::{Clock, SystemClock};
 pub use sync::ItemType;
 pub use sync_state::{DeleteRecord, DeleteRecordTarget};

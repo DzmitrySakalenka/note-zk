@@ -164,6 +164,47 @@ Store the printed plaintext in `ZK_DEVICE_TOKEN` on the device. The
 server only keeps the SHA-256 hash; the plaintext cannot be retrieved
 later.
 
+## Backup and Restore
+
+Enable built-in server backups in `server.toml`:
+
+```toml
+[backup]
+output_dir = "/Volumes/NAS/zk-backups"
+retention_count = 14
+schedule_cron = "0 3 * * *"
+include_attachments = true
+include_server_db = true
+
+[backup.encryption]
+type = "age"
+recipient = "<age-recipient>"
+```
+
+Run and inspect backups on the server host:
+
+```bash
+zk-server admin backup run --config <server.toml>
+zk-server admin backup list --config <server.toml>
+zk-server admin backup show <backup-id> --config <server.toml>
+zk-server admin restore <backup-id-prefix> --target <restore-dir> --config <server.toml> --yes
+```
+
+Inspect or trigger backups remotely with an admin-scoped token:
+
+```bash
+ZK_DEVICE_TOKEN=<admin-token> \
+  zk-cli --server-url https://zk.example.com admin backup list
+ZK_DEVICE_TOKEN=<admin-token> \
+  zk-cli --server-url https://zk.example.com admin backup show <backup-id>
+ZK_DEVICE_TOKEN=<admin-token> \
+  zk-cli --server-url https://zk.example.com admin backup trigger --wait
+```
+
+See `docs/architecture/backup-and-restore.md` for disaster recovery
+procedures. Built-in backups write local archives only; copy backup
+pairs off-host with `rsync`, `scp`, or a mounted NAS.
+
 ## Main Commands
 
 - `scan --check`: scan and validate a vault without changing files.

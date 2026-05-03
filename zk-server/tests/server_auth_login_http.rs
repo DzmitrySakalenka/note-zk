@@ -44,6 +44,7 @@ struct LoginOutcome {
 
 fn test_config(database_path: PathBuf) -> ServerConfig {
     ServerConfig {
+        vault_path: PathBuf::from("."),
         database_path,
         listen_addr: "127.0.0.1:7878"
             .parse::<SocketAddr>()
@@ -52,6 +53,7 @@ fn test_config(database_path: PathBuf) -> ServerConfig {
         stub_auth_token_sha256_hex: None,
         trash_retention_days: 14,
         max_batch_size: 1000,
+        backup: None,
     }
 }
 

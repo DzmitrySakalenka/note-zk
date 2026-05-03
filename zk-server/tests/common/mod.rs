@@ -40,12 +40,19 @@ pub fn write_text(path: &Path, text: &str) {
 pub struct EnvGuard {
     env_lock_guard: MutexGuard<'static, ()>,
     zk_server_config: Option<OsString>,
+    zk_server_vault_path: Option<OsString>,
     zk_server_database_path: Option<OsString>,
     zk_server_listen_addr: Option<OsString>,
     zk_server_log_filter: Option<OsString>,
     zk_server_token_sha256: Option<OsString>,
     zk_server_trash_retention_days: Option<OsString>,
     zk_server_max_batch_size: Option<OsString>,
+    zk_server_backup_output_dir: Option<OsString>,
+    zk_server_backup_retention_count: Option<OsString>,
+    zk_server_backup_schedule_cron: Option<OsString>,
+    zk_server_backup_age_recipient: Option<OsString>,
+    zk_server_backup_include_attachments: Option<OsString>,
+    zk_server_backup_include_server_db: Option<OsString>,
     home: Option<OsString>,
     xdg_config_home: Option<OsString>,
 }
@@ -59,12 +66,23 @@ impl EnvGuard {
         Self {
             env_lock_guard: lock,
             zk_server_config: std::env::var_os("ZK_SERVER_CONFIG"),
+            zk_server_vault_path: std::env::var_os("ZK_SERVER_VAULT_PATH"),
             zk_server_database_path: std::env::var_os("ZK_SERVER_DATABASE_PATH"),
             zk_server_listen_addr: std::env::var_os("ZK_SERVER_LISTEN_ADDR"),
             zk_server_log_filter: std::env::var_os("ZK_SERVER_LOG_FILTER"),
             zk_server_token_sha256: std::env::var_os("ZK_SERVER_TOKEN_SHA256"),
             zk_server_trash_retention_days: std::env::var_os("ZK_SERVER_TRASH_RETENTION_DAYS"),
             zk_server_max_batch_size: std::env::var_os("ZK_SERVER_MAX_BATCH_SIZE"),
+            zk_server_backup_output_dir: std::env::var_os("ZK_SERVER_BACKUP_OUTPUT_DIR"),
+            zk_server_backup_retention_count: std::env::var_os("ZK_SERVER_BACKUP_RETENTION_COUNT"),
+            zk_server_backup_schedule_cron: std::env::var_os("ZK_SERVER_BACKUP_SCHEDULE_CRON"),
+            zk_server_backup_age_recipient: std::env::var_os("ZK_SERVER_BACKUP_AGE_RECIPIENT"),
+            zk_server_backup_include_attachments: std::env::var_os(
+                "ZK_SERVER_BACKUP_INCLUDE_ATTACHMENTS",
+            ),
+            zk_server_backup_include_server_db: std::env::var_os(
+                "ZK_SERVER_BACKUP_INCLUDE_SERVER_DB",
+            ),
             home: std::env::var_os("HOME"),
             xdg_config_home: std::env::var_os("XDG_CONFIG_HOME"),
         }
@@ -97,6 +115,7 @@ impl EnvGuard {
 impl Drop for EnvGuard {
     fn drop(&mut self) {
         restore_env_var("ZK_SERVER_CONFIG", self.zk_server_config.as_ref());
+        restore_env_var("ZK_SERVER_VAULT_PATH", self.zk_server_vault_path.as_ref());
         restore_env_var(
             "ZK_SERVER_DATABASE_PATH",
             self.zk_server_database_path.as_ref(),
@@ -114,6 +133,30 @@ impl Drop for EnvGuard {
         restore_env_var(
             "ZK_SERVER_MAX_BATCH_SIZE",
             self.zk_server_max_batch_size.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_BACKUP_OUTPUT_DIR",
+            self.zk_server_backup_output_dir.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_BACKUP_RETENTION_COUNT",
+            self.zk_server_backup_retention_count.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_BACKUP_SCHEDULE_CRON",
+            self.zk_server_backup_schedule_cron.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_BACKUP_AGE_RECIPIENT",
+            self.zk_server_backup_age_recipient.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_BACKUP_INCLUDE_ATTACHMENTS",
+            self.zk_server_backup_include_attachments.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_BACKUP_INCLUDE_SERVER_DB",
+            self.zk_server_backup_include_server_db.as_ref(),
         );
         restore_env_var("HOME", self.home.as_ref());
         restore_env_var("XDG_CONFIG_HOME", self.xdg_config_home.as_ref());

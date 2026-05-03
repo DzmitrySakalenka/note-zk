@@ -57,6 +57,10 @@ pub struct AuthenticatedUser {
     pub scopes: Vec<AuthScope>,
 }
 
+/// Marker extracted by admin-only routes after scope checks pass.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthenticatedAdmin;
+
 /// Middleware that enforces device-token authentication rules.
 ///
 /// # Errors
@@ -68,59 +72,12 @@ pub async fn require_auth_layer(
     mut req: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
-    let config_hash = state.config().stub_auth_token_sha256_hex.as_deref();
+    let authenticated_device = authenticated_device_from_headers(&state, req.headers())?
+        .ok_or_else(|| ApiError::from(ServerError::Unauthorized))?;
 
-    if auth_disabled(&state).map_err(ApiError::from)? {
-        attach_authenticated_device(
-            &mut req,
-            AuthenticatedDevice {
-                token_id: None,
-                device_id: None,
-                scopes: wide_scopes(),
-            },
-        );
-        return Ok(next.run(req).await);
-    }
+    attach_authenticated_device(&mut req, authenticated_device);
 
-    let bearer_token = bearer_token_from_headers(req.headers())?;
-    let token_sha256_hex = hash_device_token(bearer_token);
-
-    if let Some(config_hash) = config_hash {
-        if hashes_match_constant_time(&token_sha256_hex, config_hash) {
-            warn_once_for_stub_token();
-            attach_authenticated_device(
-                &mut req,
-                AuthenticatedDevice {
-                    token_id: None,
-                    device_id: None,
-                    scopes: wide_scopes(),
-                },
-            );
-            return Ok(next.run(req).await);
-        }
-    }
-
-    if let Some(token_row) = lookup_device_token(&state, &token_sha256_hex)? {
-        let token_id = token_row.token_id;
-        let device_id = token_row.device_id;
-        let scopes = token_row.scopes;
-
-        state.db().with_conn(|connection| {
-            DeviceTokenRepo::touch_last_used(connection, &token_id, Utc::now())
-        })?;
-
-        attach_authenticated_device(
-            &mut req,
-            AuthenticatedDevice {
-                token_id: Some(token_id),
-                device_id,
-                scopes,
-            },
-        );
-        return Ok(next.run(req).await);
-    }
-
-    Err(ApiError::from(ServerError::Unauthorized))
+    Ok(next.run(req).await)
 }
 
 /// Middleware that enforces browser-session cookie authentication.
@@ -152,31 +109,20 @@ pub async fn require_session_layer(
 ///
 /// Returns [`ApiError`] when the token is missing or invalid. Returns an
 /// internal error when route layers are composed in the wrong order.
-pub async fn require_csrf_layer(mut req: Request, next: Next) -> Result<Response, ApiError> {
+pub async fn require_csrf_layer(req: Request, next: Next) -> Result<Response, ApiError> {
     if csrf_exempt_method(req.method()) {
         return Ok(next.run(req).await);
     }
 
-    let Some(expected_csrf_token_sha256_hex) = req
-        .extensions_mut()
-        .get::<AuthenticatedUser>()
-        .map(|authenticated_user| authenticated_user.csrf_token_sha256_hex.clone())
-    else {
+    let Some(authenticated_user) = req.extensions().get::<AuthenticatedUser>().cloned() else {
         return Err(ApiError::from(ServerError::Internal(Box::new(
             io::Error::other("CSRF middleware requires authenticated user context"),
         ))));
     };
 
-    let csrf_token = csrf_token_from_headers(req.headers())?;
-    let csrf_token_sha256_hex = hash_csrf_token(csrf_token);
+    require_csrf_token(req.headers(), &authenticated_user)?;
 
-    if hashes_match_constant_time(&csrf_token_sha256_hex, &expected_csrf_token_sha256_hex) {
-        return Ok(next.run(req).await);
-    }
-
-    Err(ApiError::from(ServerError::Forbidden(
-        "invalid CSRF token".to_string(),
-    )))
+    Ok(next.run(req).await)
 }
 
 /// Returns a layer that requires one authorization scope.
@@ -235,6 +181,47 @@ impl OptionalFromRequestParts<ServerState> for AuthenticatedUser {
         }
 
         authenticated_user_from_headers(state, &parts.headers)
+    }
+}
+
+impl FromRequestParts<ServerState> for AuthenticatedAdmin {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &ServerState,
+    ) -> Result<Self, Self::Rejection> {
+        if auth_disabled(state).map_err(ApiError::from)? {
+            return Ok(Self);
+        }
+
+        if let Some(authenticated_user) = parts.extensions.get::<AuthenticatedUser>().cloned() {
+            require_admin_scope(&authenticated_user.scopes)?;
+            require_csrf_for_method(&parts.method, &parts.headers, &authenticated_user)?;
+            return Ok(Self);
+        }
+
+        if let Some(authenticated_user) = authenticated_user_from_headers(state, &parts.headers)? {
+            require_admin_scope(&authenticated_user.scopes)?;
+            require_csrf_for_method(&parts.method, &parts.headers, &authenticated_user)?;
+            parts.extensions.insert(authenticated_user);
+            return Ok(Self);
+        }
+
+        if let Some(authenticated_device) = parts.extensions.get::<AuthenticatedDevice>().cloned() {
+            require_admin_scope(&authenticated_device.scopes)?;
+            return Ok(Self);
+        }
+
+        if let Some(authenticated_device) =
+            authenticated_device_from_headers(state, &parts.headers)?
+        {
+            require_admin_scope(&authenticated_device.scopes)?;
+            parts.extensions.insert(authenticated_device);
+            return Ok(Self);
+        }
+
+        Err(ApiError::from(ServerError::Unauthorized))
     }
 }
 
@@ -331,6 +318,53 @@ fn authenticated_user_from_headers(
     }))
 }
 
+fn authenticated_device_from_headers(
+    state: &ServerState,
+    headers: &axum::http::HeaderMap,
+) -> Result<Option<AuthenticatedDevice>, ApiError> {
+    if auth_disabled(state).map_err(ApiError::from)? {
+        return Ok(Some(AuthenticatedDevice {
+            token_id: None,
+            device_id: None,
+            scopes: wide_scopes(),
+        }));
+    }
+
+    let Some(bearer_token) = optional_bearer_token_from_headers(headers)? else {
+        return Ok(None);
+    };
+    let token_sha256_hex = hash_device_token(bearer_token);
+
+    if let Some(config_hash) = state.config().stub_auth_token_sha256_hex.as_deref() {
+        if hashes_match_constant_time(&token_sha256_hex, config_hash) {
+            warn_once_for_stub_token();
+            return Ok(Some(AuthenticatedDevice {
+                token_id: None,
+                device_id: None,
+                scopes: wide_scopes(),
+            }));
+        }
+    }
+
+    if let Some(token_row) = lookup_device_token(state, &token_sha256_hex)? {
+        let token_id = token_row.token_id;
+        let device_id = token_row.device_id;
+        let scopes = token_row.scopes;
+
+        state.db().with_conn(|connection| {
+            DeviceTokenRepo::touch_last_used(connection, &token_id, Utc::now())
+        })?;
+
+        return Ok(Some(AuthenticatedDevice {
+            token_id: Some(token_id),
+            device_id,
+            scopes,
+        }));
+    }
+
+    Err(ApiError::from(ServerError::Unauthorized))
+}
+
 fn lookup_device_token(
     state: &ServerState,
     token_sha256_hex: &str,
@@ -345,18 +379,23 @@ fn lookup_device_token(
     }
 }
 
-fn bearer_token_from_headers(headers: &axum::http::HeaderMap) -> Result<&str, ApiError> {
+fn optional_bearer_token_from_headers(
+    headers: &axum::http::HeaderMap,
+) -> Result<Option<&str>, ApiError> {
     let header_value = headers
         .get(header::AUTHORIZATION)
-        .ok_or_else(|| ApiError::from(ServerError::Unauthorized))?;
-    let header_text = header_value
-        .to_str()
+        .map_or(Ok(None), |value| value.to_str().map(Some))
         .map_err(|_| ApiError::from(ServerError::Unauthorized))?;
+    let Some(header_text) = header_value else {
+        return Ok(None);
+    };
 
-    header_text
+    let bearer_token = header_text
         .strip_prefix("Bearer ")
         .filter(|token| !token.is_empty())
-        .ok_or_else(|| ApiError::from(ServerError::Unauthorized))
+        .ok_or_else(|| ApiError::from(ServerError::Unauthorized))?;
+
+    Ok(Some(bearer_token))
 }
 
 fn optional_session_id_from_cookies(headers: &axum::http::HeaderMap) -> Option<String> {
@@ -377,6 +416,47 @@ fn csrf_token_from_headers(headers: &axum::http::HeaderMap) -> Result<&str, ApiE
     header_value
         .to_str()
         .map_err(|_| ApiError::from(ServerError::Forbidden("invalid CSRF token".to_string())))
+}
+
+fn require_csrf_for_method(
+    method: &Method,
+    headers: &axum::http::HeaderMap,
+    authenticated_user: &AuthenticatedUser,
+) -> Result<(), ApiError> {
+    if csrf_exempt_method(method) {
+        return Ok(());
+    }
+
+    require_csrf_token(headers, authenticated_user)
+}
+
+fn require_csrf_token(
+    headers: &axum::http::HeaderMap,
+    authenticated_user: &AuthenticatedUser,
+) -> Result<(), ApiError> {
+    let csrf_token = csrf_token_from_headers(headers)?;
+    let csrf_token_sha256_hex = hash_csrf_token(csrf_token);
+
+    if hashes_match_constant_time(
+        &csrf_token_sha256_hex,
+        &authenticated_user.csrf_token_sha256_hex,
+    ) {
+        return Ok(());
+    }
+
+    Err(ApiError::from(ServerError::Forbidden(
+        "invalid CSRF token".to_string(),
+    )))
+}
+
+fn require_admin_scope(scopes: &[AuthScope]) -> Result<(), ApiError> {
+    if scopes.contains(&AuthScope::Admin) {
+        return Ok(());
+    }
+
+    Err(ApiError::from(ServerError::Forbidden(
+        "admin scope required".to_string(),
+    )))
 }
 
 fn hashes_match_constant_time(candidate: &str, expected: &str) -> bool {
