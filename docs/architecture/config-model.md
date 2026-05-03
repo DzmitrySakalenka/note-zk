@@ -117,7 +117,12 @@ log_level = "info"
 output_dir = "/Volumes/NAS/zk-backups"
 retention_count = 14
 schedule_cron = "0 3 * * *"
-encryption_enabled = true
+include_attachments = true
+include_server_db = true
+
+[backup.encryption]
+type = "age"
+recipient = "<age-recipient>"
 ```
 
 ### Vault config example

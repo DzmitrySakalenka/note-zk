@@ -12,7 +12,19 @@ pub mod retention;
 pub mod schedule;
 pub mod service;
 
+pub use encryption::{
+    AgeIdentityDecryptor, AgeRecipientEncryptor, BackupDecryptor, BackupEncryptor,
+    PassthroughEncryptor,
+};
 pub use error::{BackupError, BackupResult};
+pub use manifest::{
+    BackupArchiveDescriptor, BackupManifest, BackupManifestEncryption, BackupSourceSummary,
+    MANIFEST_SCHEMA_VERSION,
+};
+pub use restore::{RestoreService, RestoreSpec, RestoreSummary};
+pub use retention::{RetentionPolicy, RetentionPruneSummary};
+pub use schedule::CronSchedule;
+pub use service::{BackupService, BackupServiceConfig};
 
 // TG15-001 fixes the crate's agreed dependency surface before the primitive
 // modules consume it in TG15-003 through TG15-009.
