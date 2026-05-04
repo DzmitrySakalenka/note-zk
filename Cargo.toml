@@ -6,6 +6,7 @@ members = [
     "zk-sync",
     "zk-auth",
     "zk-backup",
+    "zk-ai",
     "zk-app",
     "zk-server",
     "zk-cli",
