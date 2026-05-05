@@ -44,7 +44,7 @@ fn ai_domain_types_implement_required_common_traits() {
     assert_hashable_id_traits::<JobId>();
     assert_eq_common_traits::<ChunkRecord>();
     assert_eq_common_traits::<EmbeddingModelId>();
-    assert_eq_common_traits::<ProviderId>();
+    assert_hashable_id_traits::<ProviderId>();
     assert_eq_common_traits::<ExecutionMode>();
     assert_hashable_id_traits::<Capability>();
     assert_eq_common_traits::<ProviderSelectorPolicy>();

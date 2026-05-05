@@ -68,7 +68,7 @@ impl fmt::Display for EmbeddingModelId {
 }
 
 /// Stable embedding-provider identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct ProviderId(String);
 
 impl ProviderId {
