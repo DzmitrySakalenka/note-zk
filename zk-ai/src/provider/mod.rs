@@ -6,6 +6,7 @@ use zk_domain::{EmbeddingModelId, EmbeddingVector, ProviderId};
 use crate::{AiError, AiResult};
 
 /// Local Candle-backed embeddings provider.
+#[cfg(feature = "provider-local")]
 pub mod local_candle;
 /// OpenAI-compatible HTTP embeddings provider.
 #[cfg(feature = "provider-http")]
@@ -13,6 +14,8 @@ pub mod remote_http;
 /// Deterministic test embeddings provider.
 pub mod stub;
 
+#[cfg(feature = "provider-local")]
+pub use local_candle::{LocalDevice, LocalEmbeddingsConfig, LocalEmbeddingsProvider};
 #[cfg(feature = "provider-http")]
 pub use remote_http::{RemoteEmbeddingsConfig, RemoteEmbeddingsProvider};
 pub use stub::StubEmbeddingsProvider;
