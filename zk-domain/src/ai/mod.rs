@@ -12,3 +12,4 @@ pub use embedding::{
     AiIdentifierError, ChunkEmbeddingRecord, EmbeddingModelId, EmbeddingVector,
     EmbeddingVectorError, EmbeddingVectorResult, ProviderId, SemanticEdgeRecord,
 };
+pub use execution::{Capability, ExecutionMode, ExecutionModeParseError, ProviderSelectorPolicy};

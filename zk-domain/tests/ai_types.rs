@@ -1,14 +1,15 @@
 // Integration tests are separate crates; each uses only a subset of package dependencies.
 #![allow(unused_crate_dependencies)]
 
-use std::{fmt::Debug, hash::Hash};
+use std::{fmt::Debug, hash::Hash, str::FromStr};
 
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
 use zk_domain::{
-    AiIdentifierError, ChunkEmbeddingRecord, ChunkId, ChunkIdParseError, ChunkRecord,
-    EmbeddingModelId, EmbeddingVector, EmbeddingVectorError, ProviderId, SemanticEdgeRecord,
+    AiIdentifierError, Capability, ChunkEmbeddingRecord, ChunkId, ChunkIdParseError, ChunkRecord,
+    EmbeddingModelId, EmbeddingVector, EmbeddingVectorError, ExecutionMode,
+    ExecutionModeParseError, ProviderId, ProviderSelectorPolicy, SemanticEdgeRecord,
     id::{ContentHash, NoteId},
 };
 
@@ -42,12 +43,85 @@ fn ai_domain_types_implement_required_common_traits() {
     assert_eq_common_traits::<ChunkRecord>();
     assert_eq_common_traits::<EmbeddingModelId>();
     assert_eq_common_traits::<ProviderId>();
+    assert_eq_common_traits::<ExecutionMode>();
+    assert_hashable_id_traits::<Capability>();
+    assert_eq_common_traits::<ProviderSelectorPolicy>();
     assert_error_traits::<AiIdentifierError>();
     assert_error_traits::<ChunkIdParseError>();
     assert_error_traits::<EmbeddingVectorError>();
+    assert_error_traits::<ExecutionModeParseError>();
     assert_float_record_traits::<EmbeddingVector>();
     assert_float_record_traits::<ChunkEmbeddingRecord>();
     assert_float_record_traits::<SemanticEdgeRecord>();
+}
+
+#[test]
+fn execution_mode_from_str_accepts_cli_spellings() {
+    assert_eq!(
+        ExecutionMode::from_str("connected"),
+        Ok(ExecutionMode::Connected)
+    );
+    assert_eq!(
+        ExecutionMode::from_str("offline"),
+        Ok(ExecutionMode::Offline)
+    );
+    assert_eq!(ExecutionMode::from_str("hybrid"), Ok(ExecutionMode::Hybrid));
+    assert_eq!(ExecutionMode::from_str("auto"), Ok(ExecutionMode::Hybrid));
+}
+
+#[test]
+fn execution_mode_from_str_rejects_unknown_spellings() {
+    let error = ExecutionMode::from_str("server").expect_err("unknown execution mode should fail");
+
+    assert_eq!(error.value(), "server");
+    assert_eq!(error.to_string(), "unknown execution mode: server");
+}
+
+#[test]
+fn provider_selector_policy_default_uses_hybrid_without_explicit_providers() {
+    let policy = ProviderSelectorPolicy::default();
+
+    assert_eq!(policy.mode, ExecutionMode::Hybrid);
+    assert_eq!(policy.remote_provider, None);
+    assert_eq!(policy.local_provider, None);
+    assert_eq!(policy.stub_provider, None);
+}
+
+#[test]
+fn provider_selector_policy_round_trips_via_json() {
+    let policy = ProviderSelectorPolicy {
+        mode: ExecutionMode::Connected,
+        remote_provider: Some(provider_id_from("remote-http")),
+        local_provider: Some(provider_id_from("local-candle")),
+        stub_provider: Some(provider_id()),
+    };
+
+    let json = serde_json::to_value(&policy).expect("policy should serialize");
+
+    assert_eq!(json["mode"], "connected");
+    assert_eq!(json["remote_provider"], "remote-http");
+    assert_eq!(json["local_provider"], "local-candle");
+    assert_eq!(json["stub_provider"], "stub");
+
+    let decoded: ProviderSelectorPolicy =
+        serde_json::from_value(json).expect("policy should deserialize");
+    assert_eq!(decoded, policy);
+}
+
+#[test]
+fn capability_serializes_with_snake_case_names() {
+    assert_eq!(
+        serde_json::to_value(Capability::Embeddings).expect("capability should serialize"),
+        json!("embeddings")
+    );
+    assert_eq!(
+        serde_json::to_value(Capability::SemanticSearch).expect("capability should serialize"),
+        json!("semantic_search")
+    );
+    assert_eq!(
+        serde_json::to_value(Capability::Chat).expect("capability should serialize"),
+        json!("chat")
+    );
 }
 
 #[test]
@@ -301,6 +375,10 @@ fn model_id() -> EmbeddingModelId {
 
 fn provider_id() -> ProviderId {
     "stub".parse().expect("test provider id should parse")
+}
+
+fn provider_id_from(value: &str) -> ProviderId {
+    value.parse().expect("test provider id should parse")
 }
 
 fn ts(parts: (i32, u32, u32, u32, u32, u32)) -> DateTime<Utc> {
