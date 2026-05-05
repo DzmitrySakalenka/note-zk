@@ -13,6 +13,7 @@ axum = "0.8.9"
 # TG14 browser-session middleware uses `CookieJar` for request-cookie parsing;
 # TG14-016 owns response `Set-Cookie` construction.
 axum-extra = { version = "0.12.6", features = ["cookie"] }
+bytemuck = { version = "1.25.0", features = ["extern_crate_alloc"] }
 chrono = { version = "0.4.44", features = ["serde"] }
 clap = { version = "4.6.1", features = ["derive"] }
 cookie = "0.18.1"
