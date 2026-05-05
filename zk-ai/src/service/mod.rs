@@ -2,3 +2,5 @@
 
 /// Idempotent note chunking orchestration.
 pub mod chunking;
+/// Missing chunk embedding recompute orchestration.
+pub mod embeddings;

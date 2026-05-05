@@ -3,6 +3,7 @@
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
+use zk_ai::service::embeddings::EmbeddingsWriter;
 use zk_domain::{
     ChunkEmbeddingRecord, ChunkId, ChunkRecord, EmbeddingModelId, EmbeddingVector, ProviderId,
     id::{ContentHash, NoteId, RelativePath},
@@ -221,6 +222,93 @@ fn delete_for_note_removes_only_matching_note_embeddings() {
             .is_empty()
     );
     assert_eq!(remaining, vec![other_record]);
+}
+
+#[test]
+fn embeddings_writer_lists_chunks_missing_requested_model() {
+    let connection = setup_connection();
+    let note_id = note_id();
+    insert_note(&connection, &note_id);
+    let first_chunk = chunk_fixture(&note_id, "01JAR5A3PJEZ3SKG67PN8N6S6R", 0, "First");
+    let second_chunk = chunk_fixture(&note_id, "01JAR5A3PJEZ3SKG67PN8N6S6Q", 1, "Second");
+    insert_chunks(
+        &connection,
+        &note_id,
+        &[first_chunk.clone(), second_chunk.clone()],
+    );
+    let queried_model = model("test/model-a");
+    let other_model = model("test/model-b");
+    let provider = provider("test-provider");
+    let repo = EmbeddingsRepo::new(&connection);
+    repo.upsert(&embedding_record(
+        &first_chunk.chunk_id,
+        &queried_model,
+        &provider,
+        &[1.0, 0.0],
+        "2026-05-05T11:00:00Z",
+    ))
+    .expect("first chunk upsert should succeed");
+    repo.upsert(&embedding_record(
+        &second_chunk.chunk_id,
+        &other_model,
+        &provider,
+        &[0.0, 1.0],
+        "2026-05-05T11:00:00Z",
+    ))
+    .expect("other model upsert should succeed");
+
+    let missing = EmbeddingsWriter::list_chunks_missing_embeddings(&repo, &note_id, &queried_model)
+        .expect("missing chunks should list");
+
+    assert_eq!(missing, vec![second_chunk]);
+}
+
+#[test]
+fn embeddings_writer_upserts_multiple_records() {
+    let connection = setup_connection();
+    let note_id = note_id();
+    insert_note(&connection, &note_id);
+    let first_chunk = chunk_fixture(&note_id, "01JAR5A3PJEZ3SKG67PN8N6S6R", 0, "First");
+    let second_chunk = chunk_fixture(&note_id, "01JAR5A3PJEZ3SKG67PN8N6S6Q", 1, "Second");
+    insert_chunks(
+        &connection,
+        &note_id,
+        &[first_chunk.clone(), second_chunk.clone()],
+    );
+    let model = model("test/model-a");
+    let provider = provider("test-provider");
+    let records = vec![
+        embedding_record(
+            &first_chunk.chunk_id,
+            &model,
+            &provider,
+            &[1.0, 0.0],
+            "2026-05-05T11:00:00Z",
+        ),
+        embedding_record(
+            &second_chunk.chunk_id,
+            &model,
+            &provider,
+            &[0.0, 1.0],
+            "2026-05-05T11:00:00Z",
+        ),
+    ];
+
+    let repo = EmbeddingsRepo::new(&connection);
+    let upserted = EmbeddingsWriter::upsert_embeddings(&repo, &records)
+        .expect("batch embedding upsert should succeed");
+
+    assert_eq!(upserted, 2);
+    assert_eq!(
+        repo.list_for_chunk(&first_chunk.chunk_id)
+            .expect("first chunk embeddings should list"),
+        vec![records[0].clone()]
+    );
+    assert_eq!(
+        repo.list_for_chunk(&second_chunk.chunk_id)
+            .expect("second chunk embeddings should list"),
+        vec![records[1].clone()]
+    );
 }
 
 #[test]

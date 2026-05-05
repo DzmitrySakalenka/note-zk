@@ -7,9 +7,11 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, Row, types::Type};
+use zk_ai::{AiError, AiResult, service::embeddings::EmbeddingsWriter};
 use zk_domain::{
-    ChunkEmbeddingRecord, ChunkId, EmbeddingModelId, EmbeddingVector, EmbeddingVectorError,
-    ProviderId, decode_vector, encode_vector, id::NoteId,
+    ChunkEmbeddingRecord, ChunkId, ChunkRecord, EmbeddingModelId, EmbeddingVector,
+    EmbeddingVectorError, ProviderId, decode_vector, encode_vector,
+    id::{ContentHash, NoteId},
 };
 
 use crate::error::IndexError;
@@ -50,6 +52,21 @@ SELECT
 FROM chunk_embeddings
 WHERE chunk_id = ?1
 ORDER BY embedding_model ASC
+";
+const LIST_CHUNKS_MISSING_EMBEDDINGS_SQL: &str = r"
+SELECT
+    nc.chunk_id,
+    nc.note_id,
+    nc.ordinal,
+    nc.content_hash,
+    nc.text,
+    nc.token_count,
+    nc.created_at
+FROM note_chunks AS nc
+LEFT JOIN chunk_embeddings AS ce
+    ON ce.chunk_id = nc.chunk_id AND ce.embedding_model = ?2
+WHERE nc.note_id = ?1 AND ce.chunk_id IS NULL
+ORDER BY nc.ordinal ASC
 ";
 const TOP_K_COSINE_SQL: &str = r"
 SELECT
@@ -202,6 +219,45 @@ impl<'a> EmbeddingsRepo<'a> {
     }
 }
 
+impl EmbeddingsWriter for EmbeddingsRepo<'_> {
+    fn list_chunks_missing_embeddings(
+        &self,
+        note_id: &NoteId,
+        model: &EmbeddingModelId,
+    ) -> AiResult<Vec<ChunkRecord>> {
+        let mut statement = self
+            .conn
+            .prepare_cached(LIST_CHUNKS_MISSING_EMBEDDINGS_SQL)
+            .map_err(|error| {
+                AiError::Internal(format!(
+                    "prepare list local chunks missing embeddings: {error}"
+                ))
+            })?;
+        let rows = statement
+            .query_map(
+                rusqlite::params![note_id.as_str(), model.as_str()],
+                decode_chunk_record,
+            )
+            .map_err(|error| {
+                AiError::Internal(format!("list local chunks missing embeddings: {error}"))
+            })?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(|error| {
+            AiError::Internal(format!("decode local chunks missing embeddings: {error}"))
+        })
+    }
+
+    fn upsert_embeddings(&self, records: &[ChunkEmbeddingRecord]) -> AiResult<u64> {
+        for record in records {
+            self.upsert(record).map_err(|error| {
+                AiError::Internal(format!("upsert local chunk embedding: {error}"))
+            })?;
+        }
+
+        Ok(u64::try_from(records.len()).expect("record count should fit u64"))
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ScoredHit {
     note_id: NoteId,
@@ -272,6 +328,22 @@ fn decode_scored_hit(row: &Row<'_>, query: &EmbeddingVector) -> rusqlite::Result
         note_id: NoteId::new(&note_id),
         chunk_id: ChunkId::new(&chunk_id),
         similarity,
+    })
+}
+
+fn decode_chunk_record(row: &Row<'_>) -> rusqlite::Result<ChunkRecord> {
+    let chunk_id = row.get::<_, String>(0)?;
+    let note_id = row.get::<_, String>(1)?;
+    let content_hash = row.get::<_, String>(3)?;
+
+    Ok(ChunkRecord {
+        chunk_id: ChunkId::new(&chunk_id),
+        note_id: NoteId::new(&note_id),
+        ordinal: decode_u32(row, 2)?,
+        content_hash: ContentHash::new(&content_hash),
+        text: row.get(4)?,
+        token_count: decode_optional_u32(row, 5)?,
+        created_at: decode_timestamp(row, 6)?,
     })
 }
 
@@ -379,6 +451,21 @@ fn decode_provider(row: &Row<'_>, index: usize) -> rusqlite::Result<ProviderId> 
 fn decode_usize(row: &Row<'_>, index: usize) -> rusqlite::Result<usize> {
     let value = row.get::<_, i64>(index)?;
     usize::try_from(value).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(index, value))
+}
+
+fn decode_u32(row: &Row<'_>, index: usize) -> rusqlite::Result<u32> {
+    let value = row.get::<_, i64>(index)?;
+    u32::try_from(value).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(index, value))
+}
+
+fn decode_optional_u32(row: &Row<'_>, index: usize) -> rusqlite::Result<Option<u32>> {
+    let Some(value) = row.get::<_, Option<i64>>(index)? else {
+        return Ok(None);
+    };
+
+    u32::try_from(value)
+        .map(Some)
+        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(index, value))
 }
 
 fn dimension_to_i64(dimension: usize) -> Result<i64, IndexError> {
