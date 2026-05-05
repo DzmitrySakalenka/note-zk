@@ -173,15 +173,24 @@ Key columns:
 - `deleted_at TEXT`
 - `delete_revision INTEGER`
 
-## Derived/AI Tables (shipped in server schema v3, TG16-006)
+## Derived/AI Tables
 
-These tables are shipped in `zk-server` schema v3 by TG16-006. The local
-`zk-index` AI cache remains deferred to TG16-010.
+The server-side AI tables shipped in `zk-server` schema v3 by TG16-006. The
+local cache tables `note_chunks` and `chunk_embeddings` shipped in `zk-index`
+schema v3 by TG16-010 for offline semantic search.
 
-### `note_chunks` (shipped in server schema v3, TG16-006)
+Local and server schemas intentionally diverge:
+
+- local `note_chunks.note_id` references `notes_index(note_id)`;
+- server `note_chunks.note_id` references `notes(note_id)`;
+- `semantic_edges` and `ai_jobs` are server-only;
+- `idx_note_chunks_hash` is server-only.
+
+### `note_chunks` (server schema v3, local schema v3)
 
 - `chunk_id TEXT PRIMARY KEY`
-- `note_id TEXT NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE`
+- `note_id TEXT NOT NULL REFERENCES notes_index(note_id) ON DELETE CASCADE` locally
+- `note_id TEXT NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE` on the server
 - `ordinal INTEGER NOT NULL`
 - `content_hash TEXT NOT NULL`
 - `text TEXT NOT NULL`
@@ -191,9 +200,9 @@ These tables are shipped in `zk-server` schema v3 by TG16-006. The local
 Indexes:
 
 - `idx_note_chunks_note ON note_chunks(note_id, ordinal)`
-- `idx_note_chunks_hash ON note_chunks(content_hash)`
+- `idx_note_chunks_hash ON note_chunks(content_hash)` on the server only
 
-### `chunk_embeddings` (shipped in server schema v3, TG16-006)
+### `chunk_embeddings` (server schema v3, local schema v3)
 
 - `chunk_id TEXT NOT NULL REFERENCES note_chunks(chunk_id) ON DELETE CASCADE`
 - `embedding_model TEXT NOT NULL`
@@ -210,7 +219,7 @@ Index:
 
 - `idx_chunk_embeddings_model ON chunk_embeddings(embedding_model)`
 
-### `semantic_edges` (shipped in server schema v3, TG16-006)
+### `semantic_edges` (server schema v3 only)
 
 - `source_note_id TEXT NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE`
 - `target_note_id TEXT NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE`
@@ -225,7 +234,7 @@ Primary key:
 `semantic_edges` is initially empty. Population is deferred until a future
 edge-building job.
 
-### `ai_jobs` (shipped in server schema v3, TG16-006)
+### `ai_jobs` (server schema v3 only)
 
 - `job_id TEXT PRIMARY KEY`
 - `kind TEXT NOT NULL`

@@ -12,7 +12,8 @@ pub mod job;
 pub use chunk::{ChunkId, ChunkIdParseError, ChunkRecord};
 pub use embedding::{
     AiIdentifierError, ChunkEmbeddingRecord, EmbeddingModelId, EmbeddingVector,
-    EmbeddingVectorError, EmbeddingVectorResult, ProviderId, SemanticEdgeRecord,
+    EmbeddingVectorError, EmbeddingVectorResult, ProviderId, SemanticEdgeRecord, decode_vector,
+    encode_vector,
 };
 pub use execution::{Capability, ExecutionMode, ExecutionModeParseError, ProviderSelectorPolicy};
 pub use job::{JobId, JobIdParseError};

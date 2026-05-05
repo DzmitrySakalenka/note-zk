@@ -9,6 +9,7 @@ use thiserror::Error;
 use crate::{ai::chunk::ChunkId, id::NoteId};
 
 const MAX_AI_IDENTIFIER_LEN: usize = 128;
+const FLOAT_BYTE_LEN: usize = size_of::<f32>();
 
 /// Result type for pure embedding-vector operations.
 pub type EmbeddingVectorResult<T> = Result<T, EmbeddingVectorError>;
@@ -210,6 +211,47 @@ impl PartialEq for EmbeddingVector {
                 .zip(other.values.iter())
                 .all(|(left, right)| left.to_bits() == right.to_bits())
     }
+}
+
+/// Encodes an embedding vector as canonical little-endian `f32` bytes.
+#[must_use]
+pub fn encode_vector(vector: &EmbeddingVector) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(vector.values.len() * FLOAT_BYTE_LEN);
+
+    for value in &vector.values {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    bytes
+}
+
+/// Decodes canonical little-endian `f32` bytes into an embedding vector.
+///
+/// # Errors
+///
+/// Returns [`EmbeddingVectorError::DimensionMismatch`] when the byte slice is
+/// not an exact sequence of `f32` values.
+pub fn decode_vector(
+    bytes: &[u8],
+    model: EmbeddingModelId,
+) -> EmbeddingVectorResult<EmbeddingVector> {
+    if bytes.len() % FLOAT_BYTE_LEN != 0 {
+        return Err(EmbeddingVectorError::DimensionMismatch {
+            expected: bytes.len().div_ceil(FLOAT_BYTE_LEN),
+            actual: bytes.len() / FLOAT_BYTE_LEN,
+        });
+    }
+
+    let mut values = Vec::with_capacity(bytes.len() / FLOAT_BYTE_LEN);
+    for chunk in bytes.chunks_exact(FLOAT_BYTE_LEN) {
+        values.push(f32_from_le_chunk(chunk));
+    }
+
+    Ok(EmbeddingVector { values, model })
+}
+
+fn f32_from_le_chunk(chunk: &[u8]) -> f32 {
+    f32::from_le_bytes(chunk.try_into().expect("chunk should contain one f32"))
 }
 
 /// Error returned by pure embedding-vector operations.

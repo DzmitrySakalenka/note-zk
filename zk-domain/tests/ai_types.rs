@@ -10,7 +10,7 @@ use zk_domain::{
     AiIdentifierError, Capability, ChunkEmbeddingRecord, ChunkId, ChunkIdParseError, ChunkRecord,
     EmbeddingModelId, EmbeddingVector, EmbeddingVectorError, ExecutionMode,
     ExecutionModeParseError, JobId, JobIdParseError, ProviderId, ProviderSelectorPolicy,
-    SemanticEdgeRecord,
+    SemanticEdgeRecord, decode_vector, encode_vector,
     id::{ContentHash, NoteId},
 };
 
@@ -340,6 +340,42 @@ fn embedding_vector_partial_eq_uses_float_bits() {
     let negative_zero = vector([-0.0]);
 
     assert_ne!(positive_zero, negative_zero);
+}
+
+#[test]
+fn embedding_vector_encoding_uses_little_endian_f32_bytes() {
+    let embedding = vector([1.25, -0.5]);
+
+    let bytes = encode_vector(&embedding);
+
+    assert_eq!(bytes, [0, 0, 160, 63, 0, 0, 0, 191]);
+}
+
+#[test]
+fn embedding_vector_decoding_round_trips_float_bits() {
+    let embedding = EmbeddingVector {
+        values: vec![1.25, -0.0, f32::INFINITY],
+        model: model_id(),
+    };
+
+    let decoded =
+        decode_vector(&encode_vector(&embedding), model_id()).expect("vector should decode");
+
+    assert_eq!(decoded, embedding);
+}
+
+#[test]
+fn embedding_vector_decoding_rejects_partial_f32_bytes() {
+    let error =
+        decode_vector(&[0, 0, 160], model_id()).expect_err("partial f32 should be rejected");
+
+    assert_eq!(
+        error,
+        EmbeddingVectorError::DimensionMismatch {
+            expected: 1,
+            actual: 0,
+        }
+    );
 }
 
 #[test]

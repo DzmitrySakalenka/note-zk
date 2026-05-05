@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::{
     error::IndexError,
-    schema::{V1_INDEX_DDL, V1_TABLE_DDL},
+    schema::{V1_INDEX_DDL, V1_TABLE_DDL, V3_INDEX_DDL, V3_TABLE_DDL},
 };
 
 const CREATE_SCHEMA_VERSION_TABLE: &str = r"CREATE TABLE IF NOT EXISTS schema_version (
@@ -15,6 +15,7 @@ const DELETE_SCHEMA_VERSION_ROWS: &str = "DELETE FROM schema_version";
 const INSERT_SCHEMA_VERSION: &str = "INSERT INTO schema_version (version) VALUES (?1)";
 const V1_SCHEMA_VERSION: u32 = 1;
 const V2_SCHEMA_VERSION: u32 = 2;
+const V3_SCHEMA_VERSION: u32 = 3;
 const ADD_NOTE_SYNC_STATE_LAST_SYNCED_PATH: &str =
     "ALTER TABLE note_sync_state ADD COLUMN last_synced_path TEXT";
 const ADD_ASSET_SYNC_STATE_LAST_SYNCED_PATH: &str =
@@ -41,12 +42,12 @@ pub fn ensure_schema(conn: &Connection) -> Result<(), IndexError> {
         })?
         .unwrap_or(0);
 
-    match current_version.cmp(&V2_SCHEMA_VERSION) {
+    match current_version.cmp(&V3_SCHEMA_VERSION) {
         Ordering::Equal => return Ok(()),
         Ordering::Greater => {
             return Err(IndexError::UnsupportedSchemaVersion {
                 found: current_version,
-                max_supported: V2_SCHEMA_VERSION,
+                max_supported: V3_SCHEMA_VERSION,
             });
         }
         Ordering::Less => {}
@@ -92,23 +93,43 @@ pub fn ensure_schema(conn: &Connection) -> Result<(), IndexError> {
             })?;
     }
 
+    if current_version < V3_SCHEMA_VERSION {
+        for statement in V3_TABLE_DDL {
+            transaction
+                .execute(statement, [])
+                .map_err(|source| IndexError::Migration {
+                    version: V3_SCHEMA_VERSION,
+                    source,
+                })?;
+        }
+
+        for statement in V3_INDEX_DDL {
+            transaction
+                .execute(statement, [])
+                .map_err(|source| IndexError::Migration {
+                    version: V3_SCHEMA_VERSION,
+                    source,
+                })?;
+        }
+    }
+
     transaction
         .execute(DELETE_SCHEMA_VERSION_ROWS, [])
         .map_err(|source| IndexError::Migration {
-            version: V2_SCHEMA_VERSION,
+            version: V3_SCHEMA_VERSION,
             source,
         })?;
     transaction
-        .execute(INSERT_SCHEMA_VERSION, [V2_SCHEMA_VERSION])
+        .execute(INSERT_SCHEMA_VERSION, [V3_SCHEMA_VERSION])
         .map_err(|source| IndexError::Migration {
-            version: V2_SCHEMA_VERSION,
+            version: V3_SCHEMA_VERSION,
             source,
         })?;
 
     transaction
         .commit()
         .map_err(|source| IndexError::Migration {
-            version: V2_SCHEMA_VERSION,
+            version: V3_SCHEMA_VERSION,
             source,
         })?;
 

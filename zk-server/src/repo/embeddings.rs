@@ -7,7 +7,7 @@ use std::{
 use rusqlite::{Connection, Row, types::Type};
 use zk_domain::{
     ChunkEmbeddingRecord, ChunkId, EmbeddingModelId, EmbeddingVector, EmbeddingVectorError,
-    EmbeddingVectorResult, ProviderId, id::NoteId,
+    ProviderId, decode_vector, encode_vector, id::NoteId,
 };
 
 use super::timestamps::{decode_timestamp, encode_timestamp};
@@ -192,43 +192,6 @@ impl<'a> EmbeddingsRepo<'a> {
             .map(ScoredHit::into_top_hit)
             .collect())
     }
-}
-
-/// Encodes an embedding vector as canonical little-endian `f32` bytes.
-#[must_use]
-pub fn encode_vector(vector: &EmbeddingVector) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(vector.values.len() * FLOAT_BYTE_LEN);
-
-    for value in &vector.values {
-        bytes.extend_from_slice(&value.to_le_bytes());
-    }
-
-    bytes
-}
-
-/// Decodes canonical little-endian `f32` bytes into an embedding vector.
-///
-/// # Errors
-///
-/// Returns [`EmbeddingVectorError::DimensionMismatch`] when the byte slice is
-/// not an exact sequence of `f32` values.
-pub fn decode_vector(
-    bytes: &[u8],
-    model: EmbeddingModelId,
-) -> EmbeddingVectorResult<EmbeddingVector> {
-    if bytes.len() % FLOAT_BYTE_LEN != 0 {
-        return Err(EmbeddingVectorError::DimensionMismatch {
-            expected: bytes.len().div_ceil(FLOAT_BYTE_LEN),
-            actual: bytes.len() / FLOAT_BYTE_LEN,
-        });
-    }
-
-    let mut values = Vec::with_capacity(bytes.len() / FLOAT_BYTE_LEN);
-    for chunk in bytes.chunks_exact(FLOAT_BYTE_LEN) {
-        values.push(f32_from_le_chunk(chunk));
-    }
-
-    Ok(EmbeddingVector { values, model })
 }
 
 #[derive(Debug, Clone)]

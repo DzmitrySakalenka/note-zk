@@ -40,7 +40,7 @@ pub use ai::{
     AiIdentifierError, Capability, ChunkEmbeddingRecord, ChunkId, ChunkIdParseError, ChunkRecord,
     EmbeddingModelId, EmbeddingVector, EmbeddingVectorError, EmbeddingVectorResult, ExecutionMode,
     ExecutionModeParseError, JobId, JobIdParseError, ProviderId, ProviderSelectorPolicy,
-    SemanticEdgeRecord,
+    SemanticEdgeRecord, decode_vector, encode_vector,
 };
 pub use auth::{AuthScope, AuthScopeParseError, DeviceTokenRecord, PasswordUser, WebSessionRecord};
 pub use auth_wire::{
