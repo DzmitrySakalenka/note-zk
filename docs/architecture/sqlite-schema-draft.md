@@ -173,36 +173,74 @@ Key columns:
 - `deleted_at TEXT`
 - `delete_revision INTEGER`
 
-## Local Derived/AI Tables (reserved for TG16+; not present in the V1 schema)
+## Derived/AI Tables (shipped in server schema v3, TG16-006)
 
-The following draft tables are future AI-layer planning notes. They are
-not shipped in `zk-index/src/schema.rs`.
+These tables are shipped in `zk-server` schema v3 by TG16-006. The local
+`zk-index` AI cache remains deferred to TG16-010.
 
-### `note_chunks` (reserved for TG16+; not present in V1)
+### `note_chunks` (shipped in server schema v3, TG16-006)
 
 - `chunk_id TEXT PRIMARY KEY`
-- `note_id TEXT NOT NULL`
+- `note_id TEXT NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE`
 - `ordinal INTEGER NOT NULL`
-- `markdown_text TEXT NOT NULL`
+- `content_hash TEXT NOT NULL`
+- `text TEXT NOT NULL`
 - `token_count INTEGER`
-
-### `chunk_embeddings` (reserved for TG16+; not present in V1)
-
-- `chunk_id TEXT NOT NULL`
-- `embedding_model TEXT NOT NULL`
-- `vector_ref TEXT`
 - `created_at TEXT NOT NULL`
 
-Composite unique:
+Indexes:
+
+- `idx_note_chunks_note ON note_chunks(note_id, ordinal)`
+- `idx_note_chunks_hash ON note_chunks(content_hash)`
+
+### `chunk_embeddings` (shipped in server schema v3, TG16-006)
+
+- `chunk_id TEXT NOT NULL REFERENCES note_chunks(chunk_id) ON DELETE CASCADE`
+- `embedding_model TEXT NOT NULL`
+- `provider_id TEXT NOT NULL`
+- `dim INTEGER NOT NULL`
+- `vector BLOB NOT NULL`
+- `created_at TEXT NOT NULL`
+
+Primary key:
 
 - `(chunk_id, embedding_model)`
 
-### `semantic_edges` (reserved for TG16+; not present in V1)
+Index:
 
-- `source_note_id TEXT NOT NULL`
-- `target_note_id TEXT NOT NULL`
+- `idx_chunk_embeddings_model ON chunk_embeddings(embedding_model)`
+
+### `semantic_edges` (shipped in server schema v3, TG16-006)
+
+- `source_note_id TEXT NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE`
+- `target_note_id TEXT NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE`
 - `similarity REAL NOT NULL`
+- `embedding_model TEXT NOT NULL`
 - `created_at TEXT NOT NULL`
+
+Primary key:
+
+- `(source_note_id, target_note_id, embedding_model)`
+
+`semantic_edges` is initially empty. Population is deferred until a future
+edge-building job.
+
+### `ai_jobs` (shipped in server schema v3, TG16-006)
+
+- `job_id TEXT PRIMARY KEY`
+- `kind TEXT NOT NULL`
+- `payload_json TEXT NOT NULL`
+- `status TEXT NOT NULL`
+- `attempts INTEGER NOT NULL DEFAULT 0`
+- `last_error TEXT`
+- `enqueued_at TEXT NOT NULL`
+- `started_at TEXT`
+- `finished_at TEXT`
+- `claim_token TEXT`
+
+Index:
+
+- `idx_ai_jobs_status_enqueued ON ai_jobs(status, enqueued_at)`
 
 ## Server SQLite Schema
 

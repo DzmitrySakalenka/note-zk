@@ -100,6 +100,48 @@ const CREATE_TABLE_WEB_SESSIONS: &str = r"CREATE TABLE web_sessions (
   FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
 )";
 
+const CREATE_TABLE_NOTE_CHUNKS: &str = r"CREATE TABLE note_chunks (
+  chunk_id TEXT PRIMARY KEY,
+  note_id TEXT NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
+  ordinal INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  text TEXT NOT NULL,
+  token_count INTEGER,
+  created_at TEXT NOT NULL
+)";
+
+const CREATE_TABLE_CHUNK_EMBEDDINGS: &str = r"CREATE TABLE chunk_embeddings (
+  chunk_id TEXT NOT NULL REFERENCES note_chunks(chunk_id) ON DELETE CASCADE,
+  embedding_model TEXT NOT NULL,
+  provider_id TEXT NOT NULL,
+  dim INTEGER NOT NULL,
+  vector BLOB NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (chunk_id, embedding_model)
+)";
+
+const CREATE_TABLE_SEMANTIC_EDGES: &str = r"CREATE TABLE semantic_edges (
+  source_note_id TEXT NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
+  target_note_id TEXT NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
+  similarity REAL NOT NULL,
+  embedding_model TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (source_note_id, target_note_id, embedding_model)
+)";
+
+const CREATE_TABLE_AI_JOBS: &str = r"CREATE TABLE ai_jobs (
+  job_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  status TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  enqueued_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  claim_token TEXT
+)";
+
 const CREATE_INDEX_SYNC_EVENTS_SEQ: &str =
     "CREATE INDEX idx_sync_events_seq ON sync_events(event_seq)";
 const CREATE_INDEX_SYNC_EVENTS_ITEM: &str =
@@ -120,6 +162,14 @@ const CREATE_INDEX_WEB_SESSIONS_EXPIRES: &str =
     "CREATE INDEX idx_web_sessions_expires ON web_sessions(expires_at) WHERE revoked_at IS NULL";
 const CREATE_INDEX_DEVICE_TOKENS_DEVICE: &str =
     "CREATE INDEX idx_device_tokens_device ON device_tokens(device_id) WHERE revoked_at IS NULL";
+const CREATE_INDEX_NOTE_CHUNKS_NOTE: &str =
+    "CREATE INDEX idx_note_chunks_note ON note_chunks(note_id, ordinal)";
+const CREATE_INDEX_NOTE_CHUNKS_HASH: &str =
+    "CREATE INDEX idx_note_chunks_hash ON note_chunks(content_hash)";
+const CREATE_INDEX_CHUNK_EMBEDDINGS_MODEL: &str =
+    "CREATE INDEX idx_chunk_embeddings_model ON chunk_embeddings(embedding_model)";
+const CREATE_INDEX_AI_JOBS_STATUS_ENQUEUED: &str =
+    "CREATE INDEX idx_ai_jobs_status_enqueued ON ai_jobs(status, enqueued_at)";
 
 pub(crate) const V1_TABLE_DDL: &[&str] = &[
     CREATE_TABLE_DEVICES,
@@ -147,4 +197,18 @@ pub(crate) const V2_INDEX_DDL: &[&str] = &[
     CREATE_INDEX_WEB_SESSIONS_USER,
     CREATE_INDEX_WEB_SESSIONS_EXPIRES,
     CREATE_INDEX_DEVICE_TOKENS_DEVICE,
+];
+
+pub(crate) const V3_TABLE_DDL: &[&str] = &[
+    CREATE_TABLE_NOTE_CHUNKS,
+    CREATE_TABLE_CHUNK_EMBEDDINGS,
+    CREATE_TABLE_SEMANTIC_EDGES,
+    CREATE_TABLE_AI_JOBS,
+];
+
+pub(crate) const V3_INDEX_DDL: &[&str] = &[
+    CREATE_INDEX_NOTE_CHUNKS_NOTE,
+    CREATE_INDEX_NOTE_CHUNKS_HASH,
+    CREATE_INDEX_CHUNK_EMBEDDINGS_MODEL,
+    CREATE_INDEX_AI_JOBS_STATUS_ENQUEUED,
 ];

@@ -2,7 +2,9 @@
 
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::schema::{V1_INDEX_DDL, V1_TABLE_DDL, V2_INDEX_DDL, V2_TABLE_DDL};
+use crate::schema::{
+    V1_INDEX_DDL, V1_TABLE_DDL, V2_INDEX_DDL, V2_TABLE_DDL, V3_INDEX_DDL, V3_TABLE_DDL,
+};
 use crate::{ServerError, ServerResult};
 
 const CREATE_SERVER_SCHEMA_VERSION_TABLE: &str = r"CREATE TABLE IF NOT EXISTS server_schema_version (
@@ -13,7 +15,7 @@ const SELECT_SERVER_SCHEMA_VERSION: &str = "SELECT version FROM server_schema_ve
 const DELETE_SERVER_SCHEMA_VERSION_ROWS: &str = "DELETE FROM server_schema_version";
 const INSERT_SERVER_SCHEMA_VERSION: &str =
     "INSERT INTO server_schema_version (id, version) VALUES (1, ?1)";
-const CURRENT_VERSION: i64 = 2;
+const CURRENT_VERSION: i64 = 3;
 
 struct Migration {
     target_version: i64,
@@ -31,6 +33,11 @@ const MIGRATIONS: &[Migration] = &[
         target_version: 2,
         tables: V2_TABLE_DDL,
         indexes: V2_INDEX_DDL,
+    },
+    Migration {
+        target_version: 3,
+        tables: V3_TABLE_DDL,
+        indexes: V3_INDEX_DDL,
     },
 ];
 
