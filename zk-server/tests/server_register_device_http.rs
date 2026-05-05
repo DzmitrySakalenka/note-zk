@@ -37,6 +37,7 @@ fn test_config(database_path: PathBuf) -> ServerConfig {
         trash_retention_days: 30,
         max_batch_size: 250,
         backup: None,
+        ai: None,
     }
 }
 

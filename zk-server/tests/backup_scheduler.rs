@@ -149,6 +149,7 @@ impl SchedulerFixture {
             trash_retention_days: 14,
             max_batch_size: 1000,
             backup,
+            ai: None,
         }
     }
 

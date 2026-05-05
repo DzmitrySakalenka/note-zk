@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use candle_core::{Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::bert::{BertModel, Config, DTYPE};
+use serde::Deserialize;
 use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
 use zk_domain::{EmbeddingModelId, EmbeddingVector, ProviderId};
 
@@ -25,9 +26,11 @@ const SAFETENSORS_WEIGHTS_FILE: &str = "model.safetensors";
 const TOKENIZER_FILE: &str = "tokenizer.json";
 
 /// Device requested for local Candle embeddings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum LocalDevice {
     /// Run inference on CPU.
+    #[default]
     Cpu,
     /// Run inference on Apple Metal, requiring the `provider-local-metal` feature.
     Metal,
@@ -36,17 +39,20 @@ pub enum LocalDevice {
 }
 
 /// Configuration for the Candle-backed local embeddings provider.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct LocalEmbeddingsConfig {
     /// Directory containing `tokenizer.json`, `config.json`, and model weights.
     pub model_dir: PathBuf,
     /// Provider default model advertised in capability metadata.
     pub model_id: EmbeddingModelId,
     /// Maximum token sequence length for truncation.
+    #[serde(default)]
     pub max_seq_len: Option<usize>,
     /// Maximum texts sent in one provider call.
+    #[serde(default)]
     pub max_batch_size: Option<usize>,
     /// Candle device requested for inference.
+    #[serde(default)]
     pub device: LocalDevice,
 }
 

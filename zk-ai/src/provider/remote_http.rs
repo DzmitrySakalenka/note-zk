@@ -4,7 +4,7 @@ use std::{env, time::Duration};
 
 use async_trait::async_trait;
 use reqwest::{Client, Method, Response, StatusCode, Url};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tokio::time::sleep;
 use tracing::{Instrument, info, info_span, warn};
 use zk_domain::{EmbeddingModelId, EmbeddingVector, ProviderId};
@@ -21,19 +21,27 @@ const MAX_INPUT_TOKENS: u32 = 8192;
 const PROVIDER_ID: &str = "remote-http";
 
 /// Configuration for the OpenAI-compatible HTTP embeddings provider.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct RemoteEmbeddingsConfig {
     /// Base URL for the embeddings backend.
     pub base_url: String,
     /// Provider default model advertised in capability metadata.
+    #[serde(rename = "model_id")]
     pub model: EmbeddingModelId,
     /// Expected embedding vector dimension.
     pub dim: usize,
     /// Environment variable that stores the API key.
+    #[serde(default)]
     pub api_key_env_var: String,
     /// Maximum texts sent in one provider call.
+    #[serde(default)]
     pub max_batch_size: Option<usize>,
     /// Per-request HTTP timeout.
+    #[serde(
+        default,
+        rename = "timeout_secs",
+        deserialize_with = "deserialize_optional_duration_secs"
+    )]
     pub timeout: Option<Duration>,
 }
 
@@ -149,7 +157,7 @@ impl RemoteEmbeddingsProvider {
                                         "decode embeddings response: {error}"
                                     ))
                                 })?;
-                        return response.into_embeddings(request, self.capability.dim);
+                        return response.into_embeddings(&request, self.capability.dim);
                     }
 
                     let body = sanitized_response_body(response).await;
@@ -246,7 +254,7 @@ struct EmbeddingsHttpResponse {
 impl EmbeddingsHttpResponse {
     fn into_embeddings(
         mut self,
-        request: EmbeddingsRequest,
+        request: &EmbeddingsRequest,
         dim: usize,
     ) -> AiResult<EmbeddingsResponse> {
         let expected = request.texts.len();
@@ -346,6 +354,13 @@ fn is_retryable_status(status: StatusCode) -> bool {
 
 fn backoff(attempt: usize) -> Duration {
     Duration::from_millis(100 * (1_u64 << attempt))
+}
+
+fn deserialize_optional_duration_secs<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<u64>::deserialize(deserializer).map(|seconds| seconds.map(Duration::from_secs))
 }
 
 async fn sanitized_response_body(response: Response) -> String {

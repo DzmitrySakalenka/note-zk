@@ -602,6 +602,7 @@ fn server_config(
             include_attachments: true,
             include_server_db: true,
         }),
+        ai: None,
     }
 }
 

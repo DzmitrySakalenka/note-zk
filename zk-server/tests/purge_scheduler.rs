@@ -276,6 +276,7 @@ fn fresh_temp_state(prefix: &str) -> TempState {
         trash_retention_days: 14,
         max_batch_size: 1000,
         backup: None,
+        ai: None,
     })
     .expect("server state should bootstrap");
 
@@ -305,6 +306,7 @@ fn fresh_state(prefix: &str) -> ServerState {
         trash_retention_days: 14,
         max_batch_size: 1000,
         backup: None,
+        ai: None,
     })
     .expect("server state should bootstrap")
 }
