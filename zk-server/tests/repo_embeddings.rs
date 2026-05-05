@@ -3,7 +3,7 @@
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
-use zk_ai::service::embeddings::EmbeddingsWriter;
+use zk_ai::service::{embeddings::EmbeddingsWriter, semantic_search::EmbeddingsReader};
 use zk_domain::{
     ChunkEmbeddingRecord, ChunkId, ChunkRecord, EmbeddingModelId, EmbeddingVector, ProviderId,
     id::{ContentHash, NoteId},
@@ -257,6 +257,61 @@ fn embeddings_writer_upserts_multiple_records() {
         repo.list_for_chunk(&second_chunk.chunk_id)
             .expect("second chunk embeddings should list"),
         vec![records[1].clone()]
+    );
+}
+
+#[test]
+fn embeddings_reader_top_k_cosine_maps_repo_hits() {
+    let connection = setup_connection();
+    let note_id = note_id();
+    insert_note(&connection, &note_id);
+    let chunk = chunk_fixture(&note_id, "01JAR5A3PJEZ3SKG67PN8N6S6R", 0, "Chunk");
+    insert_chunks(&connection, &note_id, std::slice::from_ref(&chunk));
+    let model = model("test/model-a");
+    let provider = provider("test-provider");
+    let repo = EmbeddingsRepo::new(&connection);
+    repo.upsert(&ChunkEmbeddingRecord {
+        chunk_id: chunk.chunk_id.clone(),
+        model: model.clone(),
+        provider,
+        vector: normalized_embedding_vector(&model, &[1.0, 0.0]),
+        created_at: parse_timestamp("2026-05-05T11:00:00Z"),
+    })
+    .expect("embedding upsert should succeed");
+    let query = normalized_embedding_vector(&model, &[1.0, 0.0]);
+
+    let hits = EmbeddingsReader::top_k_cosine(&repo, &query, 1, &model)
+        .expect("reader top-k should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].note_id, note_id);
+    assert_eq!(hits[0].chunk_id, chunk.chunk_id);
+    assert!((hits[0].similarity - 1.0).abs() <= 0.000_001);
+}
+
+#[test]
+fn embeddings_reader_lists_chunk_text_in_requested_order() {
+    let connection = setup_connection();
+    let note_id = note_id();
+    insert_note(&connection, &note_id);
+    let first_chunk = chunk_fixture(&note_id, "01JAR5A3PJEZ3SKG67PN8N6S6R", 0, "First");
+    let second_chunk = chunk_fixture(&note_id, "01JAR5A3PJEZ3SKG67PN8N6S6Q", 1, "Second");
+    insert_chunks(
+        &connection,
+        &note_id,
+        &[first_chunk.clone(), second_chunk.clone()],
+    );
+    let requested = vec![second_chunk.chunk_id.clone(), first_chunk.chunk_id.clone()];
+
+    let texts = EmbeddingsReader::list_chunk_text(&EmbeddingsRepo::new(&connection), &requested)
+        .expect("chunk text should list");
+
+    assert_eq!(
+        texts,
+        vec![
+            (second_chunk.chunk_id, "Second".to_string()),
+            (first_chunk.chunk_id, "First".to_string()),
+        ]
     );
 }
 

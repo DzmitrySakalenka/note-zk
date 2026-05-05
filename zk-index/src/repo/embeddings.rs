@@ -6,8 +6,14 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, Row, types::Type};
-use zk_ai::{AiError, AiResult, service::embeddings::EmbeddingsWriter};
+use rusqlite::{Connection, OptionalExtension, Row, types::Type};
+use zk_ai::{
+    AiError, AiResult,
+    service::{
+        embeddings::EmbeddingsWriter,
+        semantic_search::{EmbeddingsReader, TopHit as AiTopHit},
+    },
+};
 use zk_domain::{
     ChunkEmbeddingRecord, ChunkId, ChunkRecord, EmbeddingModelId, EmbeddingVector,
     EmbeddingVectorError, ProviderId, decode_vector, encode_vector,
@@ -68,6 +74,7 @@ LEFT JOIN chunk_embeddings AS ce
 WHERE nc.note_id = ?1 AND ce.chunk_id IS NULL
 ORDER BY nc.ordinal ASC
 ";
+const GET_CHUNK_TEXT_SQL: &str = "SELECT text FROM note_chunks WHERE chunk_id = ?1";
 const TOP_K_COSINE_SQL: &str = r"
 SELECT
     nc.note_id,
@@ -216,6 +223,53 @@ impl<'a> EmbeddingsRepo<'a> {
             .into_iter()
             .map(ScoredHit::into_top_hit)
             .collect())
+    }
+}
+
+impl EmbeddingsReader for EmbeddingsRepo<'_> {
+    fn top_k_cosine(
+        &self,
+        query: &EmbeddingVector,
+        k: usize,
+        model: &EmbeddingModelId,
+    ) -> AiResult<Vec<AiTopHit>> {
+        EmbeddingsRepo::top_k_cosine(self, query, k, model)
+            .map(|hits| {
+                hits.into_iter()
+                    .map(|hit| AiTopHit {
+                        note_id: hit.note_id,
+                        chunk_id: hit.chunk_id,
+                        similarity: hit.similarity,
+                    })
+                    .collect()
+            })
+            .map_err(|error| AiError::Internal(format!("search local chunk embeddings: {error}")))
+    }
+
+    fn list_chunk_text(&self, chunk_ids: &[ChunkId]) -> AiResult<Vec<(ChunkId, String)>> {
+        if chunk_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut statement = self
+            .conn
+            .prepare_cached(GET_CHUNK_TEXT_SQL)
+            .map_err(|error| AiError::Internal(format!("prepare get local chunk text: {error}")))?;
+        let mut texts = Vec::with_capacity(chunk_ids.len());
+
+        for chunk_id in chunk_ids {
+            let Some(text) = statement
+                .query_row([chunk_id.as_str()], |row| row.get::<_, String>(0))
+                .optional()
+                .map_err(|error| AiError::Internal(format!("get local chunk text: {error}")))?
+            else {
+                continue;
+            };
+
+            texts.push((chunk_id.clone(), text));
+        }
+
+        Ok(texts)
     }
 }
 
