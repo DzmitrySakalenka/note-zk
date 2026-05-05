@@ -12,6 +12,8 @@ pub mod remote_http;
 /// Deterministic test embeddings provider.
 pub mod stub;
 
+pub use stub::StubEmbeddingsProvider;
+
 /// Async provider interface for batched embedding generation.
 #[async_trait]
 pub trait EmbeddingsProvider: Send + Sync {
