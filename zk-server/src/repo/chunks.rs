@@ -1,4 +1,5 @@
 use rusqlite::{Connection, OptionalExtension, Row};
+use zk_ai::{AiError, AiResult, service::chunking::ChunksWriter};
 use zk_domain::{
     ChunkId, ChunkRecord,
     id::{ContentHash, NoteId},
@@ -30,6 +31,12 @@ SELECT
     text,
     token_count,
     created_at
+FROM note_chunks
+WHERE note_id = ?1
+ORDER BY ordinal ASC
+";
+const LIST_CHUNK_HASHES_FOR_NOTE_SQL: &str = r"
+SELECT content_hash
 FROM note_chunks
 WHERE note_id = ?1
 ORDER BY ordinal ASC
@@ -144,6 +151,28 @@ impl<'a> ChunksRepo<'a> {
             .query_row([chunk_id.as_str()], decode_chunk_record)
             .optional()
             .map_err(ServerError::Database)
+    }
+}
+
+impl ChunksWriter for ChunksRepo<'_> {
+    fn list_existing_hashes(&self, note_id: &NoteId) -> AiResult<Vec<String>> {
+        let mut statement = self
+            .conn
+            .prepare_cached(LIST_CHUNK_HASHES_FOR_NOTE_SQL)
+            .map_err(|error| {
+                AiError::Internal(format!("prepare list server chunk hashes: {error}"))
+            })?;
+        let rows = statement
+            .query_map([note_id.as_str()], |row| row.get::<_, String>(0))
+            .map_err(|error| AiError::Internal(format!("list server chunk hashes: {error}")))?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| AiError::Internal(format!("decode server chunk hashes: {error}")))
+    }
+
+    fn replace_for_note(&self, note_id: &NoteId, chunks: &[ChunkRecord]) -> AiResult<u64> {
+        ChunksRepo::replace_for_note(self, note_id, chunks)
+            .map_err(|error| AiError::Internal(format!("replace server chunks for note: {error}")))
     }
 }
 

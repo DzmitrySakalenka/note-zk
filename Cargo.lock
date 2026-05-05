@@ -5599,6 +5599,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "time",
+ "zk-ai",
  "zk-domain",
 ]
 
@@ -5634,6 +5635,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ulid",
+ "zk-ai",
  "zk-auth",
  "zk-backup",
  "zk-domain",

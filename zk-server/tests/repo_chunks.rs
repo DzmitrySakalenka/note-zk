@@ -3,6 +3,7 @@
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
+use zk_ai::service::chunking::ChunksWriter;
 use zk_domain::{
     ChunkId, ChunkRecord,
     id::{ContentHash, NoteId},
@@ -114,6 +115,29 @@ fn replace_then_list_returns_chunks_in_ordinal_order() {
         .expect("list chunks should succeed");
 
     assert_eq!(loaded, vec![lower, higher]);
+}
+
+#[test]
+fn chunks_writer_lists_existing_hashes_in_ordinal_order() {
+    let connection = setup_connection();
+    let note_id = note_id();
+    insert_note(&connection, &note_id);
+    let lower = chunk_fixture(&note_id, "01JAR5A3PJEZ3SKG67PN8N6S6R", 0, "First chunk");
+    let higher = chunk_fixture(&note_id, "01JAR5A3PJEZ3SKG67PN8N6S6Q", 1, "Second chunk");
+    let repo = ChunksRepo::new(&connection);
+    repo.replace_for_note(&note_id, &[higher.clone(), lower.clone()])
+        .expect("replace chunks should succeed");
+
+    let hashes = ChunksWriter::list_existing_hashes(&repo, &note_id)
+        .expect("list existing hashes should succeed");
+
+    assert_eq!(
+        hashes,
+        vec![
+            lower.content_hash.to_string(),
+            higher.content_hash.to_string()
+        ]
+    );
 }
 
 #[test]
