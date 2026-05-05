@@ -9,7 +9,8 @@ use serde_json::json;
 use zk_domain::{
     AiIdentifierError, Capability, ChunkEmbeddingRecord, ChunkId, ChunkIdParseError, ChunkRecord,
     EmbeddingModelId, EmbeddingVector, EmbeddingVectorError, ExecutionMode,
-    ExecutionModeParseError, ProviderId, ProviderSelectorPolicy, SemanticEdgeRecord,
+    ExecutionModeParseError, JobId, JobIdParseError, ProviderId, ProviderSelectorPolicy,
+    SemanticEdgeRecord,
     id::{ContentHash, NoteId},
 };
 
@@ -40,6 +41,7 @@ where
 #[test]
 fn ai_domain_types_implement_required_common_traits() {
     assert_hashable_id_traits::<ChunkId>();
+    assert_hashable_id_traits::<JobId>();
     assert_eq_common_traits::<ChunkRecord>();
     assert_eq_common_traits::<EmbeddingModelId>();
     assert_eq_common_traits::<ProviderId>();
@@ -48,6 +50,7 @@ fn ai_domain_types_implement_required_common_traits() {
     assert_eq_common_traits::<ProviderSelectorPolicy>();
     assert_error_traits::<AiIdentifierError>();
     assert_error_traits::<ChunkIdParseError>();
+    assert_error_traits::<JobIdParseError>();
     assert_error_traits::<EmbeddingVectorError>();
     assert_error_traits::<ExecutionModeParseError>();
     assert_float_record_traits::<EmbeddingVector>();
@@ -140,6 +143,30 @@ fn chunk_id_generate_produces_serializable_ulid_value() {
 
     assert_eq!(decoded, chunk_id);
     assert_eq!(decoded.to_string(), raw);
+}
+
+#[test]
+fn job_id_generate_produces_serializable_ulid_value() {
+    let job_id = JobId::generate();
+    let raw = job_id.as_str();
+
+    assert_eq!(raw.len(), 26);
+    assert!(
+        raw.chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    );
+
+    let json = serde_json::to_string(&job_id).expect("job id should serialize");
+    let decoded: JobId = serde_json::from_str(&json).expect("job id should deserialize");
+
+    assert_eq!(decoded, job_id);
+    assert_eq!(decoded.to_string(), raw);
+}
+
+#[test]
+fn job_id_from_str_rejects_invalid_values() {
+    assert_eq!("".parse::<JobId>(), Err(JobIdParseError));
+    assert_eq!("not-a-ulid".parse::<JobId>(), Err(JobIdParseError));
 }
 
 #[test]

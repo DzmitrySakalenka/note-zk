@@ -6,6 +6,8 @@ pub mod chunk;
 pub mod embedding;
 /// AI execution records.
 pub mod execution;
+/// AI background job identifiers.
+pub mod job;
 
 pub use chunk::{ChunkId, ChunkIdParseError, ChunkRecord};
 pub use embedding::{
@@ -13,3 +15,4 @@ pub use embedding::{
     EmbeddingVectorError, EmbeddingVectorResult, ProviderId, SemanticEdgeRecord,
 };
 pub use execution::{Capability, ExecutionMode, ExecutionModeParseError, ProviderSelectorPolicy};
+pub use job::{JobId, JobIdParseError};

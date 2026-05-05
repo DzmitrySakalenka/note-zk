@@ -1,5 +1,6 @@
 //! `SQLite` repository helpers over the server schema.
 
+mod ai_jobs;
 mod assets;
 mod chunks;
 mod cursors;
@@ -13,6 +14,7 @@ mod timestamps;
 mod tokens;
 mod users;
 
+pub use ai_jobs::{AiJob, AiJobFilter, AiJobKind, AiJobKindFilter, AiJobStatus, AiJobsRepo};
 pub use assets::{AssetRow, AssetsRepo};
 pub use chunks::ChunksRepo;
 pub use cursors::DeviceCursorRepo;

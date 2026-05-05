@@ -39,7 +39,8 @@ pub mod write_request;
 pub use ai::{
     AiIdentifierError, Capability, ChunkEmbeddingRecord, ChunkId, ChunkIdParseError, ChunkRecord,
     EmbeddingModelId, EmbeddingVector, EmbeddingVectorError, EmbeddingVectorResult, ExecutionMode,
-    ExecutionModeParseError, ProviderId, ProviderSelectorPolicy, SemanticEdgeRecord,
+    ExecutionModeParseError, JobId, JobIdParseError, ProviderId, ProviderSelectorPolicy,
+    SemanticEdgeRecord,
 };
 pub use auth::{AuthScope, AuthScopeParseError, DeviceTokenRecord, PasswordUser, WebSessionRecord};
 pub use auth_wire::{
