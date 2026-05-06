@@ -84,6 +84,12 @@ async fn server_error_variants_map_to_expected_status_code_and_message() {
             "backup already in flight",
         ),
         (
+            ServerError::BadGateway("ai provider request failed".to_string()),
+            StatusCode::BAD_GATEWAY,
+            "bad_gateway",
+            "ai provider request failed",
+        ),
+        (
             ServerError::Unauthorized,
             StatusCode::UNAUTHORIZED,
             "unauthorized",

@@ -61,14 +61,14 @@ pub struct SearchHit {
 
 /// Query-time service that embeds free text and returns scored note hits.
 #[derive(Debug, Clone)]
-pub struct SemanticSearchService<P: EmbeddingsProvider, R: EmbeddingsReader> {
+pub struct SemanticSearchService<P: EmbeddingsProvider + ?Sized, R: EmbeddingsReader> {
     provider: Arc<P>,
     repo: R,
 }
 
 impl<P, R> SemanticSearchService<P, R>
 where
-    P: EmbeddingsProvider,
+    P: EmbeddingsProvider + ?Sized,
     R: EmbeddingsReader,
 {
     /// Creates a semantic search service from an embeddings provider and reader.

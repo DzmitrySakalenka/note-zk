@@ -30,6 +30,9 @@ pub enum ServerError {
     /// Requested operation is temporarily unavailable.
     #[error("service unavailable: {0}")]
     ServiceUnavailable(String),
+    /// Upstream service failed a gateway-style request.
+    #[error("bad gateway: {0}")]
+    BadGateway(String),
     /// Request lacks valid authentication credentials.
     #[error("unauthorized")]
     Unauthorized,

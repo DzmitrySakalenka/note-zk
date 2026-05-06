@@ -4,10 +4,14 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use tokio::sync::Mutex;
+use zk_ai::selector::ProviderSelector;
 
 use crate::{
     ServerError, ServerResult,
-    ai::ingest::{DEFAULT_INGEST_DEBOUNCE, IngestEnqueuer},
+    ai::{
+        ingest::{DEFAULT_INGEST_DEBOUNCE, IngestEnqueuer},
+        worker::provider_selector_from_config,
+    },
     config::ServerConfig,
     db::ServerDb,
     service::sweep_expired_sessions,
@@ -23,6 +27,7 @@ struct StateInner {
     config: ServerConfig,
     db: Arc<ServerDb>,
     ai_ingest: Option<Arc<IngestEnqueuer>>,
+    ai_selector: Option<Arc<ProviderSelector>>,
     started_at: DateTime<Utc>,
     in_flight_backup_id: Mutex<Option<String>>,
 }
@@ -52,6 +57,12 @@ impl ServerState {
         self.inner.ai_ingest.as_ref().map(Arc::clone)
     }
 
+    /// Returns the optional AI provider selector.
+    #[must_use]
+    pub fn ai_selector(&self) -> Option<Arc<ProviderSelector>> {
+        self.inner.ai_selector.as_ref().map(Arc::clone)
+    }
+
     /// Returns the server startup timestamp.
     #[must_use]
     pub fn started_at(&self) -> DateTime<Utc> {
@@ -72,12 +83,14 @@ impl ServerState {
                 DEFAULT_INGEST_DEBOUNCE,
             ))
         });
+        let ai_selector = config.ai.as_ref().map(provider_selector_from_config);
 
         Self {
             inner: Arc::new(StateInner {
                 config,
                 db,
                 ai_ingest,
+                ai_selector,
                 started_at,
                 in_flight_backup_id: Mutex::new(None),
             }),

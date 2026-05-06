@@ -110,6 +110,12 @@ fn response_parts(error: &ServerError) -> (StatusCode, &'static str, String, boo
             message.clone(),
             false,
         ),
+        ServerError::BadGateway(message) => (
+            StatusCode::BAD_GATEWAY,
+            "bad_gateway",
+            message.clone(),
+            false,
+        ),
         ServerError::Unauthorized | ServerError::ScopeDecode(_) => (
             StatusCode::UNAUTHORIZED,
             "unauthorized",

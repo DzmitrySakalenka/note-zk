@@ -10,16 +10,16 @@ use zk_domain::AuthScope;
 
 use crate::{
     ServerError, ServerResult,
-    ai::worker::{AiWorkerDeps, provider_selector_from_config, spawn_ai_job_worker},
+    ai::worker::{AiWorkerDeps, spawn_ai_job_worker},
     auth::{require_auth_layer, require_scope_layer},
-    http::{ApiError, admin_routes, auth_routes, health::health, sync_routes},
+    http::{ApiError, admin_routes, auth_routes, health::health, search_routes, sync_routes},
     scheduler::{backup::spawn_backup_scheduler, purge::spawn_purge_scheduler},
     state::ServerState,
 };
 
 /// Builds the top-level HTTP router for the server.
 pub fn build_router(state: ServerState) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/health", get(health))
         .merge(
             sync_routes()
@@ -32,7 +32,17 @@ pub fn build_router(state: ServerState) -> Router {
         .merge(auth_routes(&state))
         // `/admin/*` handlers use `AuthenticatedAdmin`; every route requires
         // the admin scope for either a device token or a browser session.
-        .merge(admin_routes())
+        .merge(admin_routes());
+    let router = if state.config().ai.is_some() {
+        router.merge(search_routes().route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_auth_layer,
+        )))
+    } else {
+        router
+    };
+
+    router
         .fallback(not_found)
         .layer(
             ServiceBuilder::new()
@@ -109,7 +119,7 @@ fn spawn_configured_ai_worker(
     shutdown: CancellationToken,
 ) -> Option<tokio::task::JoinHandle<()>> {
     let config = state.config().ai.as_ref()?.clone();
-    let selector = provider_selector_from_config(&config);
+    let selector = state.ai_selector()?;
 
     Some(spawn_ai_job_worker(
         AiWorkerDeps {
