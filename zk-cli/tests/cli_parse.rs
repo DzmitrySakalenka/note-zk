@@ -4,7 +4,7 @@
 use clap::Parser;
 
 use zk_cli::{
-    cli::{AuthCommand, Cli, Command, OutputMode},
+    cli::{AdminAiCommand, AdminAiRecomputeScope, AuthCommand, Cli, Command, OutputMode},
     error::{
         CliError, EXIT_AI_DISABLED, EXIT_ISSUES, EXIT_OK, EXIT_PROVIDER_UNAVAILABLE, EXIT_REQUEST,
         EXIT_USAGE, exit_code,
@@ -226,6 +226,98 @@ fn auth_issue_token_defaults_scopes_to_sync() {
         }
         other => panic!("expected auth issue-token command, got {other:?}"),
     }
+}
+
+#[test]
+fn admin_ai_recompute_parses_vault_scope() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "admin",
+        "ai",
+        "recompute",
+        "--server-url",
+        "https://zk.example.com",
+        "--scope",
+        "vault",
+        "--token-env",
+        "ADMIN_TOKEN",
+    ])
+    .expect("admin ai recompute arguments should parse");
+
+    match cli.command {
+        Command::Admin(zk_cli::cli::AdminCommand::Ai(AdminAiCommand::Recompute(args))) => {
+            assert_eq!(args.scope, Some(AdminAiRecomputeScope::Vault));
+            assert!(args.note.is_none());
+            assert_eq!(args.token_env, "ADMIN_TOKEN");
+        }
+        other => panic!("expected admin ai recompute command, got {other:?}"),
+    }
+}
+
+#[test]
+fn admin_ai_jobs_parses_status_limit_and_json() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "admin",
+        "ai",
+        "jobs",
+        "--server-url",
+        "https://zk.example.com",
+        "--status",
+        "in-flight",
+        "--limit",
+        "2",
+        "--json",
+    ])
+    .expect("admin ai jobs arguments should parse");
+
+    match cli.command {
+        Command::Admin(zk_cli::cli::AdminCommand::Ai(AdminAiCommand::Jobs(args))) => {
+            assert_eq!(args.status.as_deref(), Some("in-flight"));
+            assert_eq!(args.limit, Some(2));
+            assert_eq!(OutputMode::from(args.json), OutputMode::Json);
+        }
+        other => panic!("expected admin ai jobs command, got {other:?}"),
+    }
+}
+
+#[test]
+fn admin_ai_cancel_parses_job_id() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "admin",
+        "ai",
+        "cancel",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+        "--server-url",
+        "https://zk.example.com",
+    ])
+    .expect("admin ai cancel arguments should parse");
+
+    match cli.command {
+        Command::Admin(zk_cli::cli::AdminCommand::Ai(AdminAiCommand::Cancel(args))) => {
+            assert_eq!(args.job_id, "01JAR5A3PJEZ3SKG67PN8N6S6S");
+            assert_eq!(args.token_env, "ZK_DEVICE_TOKEN");
+        }
+        other => panic!("expected admin ai cancel command, got {other:?}"),
+    }
+}
+
+#[test]
+fn admin_ai_rejects_scope_and_note_together() {
+    let error = Cli::try_parse_from([
+        "zk-cli",
+        "admin",
+        "ai",
+        "recompute",
+        "--scope",
+        "vault",
+        "--note",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+    ])
+    .expect_err("admin ai recompute should reject conflicting scope selectors");
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
 }
 
 #[test]

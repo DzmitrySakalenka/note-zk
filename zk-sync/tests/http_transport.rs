@@ -115,6 +115,32 @@ async fn get_requests_health_path_with_bearer_token() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn get_json_requests_path_with_bearer_token() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/admin/ai/jobs"))
+        .and(header("authorization", "Bearer shared-secret"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "job_id": "01JAR5A3PJEZ3SKG67PN8N6S6S",
+                "status": "pending"
+            }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let body = transport(&server, Some("shared-secret"))
+        .get_json("/admin/ai/jobs")
+        .await
+        .expect("admin jobs request should succeed");
+
+    assert_eq!(body[0]["status"], "pending");
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn register_device_posts_to_register_path_with_bearer_token() {
     let server = MockServer::start().await;
     let request = register_request();

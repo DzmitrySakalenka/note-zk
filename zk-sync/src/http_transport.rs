@@ -58,7 +58,27 @@ impl HttpTransport {
             .send()
             .await
             .map_err(|error| SyncError::Transport(Box::new(error)))?;
-        let response = response_for_status(response, path).await?;
+        let response = response_for_status(response, "POST", path).await?;
+
+        response
+            .json::<Value>()
+            .await
+            .map_err(|error| SyncError::Transport(Box::new(error)))
+    }
+
+    /// Sends a GET request to an arbitrary server path and returns the JSON response value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError::Transport`] when URL construction, the request,
+    /// status handling, or JSON response decoding fails.
+    pub async fn get_json(&self, path: &str) -> SyncResult<Value> {
+        let response = self
+            .request(Method::GET, path)?
+            .send()
+            .await
+            .map_err(|error| SyncError::Transport(Box::new(error)))?;
+        let response = response_for_status(response, "GET", path).await?;
 
         response
             .json::<Value>()
@@ -112,7 +132,7 @@ impl SyncTransport for HttpTransport {
             .send()
             .await
             .map_err(|error| SyncError::Transport(Box::new(error)))?;
-        let response = response_for_status(response, REGISTER_DEVICE_PATH).await?;
+        let response = response_for_status(response, "POST", REGISTER_DEVICE_PATH).await?;
 
         response
             .json::<RegisterDeviceResponse>()
@@ -127,7 +147,7 @@ impl SyncTransport for HttpTransport {
             .send()
             .await
             .map_err(|error| SyncError::Transport(Box::new(error)))?;
-        let response = response_for_status(response, PUSH_PATH).await?;
+        let response = response_for_status(response, "POST", PUSH_PATH).await?;
 
         response
             .json::<SyncPushResponse>()
@@ -142,7 +162,7 @@ impl SyncTransport for HttpTransport {
             .send()
             .await
             .map_err(|error| SyncError::Transport(Box::new(error)))?;
-        let response = response_for_status(response, PULL_PATH).await?;
+        let response = response_for_status(response, "POST", PULL_PATH).await?;
 
         response
             .json::<SyncPullResponse>()
@@ -160,7 +180,7 @@ impl SyncTransport for HttpTransport {
             .send()
             .await
             .map_err(|error| SyncError::Transport(Box::new(error)))?;
-        let response = response_for_status(response, RESOLVE_CONFLICT_PATH).await?;
+        let response = response_for_status(response, "POST", RESOLVE_CONFLICT_PATH).await?;
 
         response
             .json::<ResolveConflictResponse>()
@@ -188,7 +208,7 @@ impl SyncTransport for HttpTransport {
     }
 }
 
-async fn response_for_status(response: Response, path: &str) -> SyncResult<Response> {
+async fn response_for_status(response: Response, method: &str, path: &str) -> SyncResult<Response> {
     let status = response.status();
 
     if status < StatusCode::BAD_REQUEST {
@@ -199,7 +219,7 @@ async fn response_for_status(response: Response, path: &str) -> SyncResult<Respo
         .text()
         .await
         .unwrap_or_else(|error| error.to_string());
-    let error = io::Error::other(format!("POST {path} -> {status}: {body}"));
+    let error = io::Error::other(format!("{method} {path} -> {status}: {body}"));
 
     Err(SyncError::Transport(Box::new(error)))
 }

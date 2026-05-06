@@ -60,6 +60,9 @@ pub enum AdminCommand {
     /// Inspect and trigger backups through the server admin HTTP API.
     #[command(subcommand)]
     Backup(AdminBackupCommand),
+    /// Inspect and trigger server-side AI recompute jobs.
+    #[command(subcommand)]
+    Ai(AdminAiCommand),
 }
 
 /// Remote backup administration command set exposed by the CLI.
@@ -71,6 +74,24 @@ pub enum AdminBackupCommand {
     Show(AdminBackupShowArgs),
     /// Trigger one server-side backup run.
     Trigger(AdminBackupTriggerArgs),
+}
+
+/// Remote AI administration command set exposed by the CLI.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum AdminAiCommand {
+    /// Enqueue one server-side AI recompute job.
+    Recompute(AdminAiRecomputeArgs),
+    /// List server-side AI jobs.
+    Jobs(AdminAiJobsArgs),
+    /// Cancel one pending server-side AI job.
+    Cancel(AdminAiCancelArgs),
+}
+
+/// Explicit recompute scope accepted by `admin ai recompute`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminAiRecomputeScope {
+    /// Recompute the whole vault.
+    Vault,
 }
 
 /// Arguments for `auth issue-token`.
@@ -120,6 +141,48 @@ pub struct AdminBackupTriggerArgs {
     /// Maximum seconds to wait for a triggered backup.
     #[arg(long = "timeout-secs", default_value_t = 600)]
     pub timeout_secs: u64,
+    /// Environment variable that stores the bearer token.
+    #[arg(long = "token-env", default_value = "ZK_DEVICE_TOKEN")]
+    pub token_env: String,
+}
+
+/// Arguments for `admin ai recompute`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("admin_ai_recompute_scope").args(["scope", "note"]).multiple(false)))]
+pub struct AdminAiRecomputeArgs {
+    /// Recompute scope. Only `vault` is accepted; use `--note` for note-scoped jobs.
+    #[arg(long, value_parser = parse_admin_ai_recompute_scope)]
+    pub scope: Option<AdminAiRecomputeScope>,
+    /// Note id for a note-scoped recompute job.
+    #[arg(long)]
+    pub note: Option<String>,
+    /// Environment variable that stores the bearer token.
+    #[arg(long = "token-env", default_value = "ZK_DEVICE_TOKEN")]
+    pub token_env: String,
+}
+
+/// Arguments for `admin ai jobs`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AdminAiJobsArgs {
+    /// Optional job status filter: pending, in-flight, done, or failed.
+    #[arg(long, value_parser = parse_admin_ai_status)]
+    pub status: Option<String>,
+    /// Maximum number of jobs to return.
+    #[arg(long)]
+    pub limit: Option<u32>,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+    /// Environment variable that stores the bearer token.
+    #[arg(long = "token-env", default_value = "ZK_DEVICE_TOKEN")]
+    pub token_env: String,
+}
+
+/// Arguments for `admin ai cancel`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AdminAiCancelArgs {
+    /// AI job id to cancel.
+    pub job_id: String,
     /// Environment variable that stores the bearer token.
     #[arg(long = "token-env", default_value = "ZK_DEVICE_TOKEN")]
     pub token_env: String,
@@ -347,4 +410,18 @@ fn parse_top_k(value: &str) -> Result<usize, String> {
     }
 
     Ok(parsed)
+}
+
+fn parse_admin_ai_recompute_scope(value: &str) -> Result<AdminAiRecomputeScope, String> {
+    match value {
+        "vault" => Ok(AdminAiRecomputeScope::Vault),
+        other => Err(format!("unknown recompute scope: {other}")),
+    }
+}
+
+fn parse_admin_ai_status(value: &str) -> Result<String, String> {
+    match value {
+        "pending" | "in-flight" | "done" | "failed" => Ok(value.to_string()),
+        other => Err(format!("unknown AI job status: {other}")),
+    }
 }
