@@ -5645,6 +5645,7 @@ dependencies = [
  "zk-auth",
  "zk-backup",
  "zk-domain",
+ "zk-server",
  "zk-vault",
 ]
 

@@ -8,19 +8,17 @@ use axum::{
     http::{Method, Request, StatusCode, header},
 };
 use axum_extra::extract::cookie::{Cookie, SameSite};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde_json::{Value, json};
 use tempfile::NamedTempFile;
 use tower::ServiceExt;
-use zk_auth::{
-    password::{HashParams, hash_password},
-    session::hash_session_id,
-};
+use zk_auth::session::hash_session_id;
 use zk_domain::{LoginResponse, RefreshResponse};
 use zk_server::{
     config::ServerConfig,
     http::build_router,
-    repo::{UserRepo, WebSessionRepo},
+    repo::WebSessionRepo,
+    service::register_user_with_test_params,
     state::{ServerState, bootstrap_with_config},
 };
 
@@ -69,33 +67,11 @@ fn build_harness() -> TestHarness {
     }
 }
 
-fn parse_timestamp(value: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(value)
-        .expect("timestamp fixture should parse")
-        .with_timezone(&Utc)
-}
-
 fn insert_user(state: &ServerState, username: &str, password: &str) {
-    let password_hash = hash_password(
-        password,
-        HashParams {
-            memory_kib: 32,
-            iterations: 1,
-            parallelism: 1,
-        },
-    )
-    .expect("password hash fixture should be created");
-
     state
         .db()
         .with_conn(|connection| {
-            UserRepo::create(
-                connection,
-                "user-a",
-                username,
-                &password_hash,
-                parse_timestamp("2026-04-29T12:00:00Z"),
-            )
+            register_user_with_test_params(connection, username, password).map(|_| ())
         })
         .expect("user fixture insert should succeed");
 }
