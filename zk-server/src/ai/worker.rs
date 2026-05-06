@@ -18,20 +18,22 @@ use zk_ai::{
     },
 };
 use zk_domain::{
-    Capability, ChunkEmbeddingRecord, ChunkRecord, EmbeddingModelId, ProviderSelectorPolicy,
+    Capability, ChunkEmbeddingRecord, ChunkRecord, EmbeddingModelId, ProviderId,
+    ProviderSelectorPolicy,
     id::{NoteId, RelativePath},
 };
 use zk_vault::parse_note_file;
 
 use crate::{
     ServerDb, ServerError,
-    config::AiConfig,
+    config::{AiConfig, AiProviderKind},
     repo::{AiJob, AiJobKind, AiJobsRepo, ChunksRepo, EmbeddingsRepo, NotesRepo},
 };
 
 const IDLE_INTERVAL: Duration = Duration::from_secs(1);
 const WORKER_EMBEDDING_ATTEMPTS: u32 = 1;
 const DEFAULT_STUB_DIM: usize = 384;
+const STUB_PROVIDER_ID: &str = "stub";
 const LOG_TARGET: &str = "zk_server::ai";
 
 /// Dependencies owned by the in-process AI job worker.
@@ -89,13 +91,35 @@ pub(crate) fn provider_selector_from_config(config: &AiConfig) -> Arc<ProviderSe
 
     Arc::new(ProviderSelector::new(
         Arc::new(registry),
-        ProviderSelectorPolicy {
+        selector_policy_from_config(config),
+    ))
+}
+
+fn selector_policy_from_config(config: &AiConfig) -> ProviderSelectorPolicy {
+    match config.provider {
+        AiProviderKind::Stub => {
+            let stub_provider = provider_id(STUB_PROVIDER_ID);
+
+            ProviderSelectorPolicy {
+                mode: config.default_mode,
+                remote_provider: Some(stub_provider.clone()),
+                local_provider: None,
+                stub_provider: Some(stub_provider),
+            }
+        }
+        AiProviderKind::RemoteHttp | AiProviderKind::LocalCandle => ProviderSelectorPolicy {
             mode: config.default_mode,
             remote_provider: None,
             local_provider: None,
             stub_provider: None,
         },
-    ))
+    }
+}
+
+fn provider_id(value: &str) -> ProviderId {
+    value
+        .parse()
+        .expect("hardcoded provider id should be valid")
 }
 
 async fn run_ai_job_worker(deps: AiWorkerDeps, shutdown: CancellationToken) {

@@ -9,12 +9,16 @@ use std::{
 
 use anyhow::Context;
 use serde::Deserialize;
+#[cfg(feature = "test-stub-ai")]
+use zk_ai::provider::StubEmbeddingsProvider;
 use zk_ai::{
     AiError,
     provider::{LocalDevice, LocalEmbeddingsConfig, LocalEmbeddingsProvider},
     selector::{ProviderRegistry, ProviderSelector},
 };
 use zk_app::{AiFacade, AiFacadeDeps, LocalEmbeddingsRepoHandle, RecomputeLocalSummary};
+#[cfg(feature = "test-stub-ai")]
+use zk_domain::ProviderId;
 use zk_domain::{EmbeddingModelId, ExecutionMode, ProviderSelectorPolicy};
 
 use crate::{
@@ -25,6 +29,10 @@ use crate::{
 };
 
 const VAULT_CONFIG_PATH: &str = ".zk/config.toml";
+#[cfg(feature = "test-stub-ai")]
+const TEST_STUB_MODEL_DIR: &str = "stub://local";
+#[cfg(feature = "test-stub-ai")]
+const TEST_STUB_EMBEDDING_DIM: usize = 128;
 
 /// Runs a local AI subcommand.
 ///
@@ -98,6 +106,11 @@ fn required_local_selector(
     vault_root: &Path,
     explicit_model_dir: Option<&Path>,
 ) -> Result<ProviderSelector, CliError> {
+    #[cfg(feature = "test-stub-ai")]
+    if explicit_model_dir.is_some_and(is_test_stub_model_dir) {
+        return Ok(test_stub_selector());
+    }
+
     let local_config = load_local_config(vault_root)?
         .ai
         .and_then(|config| config.local)
@@ -109,6 +122,36 @@ fn required_local_selector(
     let provider_config = provider_config(vault_root, explicit_model_dir, local_config, model_dir)?;
 
     build_selector(provider_config)
+}
+
+#[cfg(feature = "test-stub-ai")]
+fn is_test_stub_model_dir(path: &Path) -> bool {
+    path.to_string_lossy() == TEST_STUB_MODEL_DIR
+}
+
+#[cfg(feature = "test-stub-ai")]
+fn test_stub_selector() -> ProviderSelector {
+    let stub_provider_id = provider_id("stub");
+    let mut registry = ProviderRegistry::new();
+
+    registry.register_embeddings(Arc::new(StubEmbeddingsProvider::new(
+        TEST_STUB_EMBEDDING_DIM,
+    )));
+
+    ProviderSelector::new(
+        Arc::new(registry),
+        ProviderSelectorPolicy {
+            mode: ExecutionMode::Offline,
+            remote_provider: None,
+            local_provider: Some(stub_provider_id.clone()),
+            stub_provider: Some(stub_provider_id),
+        },
+    )
+}
+
+#[cfg(feature = "test-stub-ai")]
+fn provider_id(value: &str) -> ProviderId {
+    value.parse().expect("hardcoded provider id should parse")
 }
 
 fn provider_config(
