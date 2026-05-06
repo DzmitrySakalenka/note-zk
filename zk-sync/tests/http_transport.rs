@@ -94,6 +94,27 @@ fn assert_transport_error(error: SyncError) -> String {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn get_requests_health_path_with_bearer_token() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .and(header("authorization", "Bearer shared-secret"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let status = transport(&server, Some("shared-secret"))
+        .get("/health")
+        .await
+        .expect("health probe should succeed");
+
+    assert!(status.is_success());
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn register_device_posts_to_register_path_with_bearer_token() {
     let server = MockServer::start().await;
     let request = register_request();

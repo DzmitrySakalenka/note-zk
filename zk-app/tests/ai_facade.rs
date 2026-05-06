@@ -2,10 +2,11 @@
 #![allow(unused_crate_dependencies)]
 #![cfg(feature = "ai")]
 
-use std::{fs, sync::Arc};
+use std::{fs, sync::Arc, time::Duration};
 
 use serde_json::json;
 use tempfile::TempDir;
+use tokio::time::advance;
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
     matchers::{body_json, header, method, path},
@@ -37,6 +38,7 @@ async fn connected_mode_returns_hits_from_http_transport() {
         local_selector: None,
         local_repo: None,
         mode: ExecutionMode::Connected,
+        ..AiFacadeDeps::default()
     })
     .expect("AI facade should construct");
 
@@ -93,14 +95,14 @@ async fn connected_mode_returns_hits_from_http_transport() {
 async fn hybrid_mode_falls_back_to_local_repo_when_http_fails() {
     let server = MockServer::start().await;
     let local_repo = seeded_local_repo().await;
-    let facade = AiFacade::new(AiFacadeDeps {
-        http: Some(Arc::new(http_transport(&server, "shared-token"))),
-        local_selector: Some(stub_selector()),
-        local_repo: Some(local_repo),
-        mode: ExecutionMode::Hybrid,
-    })
-    .expect("AI facade should construct");
+    let facade = hybrid_facade(&server, local_repo);
 
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
     Mock::given(method("POST"))
         .and(path("/search/semantic"))
         .respond_with(ResponseTemplate::new(500).set_body_string("provider failed"))
@@ -125,6 +127,149 @@ async fn hybrid_mode_falls_back_to_local_repo_when_http_fails() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn hybrid_mode_probe_success_routes_to_connected_path() {
+    let server = MockServer::start().await;
+    let local_repo = seeded_local_repo().await;
+    let facade = hybrid_facade(&server, local_repo);
+
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/search/semantic"))
+        .respond_with(single_remote_hit_response("connected hit"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let hits = facade
+        .semantic_search(SemanticSearchRequest {
+            query: QUERY_TEXT.to_string(),
+            top_k: 1,
+            mode_override: None,
+        })
+        .await
+        .expect("hybrid semantic search should use connected path");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].snippet, "connected hit");
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn hybrid_mode_probe_failure_routes_to_offline_path() {
+    let server = MockServer::start().await;
+    let local_repo = seeded_local_repo().await;
+    let facade = hybrid_facade(&server, local_repo);
+
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/search/semantic"))
+        .respond_with(single_remote_hit_response("unexpected connected hit"))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let hits = facade
+        .semantic_search(SemanticSearchRequest {
+            query: QUERY_TEXT.to_string(),
+            top_k: 1,
+            mode_override: None,
+        })
+        .await
+        .expect("hybrid semantic search should use offline path");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].snippet, "Exact semantic topic sentence.");
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn hybrid_mode_reuses_probe_cache_within_ten_seconds() {
+    let server = MockServer::start().await;
+    let local_repo = seeded_local_repo().await;
+    let facade = hybrid_facade(&server, local_repo);
+
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/search/semantic"))
+        .respond_with(single_remote_hit_response("connected hit"))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    for _ in 0..2 {
+        facade
+            .semantic_search(SemanticSearchRequest {
+                query: QUERY_TEXT.to_string(),
+                top_k: 1,
+                mode_override: None,
+            })
+            .await
+            .expect("hybrid semantic search should use connected path");
+    }
+
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn hybrid_mode_refreshes_probe_cache_after_ten_seconds() {
+    let server = MockServer::start().await;
+    let local_repo = seeded_local_repo().await;
+    let facade = hybrid_facade(&server, local_repo);
+
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/search/semantic"))
+        .respond_with(single_remote_hit_response("connected hit"))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    facade
+        .semantic_search(SemanticSearchRequest {
+            query: QUERY_TEXT.to_string(),
+            top_k: 1,
+            mode_override: None,
+        })
+        .await
+        .expect("first hybrid semantic search should use connected path");
+
+    tokio::time::pause();
+    advance(Duration::from_secs(11)).await;
+    tokio::time::resume();
+
+    facade
+        .semantic_search(SemanticSearchRequest {
+            query: QUERY_TEXT.to_string(),
+            top_k: 1,
+            mode_override: None,
+        })
+        .await
+        .expect("second hybrid semantic search should refresh probe");
+
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn offline_mode_does_not_call_http_transport() {
     let server = MockServer::start().await;
     let local_repo = seeded_local_repo().await;
@@ -133,6 +278,7 @@ async fn offline_mode_does_not_call_http_transport() {
         local_selector: Some(stub_selector()),
         local_repo: Some(local_repo),
         mode: ExecutionMode::Offline,
+        ..AiFacadeDeps::default()
     })
     .expect("AI facade should construct");
 
@@ -163,6 +309,7 @@ async fn connected_mode_without_http_returns_provider_unavailable() {
         local_selector: Some(stub_selector()),
         local_repo: Some(LocalEmbeddingsRepoHandle::open_memory().expect("repo should open")),
         mode: ExecutionMode::Connected,
+        ..AiFacadeDeps::default()
     })
     .expect("AI facade should construct");
 
@@ -187,6 +334,7 @@ async fn recompute_local_populates_local_chunks_and_embeddings_for_fixture_vault
         local_selector: Some(stub_selector()),
         local_repo: Some(local_repo.clone()),
         mode: ExecutionMode::Offline,
+        ..AiFacadeDeps::default()
     })
     .expect("AI facade should construct");
 
@@ -308,6 +456,32 @@ fn http_transport(server: &MockServer, token: &str) -> HttpTransport {
         Some(token.to_string()),
     )
     .expect("HTTP transport should construct")
+}
+
+fn hybrid_facade(server: &MockServer, local_repo: LocalEmbeddingsRepoHandle) -> AiFacade {
+    AiFacade::new(AiFacadeDeps {
+        http: Some(Arc::new(http_transport(server, "shared-token"))),
+        local_selector: Some(stub_selector()),
+        local_repo: Some(local_repo),
+        mode: ExecutionMode::Hybrid,
+        ..AiFacadeDeps::default()
+    })
+    .expect("AI facade should construct")
+}
+
+fn single_remote_hit_response(snippet: &str) -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(json!({
+        "hits": [
+            {
+                "note_id": NOTE_ID,
+                "chunk_id": FIRST_CHUNK_ID,
+                "similarity": 0.9,
+                "snippet": snippet
+            }
+        ],
+        "query_dim": 2,
+        "model": "stub/sha256-2"
+    }))
 }
 
 fn provider_id(value: &str) -> ProviderId {

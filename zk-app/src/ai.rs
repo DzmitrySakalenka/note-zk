@@ -4,10 +4,12 @@ use std::{
     collections::HashSet,
     path::Path,
     sync::{Arc, Mutex, MutexGuard},
+    time::Duration,
 };
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use tokio::time::{Instant, timeout};
 use zk_ai::{
     AiError, AiResult,
     chunker::ParagraphChunker,
@@ -29,6 +31,9 @@ use zk_vault::{TrashState, VaultScanResult};
 use crate::{build_note_inputs, scan_vault};
 
 const SEMANTIC_SEARCH_PATH: &str = "/search/semantic";
+const DEFAULT_HEALTH_PROBE_PATH: &str = "/health";
+const DEFAULT_HEALTH_PROBE_TIMEOUT: Duration = Duration::from_millis(800);
+const HEALTH_PROBE_CACHE_TTL: Duration = Duration::from_secs(10);
 const LOCAL_RECOMPUTE_EMBEDDING_ATTEMPTS: u32 = 1;
 
 /// High-level AI facade used by CLI and future editor-facing entry points.
@@ -38,6 +43,9 @@ pub struct AiFacade {
     local_selector: Option<ProviderSelector>,
     local_repo: Option<LocalEmbeddingsRepoHandle>,
     mode: ExecutionMode,
+    health_probe_timeout: Duration,
+    health_probe_path: String,
+    health_probe_cache: Arc<Mutex<Option<(Instant, bool)>>>,
 }
 
 /// Dependencies used to construct [`AiFacade`].
@@ -51,6 +59,10 @@ pub struct AiFacadeDeps {
     pub local_repo: Option<LocalEmbeddingsRepoHandle>,
     /// Default execution mode used when a request does not override it.
     pub mode: ExecutionMode,
+    /// Maximum time to wait for the server health probe.
+    pub health_probe_timeout: Duration,
+    /// Server path used for health probing.
+    pub health_probe_path: String,
 }
 
 /// Request for semantic search through [`AiFacade`].
@@ -96,6 +108,9 @@ impl AiFacade {
             local_selector: deps.local_selector,
             local_repo: deps.local_repo,
             mode: deps.mode,
+            health_probe_timeout: deps.health_probe_timeout,
+            health_probe_path: deps.health_probe_path,
+            health_probe_cache: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -171,7 +186,7 @@ impl AiFacade {
         &self,
         request: &SemanticSearchRequest,
     ) -> AiResult<Vec<SearchHit>> {
-        if self.http.is_some() {
+        if self.probe_server().await {
             match self.semantic_search_connected(request).await {
                 Ok(hits) => return Ok(hits),
                 Err(AiError::ProviderRequest(error)) => {
@@ -183,10 +198,32 @@ impl AiFacade {
                 Err(error) => return Err(error),
             }
         } else {
-            tracing::info!("ai: HTTP transport unavailable; using local");
+            tracing::info!("ai: server unreachable; using local");
         }
 
         self.semantic_search_offline(request).await
+    }
+
+    async fn probe_server(&self) -> bool {
+        let Some(http) = &self.http else {
+            return false;
+        };
+        if let Some(cached) = self.cached_probe_result() {
+            return cached;
+        }
+
+        let result =
+            match timeout(self.health_probe_timeout, http.get(&self.health_probe_path)).await {
+                Ok(Ok(status)) => status.is_success(),
+                Ok(Err(error)) => {
+                    tracing::debug!(error = %error, "ai: health probe failed");
+                    false
+                }
+                Err(_) => false,
+            };
+        self.store_probe_result(result);
+
+        result
     }
 
     async fn semantic_search_connected(
@@ -243,6 +280,42 @@ impl AiFacade {
                 "local embeddings repository is not configured".to_string(),
             )
         })
+    }
+
+    fn cached_probe_result(&self) -> Option<bool> {
+        match self.health_probe_cache.lock() {
+            Ok(guard) => guard.as_ref().and_then(|(checked_at, result)| {
+                (checked_at.elapsed() <= HEALTH_PROBE_CACHE_TTL).then_some(*result)
+            }),
+            Err(error) => {
+                tracing::warn!(error = %error, "ai: health probe cache lock failed");
+                None
+            }
+        }
+    }
+
+    fn store_probe_result(&self, result: bool) {
+        match self.health_probe_cache.lock() {
+            Ok(mut guard) => {
+                *guard = Some((Instant::now(), result));
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "ai: health probe cache update failed");
+            }
+        }
+    }
+}
+
+impl Default for AiFacadeDeps {
+    fn default() -> Self {
+        Self {
+            http: None,
+            local_selector: None,
+            local_repo: None,
+            mode: ExecutionMode::Hybrid,
+            health_probe_timeout: DEFAULT_HEALTH_PROBE_TIMEOUT,
+            health_probe_path: DEFAULT_HEALTH_PROBE_PATH.to_string(),
+        }
     }
 }
 

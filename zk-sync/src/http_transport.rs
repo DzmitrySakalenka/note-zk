@@ -66,12 +66,32 @@ impl HttpTransport {
             .map_err(|error| SyncError::Transport(Box::new(error)))
     }
 
+    /// Sends a GET request to an arbitrary server path and returns the status code.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError::Transport`] when URL construction or the request
+    /// fails.
+    pub async fn get(&self, path: &str) -> SyncResult<StatusCode> {
+        let response = self
+            .request(Method::GET, path)?
+            .send()
+            .await
+            .map_err(|error| SyncError::Transport(Box::new(error)))?;
+
+        Ok(response.status())
+    }
+
     fn post(&self, path: &str) -> SyncResult<RequestBuilder> {
+        self.request(Method::POST, path)
+    }
+
+    fn request(&self, method: Method, path: &str) -> SyncResult<RequestBuilder> {
         let url = self
             .base_url
             .join(path)
             .map_err(|error| SyncError::Transport(Box::new(error)))?;
-        let builder = self.client.request(Method::POST, url);
+        let builder = self.client.request(method, url);
 
         Ok(match &self.bearer_token {
             Some(token) => builder.bearer_auth(token),
