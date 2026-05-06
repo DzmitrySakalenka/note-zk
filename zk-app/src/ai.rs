@@ -78,7 +78,7 @@ pub struct SemanticSearchRequest {
 }
 
 /// Summary returned by local cache recomputation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RecomputeLocalSummary {
     /// Number of notes fully recomputed.
     pub notes: u32,
@@ -151,7 +151,8 @@ impl AiFacade {
             errors: Vec::new(),
         };
 
-        for note in notes {
+        let total_notes = notes.len();
+        for (index, note) in notes.into_iter().enumerate() {
             let chunking_service = ChunkingService::new(ParagraphChunker::default(), repo.clone());
             let chunk_count = match chunking_service.chunk_note(&note.note_id, &note.body) {
                 Ok(outcome) => chunk_count_from_outcome(&outcome),
@@ -177,6 +178,16 @@ impl AiFacade {
                     summary.embeddings = checked_add(summary.embeddings, outcome.embedded_count)?;
                 }
                 Err(error) => summary.errors.push(format!("{}: {error}", note.note_id)),
+            }
+            let processed_notes = index + 1;
+            if processed_notes % 25 == 0 || processed_notes == total_notes {
+                tracing::info!(
+                    processed_notes,
+                    total_notes,
+                    recomputed_notes = summary.notes,
+                    errors = summary.errors.len(),
+                    "ai: recompute-local progress"
+                );
             }
         }
 

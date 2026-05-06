@@ -4,7 +4,9 @@
 use clap::Parser;
 
 use zk_cli::{
-    cli::{AdminAiCommand, AdminAiRecomputeScope, AuthCommand, Cli, Command, OutputMode},
+    cli::{
+        AdminAiCommand, AdminAiRecomputeScope, AiCommand, AuthCommand, Cli, Command, OutputMode,
+    },
     error::{
         CliError, EXIT_AI_DISABLED, EXIT_ISSUES, EXIT_OK, EXIT_PROVIDER_UNAVAILABLE, EXIT_REQUEST,
         EXIT_USAGE, exit_code,
@@ -168,6 +170,49 @@ fn search_rejects_top_k_above_one_hundred() {
     .expect_err("semantic search should reject too many hits");
 
     assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+}
+
+#[test]
+fn ai_recompute_local_parses_vault_model_dir_and_json() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "ai",
+        "recompute-local",
+        "--vault",
+        "vault",
+        "--model-dir",
+        "models/minilm",
+        "--json",
+    ])
+    .expect("AI recompute-local arguments should parse");
+
+    assert_eq!(
+        cli.shared.vault.as_deref(),
+        Some(std::path::Path::new("vault"))
+    );
+    match cli.command {
+        Command::Ai(AiCommand::RecomputeLocal(args)) => {
+            assert_eq!(
+                args.model_dir.as_deref(),
+                Some(std::path::Path::new("models/minilm"))
+            );
+            assert_eq!(OutputMode::from(args.json), OutputMode::Json);
+        }
+        other => panic!("expected ai recompute-local command, got {other:?}"),
+    }
+}
+
+#[cfg(not(feature = "ai"))]
+#[test]
+fn ai_recompute_local_without_ai_feature_returns_usage_error() {
+    let cli = Cli::try_parse_from(["zk-cli", "ai", "recompute-local", "--vault", "vault"])
+        .expect("AI recompute-local arguments should parse without the feature");
+
+    let error = zk_cli::run(cli).expect_err("AI recompute-local should require the ai feature");
+
+    assert!(
+        matches!(error, CliError::Argument(message) if message.contains("recompute-local requires zk-cli built with the ai feature"))
+    );
 }
 
 #[test]

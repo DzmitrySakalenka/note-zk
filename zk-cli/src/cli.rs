@@ -24,6 +24,9 @@ pub enum Command {
     /// Remote operator administration commands.
     #[command(subcommand)]
     Admin(AdminCommand),
+    /// Local AI cache commands.
+    #[command(subcommand)]
+    Ai(AiCommand),
     /// Authenticate against a running server for operator tasks.
     #[command(subcommand)]
     Auth(AuthCommand),
@@ -52,6 +55,13 @@ pub enum Command {
 pub enum AuthCommand {
     /// Log in with an admin password and issue a one-time device token.
     IssueToken(IssueTokenArgs),
+}
+
+/// Local AI command set exposed by the CLI.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum AiCommand {
+    /// Recompute the local chunks and embeddings cache for one vault.
+    RecomputeLocal(AiRecomputeLocalArgs),
 }
 
 /// Remote operator administration command set exposed by the CLI.
@@ -186,6 +196,17 @@ pub struct AdminAiCancelArgs {
     /// Environment variable that stores the bearer token.
     #[arg(long = "token-env", default_value = "ZK_DEVICE_TOKEN")]
     pub token_env: String,
+}
+
+/// Arguments for `ai recompute-local`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AiRecomputeLocalArgs {
+    /// Directory containing tokenizer, model config, and local model weights.
+    #[arg(long = "model-dir")]
+    pub model_dir: Option<PathBuf>,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Shared per-invocation flags that later map onto `CliOverrides`.

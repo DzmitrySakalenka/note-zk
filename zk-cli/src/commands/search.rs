@@ -20,6 +20,7 @@ use zk_sync::HttpTransport;
 use crate::{
     bootstrap::{load_effective_config, open_index_connection, resolve_vault_root},
     cli::{OutputMode, SearchArgs, SharedFlags},
+    commands::ai::optional_local_selector,
     error::{CliError, EXIT_OK},
     output::write_json_pretty,
 };
@@ -44,6 +45,8 @@ pub fn run(args: &SearchArgs, shared: &SharedFlags) -> Result<i32, CliError> {
     let vault_root = resolve_vault_root(shared)?;
     let config = load_effective_config(&vault_root, shared)?;
     let repo = LocalEmbeddingsRepoHandle::new(open_index_connection(&config)?);
+    let local_selector =
+        optional_local_selector(&vault_root)?.unwrap_or_else(|| stub_selector(args.mode));
     let http = resolve_transport(
         args.mode,
         config.sync.server_url.as_ref(),
@@ -51,7 +54,7 @@ pub fn run(args: &SearchArgs, shared: &SharedFlags) -> Result<i32, CliError> {
     )?;
     let facade = AiFacade::new(AiFacadeDeps {
         http,
-        local_selector: Some(stub_selector(args.mode)),
+        local_selector: Some(local_selector),
         local_repo: Some(repo.clone()),
         mode: args.mode,
         ..AiFacadeDeps::default()
