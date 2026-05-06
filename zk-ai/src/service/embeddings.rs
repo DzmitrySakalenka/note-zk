@@ -70,7 +70,7 @@ pub struct RecomputeOutcome {
 
 /// Service that computes missing embeddings for already-persisted note chunks.
 #[derive(Debug, Clone)]
-pub struct EmbeddingsService<P: EmbeddingsProvider, R: EmbeddingsWriter> {
+pub struct EmbeddingsService<P: EmbeddingsProvider + ?Sized, R: EmbeddingsWriter> {
     provider: Arc<P>,
     repo: R,
     options: EmbeddingsServiceOptions,
@@ -78,7 +78,7 @@ pub struct EmbeddingsService<P: EmbeddingsProvider, R: EmbeddingsWriter> {
 
 impl<P, R> EmbeddingsService<P, R>
 where
-    P: EmbeddingsProvider,
+    P: EmbeddingsProvider + ?Sized,
     R: EmbeddingsWriter,
 {
     /// Creates an embeddings service from a provider, repository, and options.

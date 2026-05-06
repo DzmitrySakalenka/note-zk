@@ -17,7 +17,7 @@ pub struct ServerState {
 
 struct StateInner {
     config: ServerConfig,
-    db: ServerDb,
+    db: Arc<ServerDb>,
     started_at: DateTime<Utc>,
     in_flight_backup_id: Mutex<Option<String>>,
 }
@@ -33,6 +33,12 @@ impl ServerState {
     #[must_use]
     pub fn db(&self) -> &ServerDb {
         &self.inner.db
+    }
+
+    /// Returns the shared server database handle for background tasks.
+    #[must_use]
+    pub(crate) fn db_handle(&self) -> Arc<ServerDb> {
+        Arc::clone(&self.inner.db)
     }
 
     /// Returns the server startup timestamp.
@@ -51,7 +57,7 @@ impl ServerState {
         Self {
             inner: Arc::new(StateInner {
                 config,
-                db,
+                db: Arc::new(db),
                 started_at,
                 in_flight_backup_id: Mutex::new(None),
             }),

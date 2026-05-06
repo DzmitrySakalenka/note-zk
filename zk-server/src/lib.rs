@@ -4,6 +4,7 @@
 #![doc = "HTTP server for the filesystem-first knowledge system. Hosts sync endpoints and supporting services."]
 
 mod admin;
+pub mod ai;
 pub mod auth;
 mod cli;
 pub mod config;

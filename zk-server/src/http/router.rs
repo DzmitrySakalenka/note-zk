@@ -10,6 +10,7 @@ use zk_domain::AuthScope;
 
 use crate::{
     ServerError, ServerResult,
+    ai::worker::{AiWorkerDeps, provider_selector_from_config, spawn_ai_job_worker},
     auth::{require_auth_layer, require_scope_layer},
     http::{ApiError, admin_routes, auth_routes, health::health, sync_routes},
     scheduler::{backup::spawn_backup_scheduler, purge::spawn_purge_scheduler},
@@ -63,6 +64,7 @@ pub async fn serve(state: ServerState) -> ServerResult<()> {
     let state = Arc::new(state);
     let backup_scheduler = spawn_backup_scheduler(Arc::clone(&state), shutdown.clone());
     let purge_scheduler = spawn_purge_scheduler(Arc::clone(&state), shutdown.clone());
+    let ai_worker = spawn_configured_ai_worker(&state, shutdown.clone());
     let shutdown_signal = shutdown_signal(shutdown.clone())?;
 
     tracing::info!(addr = %listener_addr, "server listening");
@@ -75,9 +77,32 @@ pub async fn serve(state: ServerState) -> ServerResult<()> {
     if let Some(backup_scheduler) = backup_scheduler {
         backup_scheduler.join().await;
     }
+    if let Some(ai_worker) = ai_worker
+        && let Err(error) = ai_worker.await
+    {
+        tracing::error!(error = %error, "AI worker task failed");
+    }
     purge_scheduler.join().await;
 
     serve_result
+}
+
+fn spawn_configured_ai_worker(
+    state: &Arc<ServerState>,
+    shutdown: CancellationToken,
+) -> Option<tokio::task::JoinHandle<()>> {
+    let config = state.config().ai.as_ref()?.clone();
+    let selector = provider_selector_from_config(&config);
+
+    Some(spawn_ai_job_worker(
+        AiWorkerDeps {
+            db: state.db_handle(),
+            selector,
+            config,
+            vault_root: state.config().vault_path.clone(),
+        },
+        shutdown,
+    ))
 }
 
 fn shutdown_signal(

@@ -5609,6 +5609,7 @@ version = "0.1.0"
 dependencies = [
  "age",
  "assert_cmd",
+ "async-trait",
  "axum",
  "axum-extra",
  "bytemuck",
@@ -5639,6 +5640,7 @@ dependencies = [
  "zk-auth",
  "zk-backup",
  "zk-domain",
+ "zk-vault",
 ]
 
 [[package]]

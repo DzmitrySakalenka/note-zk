@@ -36,10 +36,12 @@ zk-ai = { version = "0.1.0", path = "../zk-ai", features = ["provider-http", "pr
 zk-auth = { version = "0.1.0", path = "../zk-auth" }
 zk-backup = { version = "0.1.0", path = "../zk-backup" }
 zk-domain = { path = "../zk-domain" }
+zk-vault = { version = "0.1.0", path = "../zk-vault" }
 
 [dev-dependencies]
 age = "0.11.3"
 assert_cmd = "2.2.1"
+async-trait = "0.1.89"
 hex = "0.4.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 secrecy = "0.10.3"

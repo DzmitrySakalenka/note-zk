@@ -86,6 +86,14 @@ SET
     claim_token = NULL
 WHERE job_id = ?1 AND status = 'pending'
 ";
+const RECOVER_IN_FLIGHT_AI_JOBS_SQL: &str = r"
+UPDATE ai_jobs
+SET
+    status = 'pending',
+    started_at = NULL,
+    claim_token = NULL
+WHERE status = 'in_flight'
+";
 const LIST_AI_JOBS_SQL: &str = r"
 SELECT
     job_id,
@@ -370,6 +378,21 @@ impl<'a> AiJobsRepo<'a> {
             .map_err(ServerError::Database)
     }
 
+    /// Requeues jobs left in flight by a previous worker process.
+    ///
+    /// V1 uses startup recovery instead of claim timeouts because there is only
+    /// one in-process worker.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ServerError`] if the update fails.
+    pub fn recover_in_flight(&self) -> ServerResult<u64> {
+        self.conn
+            .execute(RECOVER_IN_FLIGHT_AI_JOBS_SQL, [])
+            .map(rows_changed_to_u64)
+            .map_err(ServerError::Database)
+    }
+
     fn query_list<P>(&self, sql: &str, params: P) -> ServerResult<Vec<AiJob>>
     where
         P: rusqlite::Params,
@@ -509,6 +532,10 @@ fn decode_limit(limit: Option<u32>) -> ServerResult<i64> {
     }
 
     Ok(i64::from(limit))
+}
+
+fn rows_changed_to_u64(rows_changed: usize) -> u64 {
+    u64::try_from(rows_changed).expect("row count should fit u64")
 }
 
 fn invalid_text_failure(index: usize, message: String) -> rusqlite::Error {
