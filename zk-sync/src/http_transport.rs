@@ -4,6 +4,7 @@ use std::io;
 
 use async_trait::async_trait;
 use reqwest::{Client, Method, RequestBuilder, Response, StatusCode};
+use serde_json::Value;
 use url::Url;
 use zk_domain::{
     RegisterDeviceRequest, RegisterDeviceResponse, ResolveConflictRequest, ResolveConflictResponse,
@@ -44,7 +45,28 @@ impl HttpTransport {
         })
     }
 
-    fn post(&self, path: &'static str) -> SyncResult<RequestBuilder> {
+    /// Posts a JSON value to an arbitrary server path and returns the JSON response value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError::Transport`] when URL construction, the request,
+    /// status handling, or JSON response decoding fails.
+    pub async fn post_json(&self, path: &str, body: &Value) -> SyncResult<Value> {
+        let response = self
+            .post(path)?
+            .json(body)
+            .send()
+            .await
+            .map_err(|error| SyncError::Transport(Box::new(error)))?;
+        let response = response_for_status(response, path).await?;
+
+        response
+            .json::<Value>()
+            .await
+            .map_err(|error| SyncError::Transport(Box::new(error)))
+    }
+
+    fn post(&self, path: &str) -> SyncResult<RequestBuilder> {
         let url = self
             .base_url
             .join(path)
@@ -146,7 +168,7 @@ impl SyncTransport for HttpTransport {
     }
 }
 
-async fn response_for_status(response: Response, path: &'static str) -> SyncResult<Response> {
+async fn response_for_status(response: Response, path: &str) -> SyncResult<Response> {
     let status = response.status();
 
     if status < StatusCode::BAD_REQUEST {
