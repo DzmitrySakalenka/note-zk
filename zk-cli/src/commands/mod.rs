@@ -16,6 +16,9 @@ pub mod resolve_conflict;
 pub mod restore;
 /// Handles the `scan` subcommand.
 pub mod scan;
+/// Handles the `search` subcommand.
+#[cfg(feature = "ai")]
+pub mod search;
 /// Handles the `status` subcommand.
 pub mod status;
 /// Handles the `sync` subcommand.

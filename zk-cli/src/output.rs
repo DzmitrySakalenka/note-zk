@@ -174,6 +174,14 @@ pub(crate) fn write_json_line<T: Serialize>(payload: &T) -> io::Result<()> {
     writeln!(handle)
 }
 
+#[cfg(feature = "ai")]
+pub(crate) fn write_json_pretty<T: Serialize>(payload: &T) -> io::Result<()> {
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    serde_json::to_writer_pretty(&mut handle, payload).map_err(io::Error::other)?;
+    writeln!(handle)
+}
+
 /// Writes human-readable `scan` output to the provided writer.
 ///
 /// # Errors

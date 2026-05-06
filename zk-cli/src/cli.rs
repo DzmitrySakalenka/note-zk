@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, builder::BoolishValueParser};
 use url::Url;
+use zk_domain::ExecutionMode;
 
 /// Top-level command-line parser for the `zk-cli` binary.
 #[derive(Debug, Clone, Parser)]
@@ -40,6 +41,8 @@ pub enum Command {
     Purge(PurgeArgs),
     /// Run one foreground sync cycle against the configured server.
     Sync(SyncArgs),
+    /// Search the vault. Keyword search is reserved; semantic search is available with `--semantic`.
+    Search(SearchArgs),
     /// Resolve one server-side sync conflict explicitly.
     ResolveConflict(ResolveConflictArgs),
 }
@@ -295,6 +298,25 @@ pub struct SyncArgs {
     pub json: bool,
 }
 
+/// Arguments for the `search` subcommand.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct SearchArgs {
+    /// Enable semantic search. Plain keyword search is reserved for a future command.
+    #[arg(long)]
+    pub semantic: bool,
+    /// Free-text query to search for.
+    pub query: String,
+    /// Maximum number of hits to return.
+    #[arg(long = "top-k", default_value_t = 10, value_parser = parse_top_k)]
+    pub top_k: usize,
+    /// AI execution mode: connected, offline, or auto.
+    #[arg(long, default_value = "auto")]
+    pub mode: ExecutionMode,
+    /// Render pretty JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
 /// Arguments for the `resolve-conflict` subcommand.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 #[command(group(ArgGroup::new("resolve_kind").args(["keep_local", "keep_remote"]).required(true).multiple(false)))]
@@ -314,4 +336,15 @@ pub struct ResolveConflictArgs {
     /// Render compact JSON to stdout.
     #[arg(long)]
     pub json: bool,
+}
+
+fn parse_top_k(value: &str) -> Result<usize, String> {
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|error| format!("top-k must be an integer: {error}"))?;
+    if parsed > 100 {
+        return Err("top-k must be 100 or less".to_string());
+    }
+
+    Ok(parsed)
 }

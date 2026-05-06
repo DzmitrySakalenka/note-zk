@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashSet,
+    error::Error,
     path::Path,
     sync::{Arc, Mutex, MutexGuard},
     time::Duration,
@@ -243,7 +244,7 @@ impl AiFacade {
         let response = http
             .post_json(SEMANTIC_SEARCH_PATH, &body)
             .await
-            .map_err(|error| AiError::ProviderRequest(error.to_string()))?;
+            .map_err(|error| AiError::ProviderRequest(error_chain_message(&error)))?;
         let response =
             serde_json::from_value::<RemoteSemanticSearchResponse>(response).map_err(|error| {
                 AiError::ProviderRequest(format!("decode semantic search response: {error}"))
@@ -575,4 +576,17 @@ fn index_to_ai_error(error: &IndexError) -> AiError {
 
 fn app_to_ai_error(error: &crate::AppError) -> AiError {
     AiError::Internal(error.to_string())
+}
+
+fn error_chain_message(error: &(dyn Error + 'static)) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+
+    while let Some(cause) = source {
+        message.push_str(": ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+
+    message
 }

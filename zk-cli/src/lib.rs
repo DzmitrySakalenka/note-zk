@@ -47,6 +47,19 @@ pub fn run(cli: Cli) -> Result<i32, CliError> {
         Command::Restore(args) => commands::restore::run(&args, &shared),
         Command::Purge(args) => commands::purge::run(&args, &shared),
         Command::Sync(args) => commands::sync::run(&args, &shared),
+        Command::Search(args) => {
+            #[cfg(feature = "ai")]
+            {
+                commands::search::run(&args, &shared)
+            }
+            #[cfg(not(feature = "ai"))]
+            {
+                let _ = args;
+                Err(CliError::Argument(
+                    "semantic search requires zk-cli built with the ai feature".to_string(),
+                ))
+            }
+        }
         Command::ResolveConflict(args) => commands::resolve_conflict::run(&args, &shared),
     }
 }

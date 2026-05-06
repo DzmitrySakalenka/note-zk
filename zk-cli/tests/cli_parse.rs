@@ -5,8 +5,12 @@ use clap::Parser;
 
 use zk_cli::{
     cli::{AuthCommand, Cli, Command, OutputMode},
-    error::{CliError, EXIT_ISSUES, EXIT_OK, EXIT_REQUEST, EXIT_USAGE, exit_code},
+    error::{
+        CliError, EXIT_AI_DISABLED, EXIT_ISSUES, EXIT_OK, EXIT_PROVIDER_UNAVAILABLE, EXIT_REQUEST,
+        EXIT_USAGE, exit_code,
+    },
 };
+use zk_domain::ExecutionMode;
 
 #[test]
 fn scan_parses_subcommand_and_shared_flags() {
@@ -108,6 +112,62 @@ fn sync_rejects_conflicting_modes() {
         .expect_err("sync should reject conflicting mode flags");
 
     assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
+fn search_parses_semantic_mode_top_k_and_json_flags() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "search",
+        "--semantic",
+        "vector search",
+        "--top-k",
+        "5",
+        "--mode",
+        "offline",
+        "--json",
+    ])
+    .expect("semantic search arguments should parse");
+
+    match cli.command {
+        Command::Search(args) => {
+            assert!(args.semantic);
+            assert_eq!(args.query, "vector search");
+            assert_eq!(args.top_k, 5);
+            assert_eq!(args.mode, ExecutionMode::Offline);
+            assert_eq!(OutputMode::from(args.json), OutputMode::Json);
+        }
+        other => panic!("expected search command, got {other:?}"),
+    }
+}
+
+#[test]
+fn search_defaults_to_top_ten_and_auto_mode() {
+    let cli = Cli::try_parse_from(["zk-cli", "search", "--semantic", "vector search"])
+        .expect("semantic search arguments should parse");
+
+    match cli.command {
+        Command::Search(args) => {
+            assert_eq!(args.top_k, 10);
+            assert_eq!(args.mode, ExecutionMode::Hybrid);
+        }
+        other => panic!("expected search command, got {other:?}"),
+    }
+}
+
+#[test]
+fn search_rejects_top_k_above_one_hundred() {
+    let error = Cli::try_parse_from([
+        "zk-cli",
+        "search",
+        "--semantic",
+        "vector search",
+        "--top-k",
+        "101",
+    ])
+    .expect_err("semantic search should reject too many hits");
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
 }
 
 #[test]
@@ -334,6 +394,8 @@ fn exit_code_matches_cli_error_policy() {
     assert_eq!(EXIT_ISSUES, 1);
     assert_eq!(EXIT_USAGE, 2);
     assert_eq!(EXIT_REQUEST, 2);
+    assert_eq!(EXIT_AI_DISABLED, 3);
+    assert_eq!(EXIT_PROVIDER_UNAVAILABLE, 4);
     assert_eq!(
         exit_code(&CliError::Argument("bad args".to_string())),
         EXIT_USAGE
@@ -350,6 +412,18 @@ fn exit_code_matches_cli_error_policy() {
     assert_eq!(
         exit_code(&CliError::Request("unauthorized: unauthorized".to_string())),
         EXIT_REQUEST
+    );
+    assert_eq!(
+        exit_code(&CliError::AiDisabled(
+            "semantic search is not enabled".to_string()
+        )),
+        EXIT_AI_DISABLED
+    );
+    assert_eq!(
+        exit_code(&CliError::ProviderUnavailable(
+            "local provider unavailable".to_string()
+        )),
+        EXIT_PROVIDER_UNAVAILABLE
     );
     assert_eq!(
         exit_code(&CliError::Internal(anyhow::anyhow!("internal failure"))),
