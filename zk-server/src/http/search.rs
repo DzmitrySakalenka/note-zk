@@ -119,6 +119,9 @@ fn ai_error_to_api_error(error: AiError) -> ApiError {
         AiError::ProviderRequest(_) => ApiError::from(ServerError::BadGateway(
             "ai provider request failed".to_string(),
         )),
+        AiError::InvalidEmbeddingBlob { len } => {
+            ApiError::from(ServerError::InvalidEmbeddingBlob { len })
+        }
         other => ApiError::from(ServerError::Internal(Box::new(io::Error::other(
             other.to_string(),
         )))),
@@ -151,7 +154,7 @@ impl EmbeddingsReader for ServerEmbeddingsReader {
                             .collect()
                     })
             })
-            .map_err(|error| AiError::Internal(format!("search server chunk embeddings: {error}")))
+            .map_err(server_error_to_ai_error)
     }
 
     fn list_chunk_text(&self, chunk_ids: &[ChunkId]) -> AiResult<Vec<(ChunkId, String)>> {
@@ -170,5 +173,15 @@ impl ServerEmbeddingsReader {
 }
 
 fn ai_to_server_error(error: &AiError) -> ServerError {
-    ServerError::Internal(Box::new(io::Error::other(error.to_string())))
+    match error {
+        AiError::InvalidEmbeddingBlob { len } => ServerError::InvalidEmbeddingBlob { len: *len },
+        other => ServerError::Internal(Box::new(io::Error::other(other.to_string()))),
+    }
+}
+
+fn server_error_to_ai_error(error: ServerError) -> AiError {
+    match error {
+        ServerError::InvalidEmbeddingBlob { len } => AiError::InvalidEmbeddingBlob { len },
+        other => AiError::Internal(format!("search server chunk embeddings: {other}")),
+    }
 }

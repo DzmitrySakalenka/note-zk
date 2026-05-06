@@ -408,11 +408,17 @@ fn with_conn_ai<R>(db: &ServerDb, f: impl FnOnce(&Connection) -> AiResult<R>) ->
 }
 
 fn ai_to_server_error(error: &AiError) -> ServerError {
-    ServerError::Internal(Box::new(std::io::Error::other(error.to_string())))
+    match error {
+        AiError::InvalidEmbeddingBlob { len } => ServerError::InvalidEmbeddingBlob { len: *len },
+        other => ServerError::Internal(Box::new(std::io::Error::other(other.to_string()))),
+    }
 }
 
 fn server_to_ai_error(context: &str, error: &ServerError) -> AiError {
-    AiError::Internal(format!("{context}: {error}"))
+    match error {
+        ServerError::InvalidEmbeddingBlob { len } => AiError::InvalidEmbeddingBlob { len: *len },
+        other => AiError::Internal(format!("{context}: {other}")),
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

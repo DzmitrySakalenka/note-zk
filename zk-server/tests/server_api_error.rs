@@ -66,6 +66,12 @@ async fn server_error_variants_map_to_expected_status_code_and_message() {
             "bad request",
         ),
         (
+            ServerError::InvalidEmbeddingBlob { len: 5 },
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_embedding_blob",
+            "invalid embedding blob length 5; expected a non-empty multiple of 4 bytes",
+        ),
+        (
             ServerError::NotFound("note abc missing".to_string()),
             StatusCode::NOT_FOUND,
             "not_found",

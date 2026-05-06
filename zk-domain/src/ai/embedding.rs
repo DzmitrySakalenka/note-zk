@@ -229,17 +229,14 @@ pub fn encode_vector(vector: &EmbeddingVector) -> Vec<u8> {
 ///
 /// # Errors
 ///
-/// Returns [`EmbeddingVectorError::DimensionMismatch`] when the byte slice is
-/// not an exact sequence of `f32` values.
+/// Returns [`EmbeddingVectorError::InvalidBlob`] when the byte slice is empty
+/// or is not an exact sequence of `f32` values.
 pub fn decode_vector(
     bytes: &[u8],
     model: EmbeddingModelId,
 ) -> EmbeddingVectorResult<EmbeddingVector> {
-    if bytes.len() % FLOAT_BYTE_LEN != 0 {
-        return Err(EmbeddingVectorError::DimensionMismatch {
-            expected: bytes.len().div_ceil(FLOAT_BYTE_LEN),
-            actual: bytes.len() / FLOAT_BYTE_LEN,
-        });
+    if !is_valid_embedding_blob_len(bytes.len()) {
+        return Err(EmbeddingVectorError::InvalidBlob { len: bytes.len() });
     }
 
     let mut values = Vec::with_capacity(bytes.len() / FLOAT_BYTE_LEN);
@@ -251,12 +248,22 @@ pub fn decode_vector(
 }
 
 fn f32_from_le_chunk(chunk: &[u8]) -> f32 {
-    f32::from_le_bytes(chunk.try_into().expect("chunk should contain one f32"))
+    f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
+}
+
+fn is_valid_embedding_blob_len(len: usize) -> bool {
+    len > 0 && len % FLOAT_BYTE_LEN == 0
 }
 
 /// Error returned by pure embedding-vector operations.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum EmbeddingVectorError {
+    /// Stored embedding bytes are not a non-empty sequence of little-endian `f32`s.
+    #[error("invalid embedding blob length {len}; expected a non-empty multiple of 4 bytes")]
+    InvalidBlob {
+        /// Raw byte length of the malformed blob.
+        len: usize,
+    },
     /// The two vectors do not have the same dimension.
     #[error("embedding vector dimension mismatch: expected {expected}, got {actual}")]
     DimensionMismatch {

@@ -8,7 +8,7 @@ use zk_domain::{
     ChunkEmbeddingRecord, ChunkId, ChunkRecord, EmbeddingModelId, EmbeddingVector, ProviderId,
     id::{ContentHash, NoteId, RelativePath},
 };
-use zk_index::{ChunksRepo, EmbeddingsRepo, NoteRepo, ensure_schema, open_memory};
+use zk_index::{ChunksRepo, EmbeddingsRepo, IndexError, NoteRepo, ensure_schema, open_memory};
 
 fn setup_connection() -> Connection {
     let connection = open_memory().expect("in-memory database should open");
@@ -104,6 +104,58 @@ fn insert_chunks(connection: &Connection, note_id: &NoteId, chunks: &[ChunkRecor
     ChunksRepo::new(connection)
         .replace_for_note(note_id, chunks)
         .expect("insert chunks should succeed");
+}
+
+fn seed_single_chunk(connection: &Connection) -> ChunkRecord {
+    let note_id = note_id();
+    insert_note(connection, &note_id);
+    let chunk = chunk_fixture(&note_id, "01JAR5A3PJEZ3SKG67PN8N6S6R", 0, "Chunk");
+    insert_chunks(connection, &note_id, std::slice::from_ref(&chunk));
+    chunk
+}
+
+fn insert_raw_embedding_blob(
+    connection: &Connection,
+    chunk_id: &ChunkId,
+    model: &EmbeddingModelId,
+    dimension: i64,
+    bytes: &[u8],
+) {
+    let provider = provider("test-provider");
+
+    connection
+        .execute(
+            r"
+            INSERT INTO chunk_embeddings (
+                chunk_id,
+                embedding_model,
+                provider_id,
+                dim,
+                vector,
+                created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ",
+            rusqlite::params![
+                chunk_id.as_str(),
+                model.as_str(),
+                provider.as_str(),
+                dimension,
+                bytes,
+                "2026-05-05T11:00:00Z",
+            ],
+        )
+        .expect("raw embedding fixture should insert");
+}
+
+fn malformed_embedding_blobs() -> [Vec<u8>; 3] {
+    [Vec::new(), vec![1; 5], vec![2; 7]]
+}
+
+fn assert_invalid_embedding_blob(error: &IndexError, expected_len: usize) {
+    assert!(
+        matches!(error, IndexError::InvalidEmbeddingBlob { len } if *len == expected_len),
+        "expected invalid embedding blob length {expected_len}, got {error:?}"
+    );
 }
 
 #[test]
@@ -364,6 +416,39 @@ fn embeddings_reader_lists_chunk_text_in_requested_order() {
             (first_chunk.chunk_id, "First".to_string()),
         ]
     );
+}
+
+#[test]
+fn list_for_chunk_rejects_malformed_embedding_blobs() {
+    for bytes in malformed_embedding_blobs() {
+        let connection = setup_connection();
+        let chunk = seed_single_chunk(&connection);
+        let model = model("test/model-a");
+        insert_raw_embedding_blob(&connection, &chunk.chunk_id, &model, 1, &bytes);
+
+        let error = EmbeddingsRepo::new(&connection)
+            .list_for_chunk(&chunk.chunk_id)
+            .expect_err("malformed embedding blob should fail list decoding");
+
+        assert_invalid_embedding_blob(&error, bytes.len());
+    }
+}
+
+#[test]
+fn top_k_cosine_rejects_malformed_embedding_blobs() {
+    for bytes in malformed_embedding_blobs() {
+        let connection = setup_connection();
+        let chunk = seed_single_chunk(&connection);
+        let model = model("test/model-a");
+        insert_raw_embedding_blob(&connection, &chunk.chunk_id, &model, 1, &bytes);
+        let query = normalized_embedding_vector(&model, &[1.0]);
+
+        let error = EmbeddingsRepo::new(&connection)
+            .top_k_cosine(&query, 1, &model)
+            .expect_err("malformed embedding blob should fail top-k search");
+
+        assert_invalid_embedding_blob(&error, bytes.len());
+    }
 }
 
 #[test]

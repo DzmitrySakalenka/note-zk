@@ -34,6 +34,12 @@ fn ai_error_variants_display_and_are_send_sync_static() {
         "embedding dimension mismatch: expected 384, got 1536"
     );
 
+    let invalid_embedding_blob = AiError::InvalidEmbeddingBlob { len: 7 };
+    assert_eq!(
+        invalid_embedding_blob.to_string(),
+        "invalid embedding blob length 7; expected a non-empty multiple of 4 bytes"
+    );
+
     let invalid_config = AiError::InvalidConfig("dim must be positive".to_string());
     assert_eq!(
         invalid_config.to_string(),

@@ -161,7 +161,7 @@ impl<'a> EmbeddingsRepo<'a> {
             .map_err(ServerError::Database)?;
 
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(ServerError::Database)
+            .map_err(embedding_sqlite_error)
     }
 
     /// Returns the top `k` chunks by cosine similarity for a normalized query.
@@ -194,7 +194,7 @@ impl<'a> EmbeddingsRepo<'a> {
         let mut heap = BinaryHeap::with_capacity(k);
 
         while let Some(row) = rows.next().map_err(ServerError::Database)? {
-            let scored_hit = decode_scored_hit(row, query).map_err(ServerError::Database)?;
+            let scored_hit = decode_scored_hit(row, query).map_err(embedding_sqlite_error)?;
 
             if heap.len() < k {
                 heap.push(Reverse(scored_hit));
@@ -235,7 +235,7 @@ impl EmbeddingsReader for EmbeddingsRepo<'_> {
                     })
                     .collect()
             })
-            .map_err(|error| AiError::Internal(format!("search server chunk embeddings: {error}")))
+            .map_err(server_search_error_to_ai_error)
     }
 
     fn list_chunk_text(&self, chunk_ids: &[ChunkId]) -> AiResult<Vec<(ChunkId, String)>> {
@@ -413,7 +413,7 @@ fn dot_product_with_encoded_vector(bytes: &[u8], query: &EmbeddingVector) -> rus
 }
 
 fn f32_from_le_chunk(chunk: &[u8]) -> f32 {
-    f32::from_le_bytes(chunk.try_into().expect("chunk should contain one f32"))
+    f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
 }
 
 fn dot_product(left: &[f32], right: &[f32]) -> f32 {
@@ -428,6 +428,14 @@ fn ensure_encoded_dimension_matches_query(
     bytes: &[u8],
     query_dimension: usize,
 ) -> rusqlite::Result<()> {
+    if !is_valid_embedding_blob_len(bytes.len()) {
+        return Err(from_sql_conversion_failure(
+            2,
+            Type::Blob,
+            EmbeddingVectorError::InvalidBlob { len: bytes.len() },
+        ));
+    }
+
     let expected_len = query_dimension
         .checked_mul(FLOAT_BYTE_LEN)
         .ok_or_else(|| invalid_embedding_dimension_failure(query_dimension))?;
@@ -508,6 +516,10 @@ fn rows_changed_to_u64(rows_changed: usize) -> u64 {
     u64::try_from(rows_changed).expect("row count should fit u64")
 }
 
+fn is_valid_embedding_blob_len(len: usize) -> bool {
+    len > 0 && len % FLOAT_BYTE_LEN == 0
+}
+
 fn invalid_embedding_dimension_failure(dimension: usize) -> rusqlite::Error {
     from_sql_conversion_failure(
         2,
@@ -525,4 +537,31 @@ fn from_sql_conversion_failure(
     source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
 ) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(index, source_type, source.into())
+}
+
+fn embedding_sqlite_error(source: rusqlite::Error) -> ServerError {
+    if let Some(len) = invalid_embedding_blob_len(&source) {
+        return ServerError::InvalidEmbeddingBlob { len };
+    }
+
+    ServerError::Database(source)
+}
+
+fn invalid_embedding_blob_len(source: &rusqlite::Error) -> Option<usize> {
+    let rusqlite::Error::FromSqlConversionFailure(_, Type::Blob, source) = source else {
+        return None;
+    };
+    let error = source.downcast_ref::<EmbeddingVectorError>()?;
+
+    match error {
+        EmbeddingVectorError::InvalidBlob { len } => Some(*len),
+        EmbeddingVectorError::DimensionMismatch { .. } => None,
+    }
+}
+
+fn server_search_error_to_ai_error(error: ServerError) -> AiError {
+    match error {
+        ServerError::InvalidEmbeddingBlob { len } => AiError::InvalidEmbeddingBlob { len },
+        other => AiError::Internal(format!("search server chunk embeddings: {other}")),
+    }
 }

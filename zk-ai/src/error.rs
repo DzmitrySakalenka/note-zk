@@ -23,6 +23,12 @@ pub enum AiError {
         /// Actual vector dimension.
         actual: usize,
     },
+    /// Stored or generated embedding bytes are not a non-empty sequence of `f32`s.
+    #[error("invalid embedding blob length {len}; expected a non-empty multiple of 4 bytes")]
+    InvalidEmbeddingBlob {
+        /// Raw byte length of the malformed blob.
+        len: usize,
+    },
     /// AI configuration failed validation.
     #[error("invalid configuration: {0}")]
     InvalidConfig(String),

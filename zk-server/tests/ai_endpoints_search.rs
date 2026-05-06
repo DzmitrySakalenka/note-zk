@@ -198,6 +198,29 @@ async fn semantic_search_returns_ordered_hits_with_model_metadata() {
 }
 
 #[tokio::test]
+async fn semantic_search_returns_422_for_malformed_embedding_blob() {
+    let fixture = SearchFixture::enabled();
+    let sync_token = fixture.issue_token(vec![AuthScope::Sync]);
+    seed_malformed_embedding_blob(&fixture.state, &[1, 2, 3, 4, 5]);
+
+    let response = build_router(fixture.state.clone())
+        .oneshot(search_request(
+            &sync_token,
+            &json!({ "query": QUERY_TEXT, "top_k": 1 }),
+        ))
+        .await
+        .expect("semantic search request should complete");
+
+    assert_json_error(
+        response,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "invalid_embedding_blob",
+        "invalid embedding blob length 5; expected a non-empty multiple of 4 bytes",
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn semantic_search_caps_large_top_k_at_one_hundred() {
     let fixture = SearchFixture::enabled();
     let sync_token = fixture.issue_token(vec![AuthScope::Sync]);
@@ -355,6 +378,50 @@ fn seed_chunks_and_embeddings(
             Ok(())
         })
         .expect("semantic search fixtures should seed");
+}
+
+fn seed_malformed_embedding_blob(state: &ServerState, bytes: &[u8]) {
+    let provider = StubEmbeddingsProvider::new(2);
+    let model = provider.capability().model.clone();
+    let note_id = NoteId::new(NOTE_ID);
+    let chunk = chunk(
+        &note_id,
+        FIRST_CHUNK_ID,
+        0,
+        "Malformed semantic topic sentence.",
+    );
+
+    state
+        .db()
+        .with_conn(|connection| {
+            NotesRepo::create(connection, &note_row(&note_id))?;
+            ChunksRepo::new(connection).replace_for_note(&note_id, std::slice::from_ref(&chunk))?;
+            connection
+                .execute(
+                    r"
+                    INSERT INTO chunk_embeddings (
+                        chunk_id,
+                        embedding_model,
+                        provider_id,
+                        dim,
+                        vector,
+                        created_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                    ",
+                    rusqlite::params![
+                        chunk.chunk_id.as_str(),
+                        model.as_str(),
+                        provider_id().as_str(),
+                        2_i64,
+                        bytes,
+                        "2026-05-05T11:00:00Z",
+                    ],
+                )
+                .expect("malformed embedding fixture should insert");
+
+            Ok(())
+        })
+        .expect("malformed semantic search fixture should seed");
 }
 
 fn note_row(note_id: &NoteId) -> NoteRow {

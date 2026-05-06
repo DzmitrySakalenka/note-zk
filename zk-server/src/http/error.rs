@@ -98,6 +98,12 @@ fn response_parts(error: &ServerError) -> (StatusCode, &'static str, String, boo
             message.clone(),
             false,
         ),
+        ServerError::InvalidEmbeddingBlob { .. } => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_embedding_blob",
+            error.to_string(),
+            false,
+        ),
         ServerError::NotFound(message) => {
             (StatusCode::NOT_FOUND, "not_found", message.clone(), false)
         }

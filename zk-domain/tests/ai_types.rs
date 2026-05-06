@@ -369,13 +369,20 @@ fn embedding_vector_decoding_rejects_partial_f32_bytes() {
     let error =
         decode_vector(&[0, 0, 160], model_id()).expect_err("partial f32 should be rejected");
 
-    assert_eq!(
-        error,
-        EmbeddingVectorError::DimensionMismatch {
-            expected: 1,
-            actual: 0,
-        }
-    );
+    assert_eq!(error, EmbeddingVectorError::InvalidBlob { len: 3 });
+}
+
+#[test]
+fn embedding_vector_decoding_rejects_malformed_blob_lengths() {
+    for bytes in malformed_embedding_blobs() {
+        let error = decode_vector(&bytes, model_id())
+            .expect_err("malformed embedding blob should be rejected");
+
+        assert_eq!(
+            error,
+            EmbeddingVectorError::InvalidBlob { len: bytes.len() }
+        );
+    }
 }
 
 #[test]
@@ -428,6 +435,10 @@ fn vector<const DIM: usize>(values: [f32; DIM]) -> EmbeddingVector {
         values: values.to_vec(),
         model: model_id(),
     }
+}
+
+fn malformed_embedding_blobs() -> [Vec<u8>; 3] {
+    [Vec::new(), vec![1; 5], vec![2; 7]]
 }
 
 fn model_id() -> EmbeddingModelId {
