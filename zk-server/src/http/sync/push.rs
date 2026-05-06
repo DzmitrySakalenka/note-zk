@@ -3,7 +3,10 @@
 use axum::{Json, extract::State};
 use chrono::{DateTime, Days, Utc};
 use rusqlite::Connection;
-use zk_domain::{PushAssetItem, PushItemResult, PushNoteItem, SyncPushRequest, SyncPushResponse};
+use zk_domain::{
+    PushAssetItem, PushItemResult, PushNoteItem, SyncPushRequest, SyncPushResponse, WireOperation,
+    id::NoteId,
+};
 
 use super::dto;
 use crate::{
@@ -27,16 +30,19 @@ pub(super) async fn sync_push(
 
     let now = Utc::now();
     let editor_device_id = auth.device_id.as_deref().unwrap_or(&body.device_id);
+    let ai_ingest = state.ai_ingest();
     let mut results = Vec::with_capacity(body.notes.len().saturating_add(body.assets.len()));
 
     for item in &body.notes {
-        results.push(process_note_item(
-            &state,
-            item,
-            &body.device_id,
-            editor_device_id,
-            now,
-        )?);
+        let result = process_note_item(&state, item, &body.device_id, editor_device_id, now)?;
+        if result.accepted
+            && operation_recomputes_embeddings(item.operation)
+            && let Some(enqueuer) = &ai_ingest
+        {
+            enqueuer.note_changed(NoteId::new(&item.note_id));
+        }
+
+        results.push(result);
     }
 
     for item in &body.assets {
@@ -146,6 +152,16 @@ fn process_asset_item(
             }
         }
     })
+}
+
+fn operation_recomputes_embeddings(operation: WireOperation) -> bool {
+    matches!(
+        operation,
+        WireOperation::Create
+            | WireOperation::Update
+            | WireOperation::Move
+            | WireOperation::Restore
+    )
 }
 
 struct DeleteRecordSync<'a> {

@@ -32,6 +32,10 @@ fn recompute_note_kind() -> AiJobKind {
     AiJobKind::RecomputeNote { note_id: note_id() }
 }
 
+fn other_note_id() -> NoteId {
+    NoteId::new("01JAR5A3PJEZ3SKG67PN8N6S6T")
+}
+
 fn pending_filter() -> AiJobFilter {
     AiJobFilter {
         status: Some(AiJobStatus::Pending),
@@ -276,6 +280,74 @@ fn list_filters_by_status_and_kind() {
     assert_eq!(vault_jobs[0].job_id, vault_job.job_id);
     assert_eq!(pending_note_jobs.len(), 1);
     assert_eq!(pending_note_jobs[0].job_id, note_job.job_id);
+}
+
+#[test]
+fn pending_recompute_note_exists_only_matches_pending_same_note() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+
+    assert!(
+        !repo
+            .pending_recompute_note_exists(&note_id())
+            .expect("pending lookup should succeed")
+    );
+
+    let job = repo
+        .enqueue(
+            recompute_note_kind(),
+            parse_timestamp("2026-05-05T10:00:00Z"),
+        )
+        .expect("job enqueue should succeed");
+
+    assert!(
+        repo.pending_recompute_note_exists(&note_id())
+            .expect("pending lookup should succeed")
+    );
+    assert!(
+        !repo
+            .pending_recompute_note_exists(&other_note_id())
+            .expect("other note pending lookup should succeed")
+    );
+
+    repo.claim_next(3, parse_timestamp("2026-05-05T10:01:00Z"))
+        .expect("claim should succeed")
+        .expect("job should be claimed");
+    assert!(
+        !repo
+            .pending_recompute_note_exists(&note_id())
+            .expect("in-flight lookup should succeed")
+    );
+
+    repo.mark_done(&job.job_id, parse_timestamp("2026-05-05T10:02:00Z"))
+        .expect("mark done should succeed");
+    assert!(
+        !repo
+            .pending_recompute_note_exists(&note_id())
+            .expect("done lookup should succeed")
+    );
+
+    let failed_job = repo
+        .enqueue(
+            recompute_note_kind(),
+            parse_timestamp("2026-05-05T10:03:00Z"),
+        )
+        .expect("second job enqueue should succeed");
+    repo.claim_next(1, parse_timestamp("2026-05-05T10:04:00Z"))
+        .expect("second claim should succeed")
+        .expect("second job should be claimed");
+    repo.mark_failed(
+        &failed_job.job_id,
+        "failed",
+        1,
+        parse_timestamp("2026-05-05T10:05:00Z"),
+    )
+    .expect("mark failed should succeed");
+    assert!(
+        !repo
+            .pending_recompute_note_exists(&note_id())
+            .expect("failed lookup should succeed")
+    );
 }
 
 #[test]

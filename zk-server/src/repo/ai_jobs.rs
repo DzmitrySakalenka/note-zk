@@ -24,6 +24,15 @@ INSERT INTO ai_jobs (
     ?1, ?2, ?3, 'pending', 0, NULL, ?4, NULL, NULL, NULL
 )
 ";
+const PENDING_RECOMPUTE_NOTE_EXISTS_SQL: &str = r"
+SELECT EXISTS (
+    SELECT 1
+    FROM ai_jobs
+    WHERE status = 'pending'
+      AND kind = 'recompute_note'
+      AND payload_json = ?1
+)
+";
 const CLAIM_NEXT_AI_JOB_SQL: &str = r"
 UPDATE ai_jobs
 SET
@@ -266,6 +275,23 @@ impl<'a> AiJobsRepo<'a> {
             started_at: None,
             finished_at: None,
         })
+    }
+
+    /// Returns whether a pending recompute-note job already exists for `note_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ServerError`] if JSON encoding or the lookup query fails.
+    pub fn pending_recompute_note_exists(&self, note_id: &NoteId) -> ServerResult<bool> {
+        let payload_json = encode_payload_json(&AiJobKind::RecomputeNote {
+            note_id: note_id.clone(),
+        })?;
+
+        self.conn
+            .query_row(PENDING_RECOMPUTE_NOTE_EXISTS_SQL, [payload_json], |row| {
+                row.get::<_, bool>(0)
+            })
+            .map_err(ServerError::Database)
     }
 
     /// Atomically claims the oldest pending AI job below the retry ceiling.

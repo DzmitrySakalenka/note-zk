@@ -64,6 +64,7 @@ pub async fn serve(state: ServerState) -> ServerResult<()> {
     let state = Arc::new(state);
     let backup_scheduler = spawn_backup_scheduler(Arc::clone(&state), shutdown.clone());
     let purge_scheduler = spawn_purge_scheduler(Arc::clone(&state), shutdown.clone());
+    let ai_ingest = spawn_configured_ai_ingest_loop(&state, shutdown.clone());
     let ai_worker = spawn_configured_ai_worker(&state, shutdown.clone());
     let shutdown_signal = shutdown_signal(shutdown.clone())?;
 
@@ -77,6 +78,11 @@ pub async fn serve(state: ServerState) -> ServerResult<()> {
     if let Some(backup_scheduler) = backup_scheduler {
         backup_scheduler.join().await;
     }
+    if let Some(ai_ingest) = ai_ingest
+        && let Err(error) = ai_ingest.await
+    {
+        tracing::error!(error = %error, "AI ingest task failed");
+    }
     if let Some(ai_worker) = ai_worker
         && let Err(error) = ai_worker.await
     {
@@ -85,6 +91,17 @@ pub async fn serve(state: ServerState) -> ServerResult<()> {
     purge_scheduler.join().await;
 
     serve_result
+}
+
+fn spawn_configured_ai_ingest_loop(
+    state: &Arc<ServerState>,
+    shutdown: CancellationToken,
+) -> Option<tokio::task::JoinHandle<()>> {
+    let enqueuer = state.ai_ingest()?;
+
+    Some(tokio::spawn(async move {
+        enqueuer.flush_loop(shutdown).await;
+    }))
 }
 
 fn spawn_configured_ai_worker(
