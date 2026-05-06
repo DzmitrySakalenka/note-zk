@@ -9,7 +9,22 @@ pub mod provider;
 pub mod selector;
 pub mod service;
 
+pub use chunker::{Chunker, ChunkerOptions, ParagraphChunker};
 pub use error::{AiError, AiResult};
+#[cfg(feature = "provider-local")]
+pub use provider::local_candle::{LocalEmbeddingsConfig, LocalEmbeddingsProvider};
+#[cfg(feature = "provider-http")]
+pub use provider::remote_http::{RemoteEmbeddingsConfig, RemoteEmbeddingsProvider};
+pub use provider::stub::StubEmbeddingsProvider;
+pub use provider::{
+    EmbeddingsCapability, EmbeddingsProvider, EmbeddingsRequest, EmbeddingsResponse, embed_one,
+};
+pub use selector::{ProviderRegistry, ProviderSelector};
+pub use service::{
+    chunking::{ChunkOutcome, ChunkingService, ChunksWriter},
+    embeddings::{EmbeddingsService, EmbeddingsServiceOptions, EmbeddingsWriter, RecomputeOutcome},
+    semantic_search::{EmbeddingsReader, SearchHit, SemanticSearchService},
+};
 
 // TG16-001 fixes the crate's agreed dependency surface before the primitive
 // modules consume it in TG16-003 through TG16-019.

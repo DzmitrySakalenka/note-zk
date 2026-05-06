@@ -193,6 +193,60 @@ Store the printed plaintext in `ZK_DEVICE_TOKEN` on the device. The
 server only keeps the SHA-256 hash; the plaintext cannot be retrieved
 later.
 
+## AI
+
+Server-side AI is optional; production embedding providers can be remote
+HTTP or a local Candle model:
+
+```toml
+[ai]
+provider = "stub" # "stub", "remote-http", or "local-candle"
+default_mode = "connected"
+recompute_concurrency = 2
+max_attempts = 3
+
+[ai.stub]
+dim = 384
+
+[ai.remote]
+base_url = "https://api.openai.com"
+model_id = "text-embedding-3-small"
+dim = 1536
+api_key_env_var = "OPENAI_API_KEY"
+
+[ai.local]
+model_dir = "/var/lib/zk-server/models/all-minilm-l6-v2"
+model_id = "local/all-minilm-l6-v2"
+device = "cpu"
+```
+
+Run server-side embedding jobs with an admin-scoped token:
+
+```bash
+zk-cli admin ai recompute --scope vault
+zk-cli admin ai jobs
+zk-cli admin ai cancel <job-id>
+```
+
+Search and refresh the local offline cache from a vault client:
+
+```bash
+zk-cli search --semantic "<query>"
+zk-cli ai recompute-local --vault <path>
+```
+
+Local model runtime support is feature-gated:
+
+```bash
+cargo build --features zk-cli/ai-local
+```
+
+`provider-local-metal` and `provider-local-cuda` are opt-in hardware
+features and require platform support. See
+`docs/architecture/llm-execution-model.md` for execution modes and
+`docs/decisions/0004-server-first-ai-with-local-fallback.md` for the
+server-first local fallback decision.
+
 ## Backup and Restore
 
 Enable built-in server backups in `server.toml`:

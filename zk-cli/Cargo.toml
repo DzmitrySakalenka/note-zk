@@ -41,4 +41,5 @@ zk-vault = { version = "0.1.0", path = "../zk-vault" }
 
 [features]
 ai = ["dep:toml", "dep:zk-ai", "dep:zk-index", "zk-ai/provider-local", "zk-app/ai"]
+ai-local = ["ai"]
 test-stub-ai = ["ai"]
