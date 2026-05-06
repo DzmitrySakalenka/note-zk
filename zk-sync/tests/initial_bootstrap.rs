@@ -16,8 +16,8 @@ use zk_index::{AssetRepo, DeleteRecordRepo, NoteRepo, SyncStateRepo, ensure_sche
 use zk_sync::{
     SyncError,
     bootstrap::{
-        InitialSyncMode, LocalBootstrapProbe, RemoteBootstrapProbe, detect_initial_mode,
-        plan_empty_local_bootstrap, plan_empty_remote_bootstrap,
+        InitialSyncMode, LocalBootstrapProbe, RemoteBootstrapProbe, ValidatedInitialSyncMode,
+        detect_initial_mode, plan_empty_local_bootstrap, plan_empty_remote_bootstrap,
     },
     plan::{Clock, PlannerContext},
 };
@@ -136,13 +136,13 @@ fn require_unambiguous_rejects_both_mode_only() {
         InitialSyncMode::EmptyLocal
             .require_unambiguous()
             .expect("empty-local mode should succeed"),
-        InitialSyncMode::EmptyLocal
+        ValidatedInitialSyncMode::EmptyLocal
     );
     assert_eq!(
         InitialSyncMode::EmptyRemote
             .require_unambiguous()
             .expect("empty-remote mode should succeed"),
-        InitialSyncMode::EmptyRemote
+        ValidatedInitialSyncMode::EmptyRemote
     );
     assert!(matches!(
         InitialSyncMode::Both.require_unambiguous(),

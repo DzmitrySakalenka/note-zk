@@ -42,6 +42,27 @@ pub enum RebuildOutcome {
     },
 }
 
+impl RebuildOutcome {
+    /// Extracts the normalization payload from a write-normalized rebuild outcome.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::InvariantViolation`] if a caller requests the
+    /// normalization payload from a scan-only outcome.
+    pub fn into_normalized(self) -> Result<(ScanOutcome, NormalizationSummary), AppError> {
+        match self {
+            Self::Normalized {
+                scan_outcome,
+                normalization,
+                ..
+            } => Ok((scan_outcome, normalization)),
+            Self::ScanOnly { .. } => Err(AppError::InvariantViolation {
+                context: "write rebuild completed without normalization payload".to_string(),
+            }),
+        }
+    }
+}
+
 /// Scans a vault and rebuilds the local `SQLite` index from scan output.
 ///
 /// # Errors

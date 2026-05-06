@@ -8,8 +8,8 @@ use zk_index::{AssetRepo, DeviceRepo, NoteRepo};
 use zk_sync::{
     SyncError,
     bootstrap::{
-        InitialSyncMode, LocalBootstrapProbe, detect_initial_mode, plan_empty_local_bootstrap,
-        plan_empty_remote_bootstrap,
+        LocalBootstrapProbe, ValidatedInitialSyncMode, detect_initial_mode,
+        plan_empty_local_bootstrap, plan_empty_remote_bootstrap,
     },
     plan::{
         AssetPlannedOperation, NotePlannedOperation, PlannedOp, PlannedOperation, PlannerContext,
@@ -202,7 +202,7 @@ pub async fn bootstrap(
     let mode = detect_initial_mode(&local, &remote).require_unambiguous()?;
 
     match mode {
-        InitialSyncMode::EmptyLocal => Ok(BootstrapOutcome::Pulled(
+        ValidatedInitialSyncMode::EmptyLocal => Ok(BootstrapOutcome::Pulled(
             pull_and_apply(
                 transport,
                 SyncContext {
@@ -215,7 +215,7 @@ pub async fn bootstrap(
             )
             .await?,
         )),
-        InitialSyncMode::EmptyRemote => {
+        ValidatedInitialSyncMode::EmptyRemote => {
             let request = {
                 let planner = PlannerContext {
                     conn: &*conn,
@@ -231,7 +231,6 @@ pub async fn bootstrap(
 
             Ok(BootstrapOutcome::Pushed(outcome))
         }
-        InitialSyncMode::Both => unreachable!("validated bootstrap mode should be unambiguous"),
     }
 }
 

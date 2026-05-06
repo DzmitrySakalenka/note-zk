@@ -32,6 +32,12 @@ pub enum SyncError {
     /// Initial sync cannot proceed automatically because both sides already contain data.
     #[error("initial sync is ambiguous: both local and remote have content")]
     AmbiguousBootstrap,
+    /// A bounded collision-probing loop could not find a free destination.
+    #[error("collision retry exhausted after {attempts} attempts")]
+    CollisionRetryExhausted {
+        /// Number of destination candidates inspected before giving up.
+        attempts: u32,
+    },
     /// The selected transport does not support this operation.
     #[error("unsupported sync operation: {0}")]
     Unsupported(&'static str),

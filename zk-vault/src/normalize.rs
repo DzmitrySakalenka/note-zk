@@ -21,6 +21,22 @@ pub enum TitleSource {
     FilenameStem,
 }
 
+enum ChosenTitleSource<'a> {
+    Frontmatter(&'a str),
+    H1(&'a str),
+    FilenameStem,
+}
+
+impl ChosenTitleSource<'_> {
+    fn source(&self) -> TitleSource {
+        match self {
+            Self::Frontmatter(_) => TitleSource::Frontmatter,
+            Self::H1(_) => TitleSource::H1,
+            Self::FilenameStem => TitleSource::FilenameStem,
+        }
+    }
+}
+
 /// Inputs required to normalize one raw note frontmatter payload.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalizationContext<'a> {
@@ -170,7 +186,7 @@ pub(crate) fn plan_normalization_with_body_analysis(
         config,
         is_immutable: candidate.is_immutable,
     };
-    let title_source = choose_title_source(raw_frontmatter, &ctx);
+    let title_source = choose_title_source(raw_frontmatter, &ctx).source();
 
     NormalizationPlan {
         needs_id_injection: raw_frontmatter.id.is_none(),
@@ -204,43 +220,38 @@ pub(crate) fn empty_raw_frontmatter() -> RawNoteFrontmatter {
 
 fn derive_title(raw: &RawNoteFrontmatter, ctx: &NormalizationContext<'_>) -> (String, TitleSource) {
     match choose_title_source(raw, ctx) {
-        TitleSource::Frontmatter => (
-            raw.title.clone().unwrap_or_else(|| {
-                unreachable!(
-                    "choose_title_source returned Frontmatter without a non-empty raw title"
-                )
-            }),
-            TitleSource::Frontmatter,
-        ),
-        TitleSource::H1 => (
-            ctx.body_analysis.first_h1.clone().unwrap_or_else(|| {
-                unreachable!("choose_title_source returned H1 without a non-empty first heading")
-            }),
-            TitleSource::H1,
-        ),
-        TitleSource::FilenameStem => (
+        ChosenTitleSource::Frontmatter(title) => (title.to_string(), TitleSource::Frontmatter),
+        ChosenTitleSource::H1(title) => (title.to_string(), TitleSource::H1),
+        ChosenTitleSource::FilenameStem => (
             derive_title_from_filename_stem(ctx.relative_path),
             TitleSource::FilenameStem,
         ),
     }
 }
 
-fn choose_title_source(raw: &RawNoteFrontmatter, ctx: &NormalizationContext<'_>) -> TitleSource {
-    if raw.title.as_deref().is_some_and(has_non_whitespace_content) {
-        return TitleSource::Frontmatter;
+fn choose_title_source<'a>(
+    raw: &'a RawNoteFrontmatter,
+    ctx: &'a NormalizationContext<'_>,
+) -> ChosenTitleSource<'a> {
+    if let Some(title) = raw
+        .title
+        .as_deref()
+        .filter(|title| has_non_whitespace_content(title))
+    {
+        return ChosenTitleSource::Frontmatter(title);
     }
 
     if ctx.config.derive_title_from_h1
-        && ctx
+        && let Some(title) = ctx
             .body_analysis
             .first_h1
             .as_deref()
-            .is_some_and(has_non_whitespace_content)
+            .filter(|title| has_non_whitespace_content(title))
     {
-        return TitleSource::H1;
+        return ChosenTitleSource::H1(title);
     }
 
-    TitleSource::FilenameStem
+    ChosenTitleSource::FilenameStem
 }
 
 fn derive_title_from_filename_stem(path: &RelativePath) -> String {

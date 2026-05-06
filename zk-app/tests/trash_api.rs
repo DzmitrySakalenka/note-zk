@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, fs, path::Path};
 
 mod common;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use common::{unique_test_dir, write_text};
 use rusqlite::OpenFlags;
 use zk_app::{
@@ -20,6 +20,8 @@ use zk_domain::{
     id::{NoteId, RelativePath},
 };
 use zk_index::{AssetRepo, DeleteRecordRepo, NoteRepo, ensure_schema, open_or_create};
+
+const TEST_COLLISION_ATTEMPTS: u32 = 1024;
 
 #[test]
 fn trash_note_by_id_moves_file_updates_index_and_creates_delete_record() {
@@ -120,6 +122,45 @@ fn preview_trash_note_returns_planned_path_without_mutating_disk_or_db() {
     )
     .expect("real trash note should succeed");
     assert_eq!(actual.new_path, preview.new_path);
+}
+
+#[test]
+fn preview_trash_note_returns_collision_exhausted_when_all_candidates_exist() {
+    let root = unique_test_dir("preview-trash-note-collision-exhausted");
+    let vault_root = root.join("vault");
+    let note_id = NoteId::new("01PREVIEWCOLLISIONEXHAUST001");
+    let note_relative_path = RelativePath::new("notes/alpha.md");
+    write_note(
+        &vault_root.join(note_relative_path.as_str()),
+        note_id.as_str(),
+        "Alpha",
+    );
+    seed_trash_collision_candidates(&vault_root, "99_trash", "alpha.md");
+
+    let config = base_config(&vault_root);
+    let conn = seeded_connection(
+        &vault_root,
+        &config,
+        "preview-trash-note-collision-exhausted.sqlite",
+    );
+    let err = preview_trash_note(
+        &vault_root,
+        &config,
+        &conn,
+        &TrashRequest {
+            kind: ItemKind::Note,
+            target: TargetSelector::ById(note_id.as_str().to_string()),
+            reason: None,
+        },
+    )
+    .expect_err("saturated trash destination candidates should fail");
+
+    assert!(matches!(
+        err,
+        AppError::CollisionRetryExhausted {
+            attempts: TEST_COLLISION_ATTEMPTS
+        }
+    ));
 }
 
 #[test]
@@ -1481,6 +1522,30 @@ fn expected_trashed_directory(trashed_at: &str) -> String {
         .expect("trashed_at should parse")
         .with_timezone(&Utc);
     format!("99_trash/{}", timestamp.format("%Y-%m-%d"))
+}
+
+fn seed_trash_collision_candidates(vault_root: &Path, trash_dir: &str, file_name: &str) {
+    let today = Utc::now().date_naive();
+    for day_offset in 0..=1 {
+        let date = today + Duration::days(i64::from(day_offset));
+        let dated_dir = vault_root
+            .join(trash_dir)
+            .join(date.format("%Y-%m-%d").to_string());
+        let (stem, extension) = file_name
+            .rsplit_once('.')
+            .map_or((file_name, None), |(stem, extension)| {
+                (stem, Some(extension))
+            });
+
+        for suffix in 0..TEST_COLLISION_ATTEMPTS {
+            let candidate_name = match (suffix, extension) {
+                (0, _) => file_name.to_string(),
+                (_, Some(extension)) => format!("{stem}-{suffix}.{extension}"),
+                (_, None) => format!("{stem}-{suffix}"),
+            };
+            write_text(&dated_dir.join(candidate_name), "collision");
+        }
+    }
 }
 
 fn assert_note_tombstone(

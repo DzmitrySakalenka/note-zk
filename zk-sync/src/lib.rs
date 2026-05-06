@@ -13,7 +13,7 @@ pub mod push;
 pub mod transport;
 
 #[rustfmt::skip]
-pub use bootstrap::{detect_initial_mode, InitialSyncMode};
+pub use bootstrap::{InitialSyncMode, ValidatedInitialSyncMode, detect_initial_mode};
 #[rustfmt::skip]
 pub use conflict::{
     detect_pull_conflict, detect_push_conflict, local_unchanged_since_sync, revision_matches,

@@ -9,6 +9,8 @@ use zk_domain::id::RelativePath;
 
 use crate::{AppError, Result};
 
+const MAX_COLLISION_ATTEMPTS: u32 = 1024;
+
 /// Chooses the next available dated destination under the configured trash directory.
 pub(crate) fn next_trash_path(
     vault_root: &Path,
@@ -33,7 +35,7 @@ pub(crate) fn next_trash_path(
     );
     let (stem, extension) = split_file_name(file_name);
 
-    for suffix in 0.. {
+    for suffix in 0..MAX_COLLISION_ATTEMPTS {
         let candidate_name = build_collision_name(file_name, stem, extension.as_deref(), suffix);
         let candidate_relative_path =
             RelativePath::new(&format!("{dated_prefix}/{candidate_name}"));
@@ -53,7 +55,9 @@ pub(crate) fn next_trash_path(
         }
     }
 
-    unreachable!("collision loop always returns or continues")
+    Err(AppError::CollisionRetryExhausted {
+        attempts: MAX_COLLISION_ATTEMPTS,
+    })
 }
 
 fn split_file_name(file_name: &str) -> (&str, Option<String>) {
@@ -74,7 +78,7 @@ fn build_collision_name(
     original_name: &str,
     stem: &str,
     extension: Option<&str>,
-    suffix: usize,
+    suffix: u32,
 ) -> String {
     if suffix == 0 {
         return original_name.to_string();

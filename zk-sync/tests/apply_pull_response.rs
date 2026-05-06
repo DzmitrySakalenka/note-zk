@@ -22,6 +22,8 @@ use zk_sync::{
     pull::{PullApplyContext, apply_pull_response},
 };
 
+const TEST_COLLISION_ATTEMPTS: u32 = 1024;
+
 #[derive(Debug, Clone, Copy)]
 struct FixedClock {
     now: DateTime<Utc>,
@@ -352,6 +354,27 @@ fn apply(
     };
 
     apply_pull_response(connection, &ctx, response)
+}
+
+fn seed_pull_trash_collision_candidates(vault: &TempDir, dated_dir: &str, file_name: &str) {
+    let (stem, extension) = file_name
+        .rsplit_once('.')
+        .map_or((file_name, None), |(stem, extension)| {
+            (stem, Some(extension))
+        });
+
+    for suffix in 0..TEST_COLLISION_ATTEMPTS {
+        let candidate_name = match (suffix, extension) {
+            (0, _) => file_name.to_string(),
+            (_, Some(extension)) => format!("{stem}-{suffix}.{extension}"),
+            (_, None) => format!("{stem}-{suffix}"),
+        };
+        write_vault_file(
+            vault.path(),
+            &RelativePath::new(&format!("{dated_dir}/{candidate_name}")),
+            b"existing trash candidate",
+        );
+    }
 }
 
 #[test]
@@ -960,6 +983,76 @@ fn apply_pull_response_trashes_and_restores_note_using_original_path() {
         .is_none(),
         "delete record should be removed after restore"
     );
+}
+
+#[test]
+fn apply_pull_response_returns_collision_exhausted_when_trash_candidates_exist() {
+    let vault = TempDir::new().expect("temp vault should create");
+    let mut connection = open_sync_connection();
+    DeviceRepo::upsert_device(&connection, &device_record(Some(20))).expect("device should insert");
+
+    let note_id = "01TG16034NOTETRASHCOLLISION1";
+    let note_path = RelativePath::new("notes/trash-me.md");
+    let body = note_body(note_id, "Trash Me", "2026-04-20T08:00:00Z", "# Trash Me");
+    let body_hash = ContentHash::from_bytes(body.as_bytes());
+    write_vault_file(vault.path(), &note_path, body.as_bytes());
+    seed_pull_trash_collision_candidates(&vault, ".zk-trash/2026-04-22", "trash-me.md");
+    NoteRepo::upsert_note(
+        &connection,
+        &NoteId::new(note_id),
+        &note_path,
+        "Trash Me",
+        &body_hash,
+        &serde_json::json!({
+            "id": note_id,
+            "title": "Trash Me",
+            "created": "2026-04-01T00:00:00Z",
+            "updated": "2026-04-20T08:00:00Z"
+        })
+        .to_string(),
+        "2026-04-01T00:00:00Z",
+        "2026-04-20T08:00:00Z",
+        None,
+        false,
+    )
+    .expect("note should seed");
+    upsert_note_state(
+        &connection,
+        note_id,
+        Some(&body_hash),
+        Some(&body_hash),
+        Some(&note_path),
+        Some(7),
+        None,
+    );
+
+    let response = SyncPullResponse {
+        changes: vec![SyncChange {
+            event_seq: 21,
+            item_id: note_id.to_string(),
+            item_type: WireItemType::Note,
+            event_type: WireEventType::Trash,
+            path: Some(note_path.to_string()),
+            content: None,
+            asset_bytes_base64: None,
+            content_hash: None,
+            server_revision: Some(8),
+            trashed_at: Some("2026-04-22T18:07:33Z".to_string()),
+            retention_until: Some("2026-05-22T18:07:33Z".to_string()),
+            deleted_at: None,
+        }],
+        next_cursor: Some(21),
+    };
+
+    let error = apply(&mut connection, &vault, &response)
+        .expect_err("saturated trash destination candidates should fail");
+
+    assert!(matches!(
+        error,
+        SyncError::CollisionRetryExhausted {
+            attempts: TEST_COLLISION_ATTEMPTS
+        }
+    ));
 }
 
 #[test]

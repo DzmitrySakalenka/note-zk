@@ -66,6 +66,12 @@ pub enum AppError {
         #[source]
         source: io::Error,
     },
+    /// A bounded collision-probing loop could not find a free destination.
+    #[error("while attempting to choose a collision-free path: exhausted {attempts} attempts")]
+    CollisionRetryExhausted {
+        /// Number of destination candidates inspected before giving up.
+        attempts: u32,
+    },
     /// App-layer invariant was violated after a local lifecycle write.
     #[error("while attempting to maintain local lifecycle invariants: {context}")]
     InvariantViolation {
