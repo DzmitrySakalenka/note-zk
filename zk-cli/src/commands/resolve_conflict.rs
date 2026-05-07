@@ -10,7 +10,7 @@ use zk_sync::{HttpTransport, transport::SyncTransport};
 
 use crate::{
     bootstrap::{load_effective_config, resolve_sync_settings, resolve_vault_root},
-    cli::{OutputMode, ResolveConflictArgs, SharedFlags},
+    cli::{OutputMode, ResolveConflictArgs, ResolveStrategy, SharedFlags},
     error::{CliError, EXIT_OK},
     output::{
         ResolveConflictCommandPayload, ResolveConflictJsonOutput, write_json_line,
@@ -75,10 +75,9 @@ fn resolve_conflict_request(
         } else {
             WireItemType::Note
         },
-        resolution: if args.keep_local {
-            WireConflictResolution::KeepLocal
-        } else {
-            WireConflictResolution::KeepRemote
+        resolution: match args.strategy() {
+            ResolveStrategy::KeepLocal => WireConflictResolution::KeepLocal,
+            ResolveStrategy::KeepRemote => WireConflictResolution::KeepRemote,
         },
     }
 }

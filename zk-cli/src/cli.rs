@@ -270,6 +270,42 @@ impl From<bool> for OutputMode {
     }
 }
 
+/// Resolved scope for the `purge` subcommand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PurgeScope {
+    /// Purge every expired delete record.
+    AllExpired,
+    /// Purge one explicit note or asset target.
+    Target {
+        /// Note or asset identifier, or vault-relative path.
+        id: String,
+        /// Whether the target should be treated as an asset.
+        as_asset: bool,
+    },
+}
+
+/// Resolved mode for the `sync` subcommand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncMode {
+    /// Run the normal push and pull cycle.
+    Full,
+    /// Force an initial-sync bootstrap call.
+    Bootstrap,
+    /// Run only the push half of the cycle.
+    PushOnly,
+    /// Run only the pull half of the cycle.
+    PullOnly,
+}
+
+/// Resolved conflict strategy for the `resolve-conflict` subcommand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveStrategy {
+    /// Resolve by keeping the local version.
+    KeepLocal,
+    /// Resolve by keeping the remote version.
+    KeepRemote,
+}
+
 /// Arguments for the `scan` subcommand.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 #[command(group(ArgGroup::new("scan_mode").args(["check", "write"]).multiple(false)))]
@@ -341,17 +377,9 @@ pub struct RestoreArgs {
 
 /// Arguments for the `purge` subcommand.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
-#[command(group(ArgGroup::new("purge_scope").args(["expired", "target"]).multiple(false)))]
-#[allow(clippy::struct_excessive_bools)]
 pub struct PurgeArgs {
-    /// Purge every expired delete record. Default when no target is supplied.
-    #[arg(long)]
-    pub expired: bool,
-    /// Explicit note or asset identifier, or vault-relative path, to purge.
-    pub target: Option<String>,
-    /// Force asset handling instead of the default note handling.
-    #[arg(long = "as-asset")]
-    pub as_asset: bool,
+    #[command(flatten)]
+    scope: PurgeScopeFlags,
     /// Confirm destructive execution.
     #[arg(long)]
     pub yes: bool,
@@ -363,23 +391,71 @@ pub struct PurgeArgs {
     pub json: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("purge_scope").args(["expired", "target"]).multiple(false)))]
+struct PurgeScopeFlags {
+    /// Purge every expired delete record. Default when no target is supplied.
+    #[arg(long)]
+    expired: bool,
+    /// Explicit note or asset identifier, or vault-relative path, to purge.
+    target: Option<String>,
+    /// Force asset handling instead of the default note handling.
+    #[arg(long = "as-asset")]
+    as_asset: bool,
+}
+
+impl PurgeArgs {
+    /// Resolves clap flags and positional target into one purge scope.
+    #[must_use]
+    pub fn scope(&self) -> PurgeScope {
+        match (&self.scope.target, self.scope.expired) {
+            (Some(id), _) => PurgeScope::Target {
+                id: id.clone(),
+                as_asset: self.scope.as_asset,
+            },
+            (None, _) => PurgeScope::AllExpired,
+        }
+    }
+}
+
 /// Arguments for the `sync` subcommand.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
-#[command(group(ArgGroup::new("sync_mode").args(["push_only", "pull_only", "bootstrap"]).multiple(false)))]
-#[allow(clippy::struct_excessive_bools)]
 pub struct SyncArgs {
-    /// Force one initial-sync bootstrap call before push/pull.
-    #[arg(long)]
-    pub bootstrap: bool,
-    /// Run only the push half of the cycle.
-    #[arg(long = "push-only")]
-    pub push_only: bool,
-    /// Run only the pull half of the cycle.
-    #[arg(long = "pull-only")]
-    pub pull_only: bool,
+    #[command(flatten)]
+    mode: SyncModeFlags,
     /// Render compact JSON to stdout.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("sync_mode").args(["push_only", "pull_only", "bootstrap"]).multiple(false)))]
+struct SyncModeFlags {
+    /// Force one initial-sync bootstrap call before push/pull.
+    #[arg(long)]
+    bootstrap: bool,
+    /// Run only the push half of the cycle.
+    #[arg(long = "push-only")]
+    push_only: bool,
+    /// Run only the pull half of the cycle.
+    #[arg(long = "pull-only")]
+    pull_only: bool,
+}
+
+impl SyncArgs {
+    /// Resolves clap flags into one sync mode.
+    #[must_use]
+    pub fn mode(&self) -> SyncMode {
+        if self.mode.bootstrap {
+            SyncMode::Bootstrap
+        } else if self.mode.push_only {
+            SyncMode::PushOnly
+        } else if self.mode.pull_only {
+            SyncMode::PullOnly
+        } else {
+            SyncMode::Full
+        }
+    }
 }
 
 /// Arguments for the `search` subcommand.
@@ -403,23 +479,39 @@ pub struct SearchArgs {
 
 /// Arguments for the `resolve-conflict` subcommand.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
-#[command(group(ArgGroup::new("resolve_kind").args(["keep_local", "keep_remote"]).required(true).multiple(false)))]
-#[allow(clippy::struct_excessive_bools)]
 pub struct ResolveConflictArgs {
     /// Identifier of the conflicting note or asset.
     pub target: String,
     /// Treat target as an asset id rather than a note id.
     #[arg(long = "as-asset")]
     pub as_asset: bool,
-    /// Resolve by keeping the local version.
-    #[arg(long = "keep-local")]
-    pub keep_local: bool,
-    /// Resolve by keeping the remote version.
-    #[arg(long = "keep-remote")]
-    pub keep_remote: bool,
+    #[command(flatten)]
+    strategy: ResolveStrategyFlags,
     /// Render compact JSON to stdout.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("resolve_kind").args(["keep_local", "keep_remote"]).required(true).multiple(false)))]
+struct ResolveStrategyFlags {
+    /// Resolve by keeping the local version.
+    #[arg(long = "keep-local")]
+    keep_local: bool,
+    /// Resolve by keeping the remote version.
+    #[arg(long = "keep-remote")]
+    keep_remote: bool,
+}
+
+impl ResolveConflictArgs {
+    /// Resolves clap flags into one conflict resolution strategy.
+    #[must_use]
+    pub fn strategy(&self) -> ResolveStrategy {
+        match (self.strategy.keep_local, self.strategy.keep_remote) {
+            (true, _) => ResolveStrategy::KeepLocal,
+            _ => ResolveStrategy::KeepRemote,
+        }
+    }
 }
 
 fn parse_top_k(value: &str) -> Result<usize, String> {

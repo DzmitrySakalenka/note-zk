@@ -6,6 +6,7 @@ use clap::Parser;
 use zk_cli::{
     cli::{
         AdminAiCommand, AdminAiRecomputeScope, AiCommand, AuthCommand, Cli, Command, OutputMode,
+        PurgeScope, ResolveStrategy, SyncMode,
     },
     error::{
         CliError, EXIT_AI_DISABLED, EXIT_ISSUES, EXIT_OK, EXIT_PROVIDER_UNAVAILABLE, EXIT_REQUEST,
@@ -99,11 +100,39 @@ fn sync_parses_mode_and_json_flags() {
 
     match cli.command {
         Command::Sync(args) => {
-            assert!(!args.bootstrap);
-            assert!(!args.push_only);
-            assert!(args.pull_only);
+            assert_eq!(args.mode(), SyncMode::PullOnly);
             assert_eq!(OutputMode::from(args.json), OutputMode::Json);
         }
+        other => panic!("expected sync command, got {other:?}"),
+    }
+}
+
+#[test]
+fn sync_resolves_each_mode() {
+    let cli = Cli::try_parse_from(["zk-cli", "sync"]).expect("sync arguments should parse");
+    match cli.command {
+        Command::Sync(args) => assert_eq!(args.mode(), SyncMode::Full),
+        other => panic!("expected sync command, got {other:?}"),
+    }
+
+    let cli = Cli::try_parse_from(["zk-cli", "sync", "--bootstrap"])
+        .expect("sync bootstrap arguments should parse");
+    match cli.command {
+        Command::Sync(args) => assert_eq!(args.mode(), SyncMode::Bootstrap),
+        other => panic!("expected sync command, got {other:?}"),
+    }
+
+    let cli = Cli::try_parse_from(["zk-cli", "sync", "--push-only"])
+        .expect("sync push-only arguments should parse");
+    match cli.command {
+        Command::Sync(args) => assert_eq!(args.mode(), SyncMode::PushOnly),
+        other => panic!("expected sync command, got {other:?}"),
+    }
+
+    let cli = Cli::try_parse_from(["zk-cli", "sync", "--pull-only"])
+        .expect("sync pull-only arguments should parse");
+    match cli.command {
+        Command::Sync(args) => assert_eq!(args.mode(), SyncMode::PullOnly),
         other => panic!("expected sync command, got {other:?}"),
     }
 }
@@ -374,8 +403,7 @@ fn resolve_conflict_parses_keep_local_note_target() {
         Command::ResolveConflict(args) => {
             assert_eq!(args.target, "note-a");
             assert!(!args.as_asset);
-            assert!(args.keep_local);
-            assert!(!args.keep_remote);
+            assert_eq!(args.strategy(), ResolveStrategy::KeepLocal);
             assert_eq!(OutputMode::from(args.json), OutputMode::Human);
         }
         other => panic!("expected resolve-conflict command, got {other:?}"),
@@ -398,8 +426,7 @@ fn resolve_conflict_parses_keep_remote_asset_json() {
         Command::ResolveConflict(args) => {
             assert_eq!(args.target, "asset-a");
             assert!(args.as_asset);
-            assert!(!args.keep_local);
-            assert!(args.keep_remote);
+            assert_eq!(args.strategy(), ResolveStrategy::KeepRemote);
             assert_eq!(OutputMode::from(args.json), OutputMode::Json);
         }
         other => panic!("expected resolve-conflict command, got {other:?}"),
@@ -487,14 +514,46 @@ fn purge_defaults_to_expired_mode_without_target() {
 
     match cli.command {
         Command::Purge(args) => {
-            assert!(
-                !args.expired,
-                "default expired mode should not require the flag"
-            );
-            assert!(args.target.is_none());
+            assert_eq!(args.scope(), PurgeScope::AllExpired);
             assert!(args.yes);
             assert_eq!(OutputMode::from(args.json), OutputMode::Json);
         }
+        other => panic!("expected purge command, got {other:?}"),
+    }
+}
+
+#[test]
+fn purge_resolves_each_scope() {
+    let cli = Cli::try_parse_from(["zk-cli", "purge", "--expired"])
+        .expect("purge expired arguments should parse");
+    match cli.command {
+        Command::Purge(args) => assert_eq!(args.scope(), PurgeScope::AllExpired),
+        other => panic!("expected purge command, got {other:?}"),
+    }
+
+    let cli = Cli::try_parse_from(["zk-cli", "purge", "01NOTE"])
+        .expect("purge note target arguments should parse");
+    match cli.command {
+        Command::Purge(args) => assert_eq!(
+            args.scope(),
+            PurgeScope::Target {
+                id: "01NOTE".to_string(),
+                as_asset: false,
+            }
+        ),
+        other => panic!("expected purge command, got {other:?}"),
+    }
+
+    let cli = Cli::try_parse_from(["zk-cli", "purge", "assets/diagram.png", "--as-asset"])
+        .expect("purge asset target arguments should parse");
+    match cli.command {
+        Command::Purge(args) => assert_eq!(
+            args.scope(),
+            PurgeScope::Target {
+                id: "assets/diagram.png".to_string(),
+                as_asset: true,
+            }
+        ),
         other => panic!("expected purge command, got {other:?}"),
     }
 }
