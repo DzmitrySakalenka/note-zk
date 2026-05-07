@@ -48,6 +48,12 @@ Key columns:
 
 Note: `body_markdown` is NOT stored locally. The filesystem is the sole authority for note body content. See ADR 0013.
 
+Server-side `notes` intentionally retains `body_markdown` and
+`frontmatter_json` columns. This is the documented mirror-semantic
+exception in `docs/decisions/0013-remove-body-from-sqlite.md`: the
+server stores body for sync transport / remote client access, while the
+filesystem remains the canonical body source on every client.
+
 ### `note_sync_state`
 
 Per-note sync bookkeeping for this device.
@@ -266,6 +272,10 @@ The server schema mirrors some local concepts but remains authoritative for shar
 - `last_seen_at TEXT NOT NULL`
 
 ### `notes`
+
+See the Local SQLite Schema note above for why server `notes.body_markdown`
+is the documented ADR 0013 mirror/cache exception, not a local SQLite body
+store.
 
 - `note_id TEXT PRIMARY KEY`
 - `current_path TEXT NOT NULL`
