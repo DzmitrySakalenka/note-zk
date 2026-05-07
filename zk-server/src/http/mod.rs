@@ -2,6 +2,7 @@
 
 mod admin;
 mod auth;
+mod blocking;
 mod error;
 pub mod extract;
 mod health;
@@ -13,6 +14,7 @@ mod sync;
 pub(crate) use admin::admin_routes;
 #[doc(hidden)]
 pub(crate) use auth::auth_routes;
+pub(crate) use blocking::run_blocking;
 pub use error::ApiError;
 pub use health::HealthResponse;
 pub use router::{build_router, serve};

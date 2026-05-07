@@ -1,6 +1,6 @@
 //! Query-time semantic search over persisted chunk embeddings.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, hash::BuildHasher, sync::Arc};
 
 use zk_domain::{ChunkId, EmbeddingModelId, EmbeddingVector, id::NoteId};
 
@@ -112,14 +112,32 @@ where
             .into_iter()
             .collect::<HashMap<_, _>>();
 
-        top_hits
-            .into_iter()
-            .map(|hit| search_hit(hit, &text_by_chunk))
-            .collect()
+        build_search_hits(top_hits, &text_by_chunk)
     }
 }
 
-fn search_hit(hit: TopHit, text_by_chunk: &HashMap<ChunkId, String>) -> AiResult<SearchHit> {
+/// Builds final semantic-search hits from scored chunk matches and chunk text.
+///
+/// # Errors
+///
+/// Returns [`AiError::Internal`] if any scored hit has no matching chunk text.
+pub fn build_search_hits<S>(
+    top_hits: Vec<TopHit>,
+    text_by_chunk: &HashMap<ChunkId, String, S>,
+) -> AiResult<Vec<SearchHit>>
+where
+    S: BuildHasher,
+{
+    top_hits
+        .into_iter()
+        .map(|hit| search_hit(hit, text_by_chunk))
+        .collect()
+}
+
+fn search_hit<S>(hit: TopHit, text_by_chunk: &HashMap<ChunkId, String, S>) -> AiResult<SearchHit>
+where
+    S: BuildHasher,
+{
     let text = text_by_chunk.get(&hit.chunk_id).ok_or_else(|| {
         AiError::Internal(format!(
             "semantic search hit is missing chunk text: {}",

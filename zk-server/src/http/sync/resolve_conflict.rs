@@ -8,7 +8,7 @@ use zk_domain::{
 use crate::{
     ServerError, ServerResult,
     auth::AuthenticatedDevice,
-    http::ApiError,
+    http::{ApiError, run_blocking},
     repo::{AssetsRepo, NotesRepo},
     service,
     state::ServerState,
@@ -23,7 +23,13 @@ pub(super) async fn resolve_conflict(
 
     match body.resolution {
         WireConflictResolution::KeepRemote => {
-            let server_revision = current_server_revision(&state, &body)?;
+            let item_type = body.item_type;
+            let item_id = body.item_id.clone();
+            let blocking_state = state.clone();
+            let server_revision = run_blocking("resolve conflict", move || {
+                current_server_revision(&blocking_state, item_type, &item_id)
+            })
+            .await?;
 
             Ok(Json(ResolveConflictResponse {
                 accepted: true,
@@ -42,13 +48,14 @@ pub(super) async fn resolve_conflict(
 
 fn current_server_revision(
     state: &ServerState,
-    body: &ResolveConflictRequest,
+    item_type: WireItemType,
+    item_id: &str,
 ) -> ServerResult<i64> {
-    state.db().with_conn(|connection| match body.item_type {
-        WireItemType::Note => NotesRepo::get(connection, &body.item_id)?
+    state.db().with_conn(|connection| match item_type {
+        WireItemType::Note => NotesRepo::get(connection, item_id)?
             .map(|row| row.server_revision)
             .ok_or_else(|| ServerError::NotFound("note not found".to_string())),
-        WireItemType::Asset => AssetsRepo::get(connection, &body.item_id)?
+        WireItemType::Asset => AssetsRepo::get(connection, item_id)?
             .map(|row| row.server_revision)
             .ok_or_else(|| ServerError::NotFound("asset not found".to_string())),
     })

@@ -16,7 +16,7 @@ use zk_domain::{
 use crate::{
     ServerError,
     auth::AuthenticatedUser,
-    http::ApiError,
+    http::{ApiError, run_blocking},
     repo::{DeviceTokenRepo, DeviceTokenRow},
     service::{self, IssueTokenSpec, RotateTokenSpec},
     state::ServerState,
@@ -36,17 +36,21 @@ async fn issue(
 ) -> Result<Json<IssueTokenResponse>, ApiError> {
     require_admin_scope(&scopes)?;
 
-    let issued = state.db().with_conn(|connection| {
-        service::issue_device_token(
-            connection,
-            &IssueTokenSpec {
-                label: request.label,
-                device_id: request.device_id,
-                scopes: request.scopes,
-            },
-            Utc::now(),
-        )
-    })?;
+    let blocking_state = state.clone();
+    let issued = run_blocking("issue device token", move || {
+        blocking_state.db().with_conn(|connection| {
+            service::issue_device_token(
+                connection,
+                &IssueTokenSpec {
+                    label: request.label,
+                    device_id: request.device_id,
+                    scopes: request.scopes,
+                },
+                Utc::now(),
+            )
+        })
+    })
+    .await?;
 
     Ok(Json(IssueTokenResponse {
         token_id: issued.token_id,
@@ -62,7 +66,13 @@ async fn list(
 ) -> Result<Json<ListTokensResponse>, ApiError> {
     require_admin_scope(&scopes)?;
 
-    let rows = state.db().with_conn(DeviceTokenRepo::list_all_active)?;
+    let blocking_state = state.clone();
+    let rows = run_blocking("list device tokens", move || {
+        blocking_state
+            .db()
+            .with_conn(DeviceTokenRepo::list_all_active)
+    })
+    .await?;
 
     Ok(Json(ListTokensResponse {
         tokens: rows.into_iter().map(listed_token).collect(),
@@ -77,9 +87,13 @@ async fn revoke(
     require_admin_scope(&scopes)?;
     validate_token_id(&token_id)?;
 
-    state
-        .db()
-        .with_conn(|connection| service::revoke_device_token(connection, &token_id, Utc::now()))?;
+    let blocking_state = state.clone();
+    run_blocking("revoke device token", move || {
+        blocking_state
+            .db()
+            .with_conn(|connection| service::revoke_device_token(connection, &token_id, Utc::now()))
+    })
+    .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -93,18 +107,22 @@ async fn rotate(
     require_admin_scope(&scopes)?;
     validate_token_id(&token_id)?;
 
-    let issued = state.db().with_conn_mut(|connection| {
-        service::rotate_device_token(
-            connection,
-            &RotateTokenSpec {
-                current_token_id: token_id,
-                label: request.label,
-                device_id: request.device_id,
-                scopes: request.scopes,
-            },
-            Utc::now(),
-        )
-    })?;
+    let blocking_state = state.clone();
+    let issued = run_blocking("rotate device token", move || {
+        blocking_state.db().with_conn_mut(|connection| {
+            service::rotate_device_token(
+                connection,
+                &RotateTokenSpec {
+                    current_token_id: token_id,
+                    label: request.label,
+                    device_id: request.device_id,
+                    scopes: request.scopes,
+                },
+                Utc::now(),
+            )
+        })
+    })
+    .await?;
 
     Ok(Json(IssueTokenResponse {
         token_id: issued.token_id,

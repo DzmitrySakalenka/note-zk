@@ -4,7 +4,7 @@ use chrono::Utc;
 use zk_domain::{AuthScope, LoginRequest, LoginResponse};
 
 use crate::{
-    http::ApiError,
+    http::{ApiError, run_blocking},
     service::{self, CreateSessionSpec, SessionLifetime},
     state::ServerState,
 };
@@ -16,16 +16,14 @@ pub(super) async fn login(
     jar: CookieJar,
     Json(request): Json<LoginRequest>,
 ) -> Result<(CookieJar, Json<LoginResponse>), ApiError> {
-    let verified_user = state
-        .db()
-        .with_conn(|connection| {
-            service::verify_password(connection, &request.username, &request.password)
-        })
-        .map_err(ApiError::from)?;
     let lifetime = SessionLifetime::default();
-    let issued_session = state
-        .db()
-        .with_conn(|connection| {
+    let blocking_state = state.clone();
+    let issued_session = run_blocking("login", move || {
+        let verified_user = blocking_state.db().with_conn(|connection| {
+            service::verify_password(connection, &request.username, &request.password)
+        })?;
+
+        blocking_state.db().with_conn(|connection| {
             service::create_web_session(
                 connection,
                 &CreateSessionSpec {
@@ -40,7 +38,8 @@ pub(super) async fn login(
                 Utc::now(),
             )
         })
-        .map_err(ApiError::from)?;
+    })
+    .await?;
     let csrf_token = issued_session.plaintext_csrf_token.clone();
 
     Ok((

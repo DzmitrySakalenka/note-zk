@@ -11,12 +11,14 @@ use std::{
 
 use async_trait::async_trait;
 use zk_ai::{
-    AiResult,
+    AiError, AiResult,
     provider::{
         EmbeddingsCapability, EmbeddingsProvider, EmbeddingsRequest, EmbeddingsResponse,
         StubEmbeddingsProvider, embed_one,
     },
-    service::semantic_search::{EmbeddingsReader, SemanticSearchService, TopHit},
+    service::semantic_search::{
+        EmbeddingsReader, SemanticSearchService, TopHit, build_search_hits,
+    },
 };
 use zk_domain::{ChunkId, EmbeddingModelId, EmbeddingVector, ProviderId, id::NoteId};
 
@@ -133,6 +135,44 @@ async fn snippet_truncates_at_sentence_boundary_when_possible() {
         .expect("semantic query should succeed");
 
     assert_eq!(hits[0].snippet, format!("{}.", "a".repeat(80)));
+}
+
+#[test]
+fn build_search_hits_assembles_snippets_for_blocking_callers() {
+    let chunk_id = chunk_id(0);
+    let top_hits = vec![TopHit {
+        note_id: note_id(0),
+        chunk_id: chunk_id.clone(),
+        similarity: 0.75,
+    }];
+    let mut text_by_chunk = HashMap::new();
+    text_by_chunk.insert(chunk_id.clone(), "  Shared snippet text.  ".to_string());
+
+    let hits = build_search_hits(top_hits, &text_by_chunk).expect("hits should build");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].chunk_id, chunk_id);
+    assert!((hits[0].similarity - 0.75).abs() < f32::EPSILON);
+    assert_eq!(hits[0].snippet, "Shared snippet text.");
+}
+
+#[test]
+fn build_search_hits_rejects_missing_chunk_text() {
+    let missing_chunk_id = chunk_id(0);
+    let error = build_search_hits(
+        vec![TopHit {
+            note_id: note_id(0),
+            chunk_id: missing_chunk_id.clone(),
+            similarity: 0.75,
+        }],
+        &HashMap::new(),
+    )
+    .expect_err("missing chunk text should fail");
+
+    assert!(matches!(
+        error,
+        AiError::Internal(message) if message.contains(&missing_chunk_id.to_string())
+    ));
 }
 
 #[derive(Clone, Default)]

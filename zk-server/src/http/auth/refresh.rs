@@ -5,7 +5,7 @@ use zk_domain::RefreshResponse;
 
 use crate::{
     auth::AuthenticatedUser,
-    http::ApiError,
+    http::{ApiError, run_blocking},
     service::{self, SessionLifetime},
     state::ServerState,
 };
@@ -20,12 +20,13 @@ pub(super) async fn refresh(
     // Refresh needs the original plaintext id; session middleware stores only hashes.
     let plaintext_session_id = plaintext_session_id_from_jar(&jar)?;
     let lifetime = SessionLifetime::default();
-    let issued_session = state
-        .db()
-        .with_conn_mut(|connection| {
+    let blocking_state = state.clone();
+    let issued_session = run_blocking("refresh session", move || {
+        blocking_state.db().with_conn_mut(|connection| {
             service::refresh_web_session(connection, &plaintext_session_id, Utc::now(), lifetime)
         })
-        .map_err(ApiError::from)?;
+    })
+    .await?;
     let csrf_token = issued_session.plaintext_csrf_token.clone();
 
     Ok((

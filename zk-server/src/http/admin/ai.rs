@@ -13,7 +13,7 @@ use zk_domain::{JobId, id::NoteId};
 use crate::{
     ServerError,
     auth::AuthenticatedAdmin,
-    http::ApiError,
+    http::{ApiError, run_blocking},
     repo::{AiJob, AiJobFilter, AiJobKind, AiJobStatus, AiJobsRepo},
     state::ServerState,
 };
@@ -58,9 +58,13 @@ pub(super) async fn recompute(
 ) -> Result<Json<RecomputeResponse>, ApiError> {
     ensure_ai_enabled(&state)?;
     let kind = recompute_kind(request)?;
-    let job = state
-        .db()
-        .with_conn(|connection| AiJobsRepo::new(connection).enqueue(kind, Utc::now()))?;
+    let blocking_state = state.clone();
+    let job = run_blocking("enqueue AI recompute job", move || {
+        blocking_state
+            .db()
+            .with_conn(|connection| AiJobsRepo::new(connection).enqueue(kind, Utc::now()))
+    })
+    .await?;
 
     Ok(Json(RecomputeResponse {
         job_id: job.job_id.to_string(),
@@ -79,9 +83,13 @@ pub(super) async fn jobs(
         kind: None,
         limit: parse_limit(query.get("limit").map(String::as_str))?,
     };
-    let jobs = state
-        .db()
-        .with_conn(|connection| AiJobsRepo::new(connection).list(filter))?;
+    let blocking_state = state.clone();
+    let jobs = run_blocking("list AI jobs", move || {
+        blocking_state
+            .db()
+            .with_conn(|connection| AiJobsRepo::new(connection).list(filter))
+    })
+    .await?;
 
     Ok(Json(jobs.into_iter().map(listed_job).collect()))
 }
@@ -93,9 +101,13 @@ pub(super) async fn cancel(
 ) -> Result<Json<CancelResponse>, ApiError> {
     ensure_ai_enabled(&state)?;
     let job_id = parse_job_id(&job_id)?;
-    let cancelled = state
-        .db()
-        .with_conn(|connection| AiJobsRepo::new(connection).cancel(&job_id, Utc::now()))?;
+    let blocking_state = state.clone();
+    let cancelled = run_blocking("cancel AI job", move || {
+        blocking_state
+            .db()
+            .with_conn(|connection| AiJobsRepo::new(connection).cancel(&job_id, Utc::now()))
+    })
+    .await?;
 
     Ok(Json(CancelResponse { cancelled }))
 }

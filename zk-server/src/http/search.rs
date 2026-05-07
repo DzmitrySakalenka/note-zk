@@ -1,20 +1,23 @@
 //! Search-scoped HTTP routes.
 
-use std::{io, sync::Arc};
+use std::{collections::HashMap, io};
 
 use axum::{Json, Router, extract::State, routing::post};
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use zk_ai::{
-    AiError, AiResult,
+    AiError,
+    provider::embed_one,
     service::semantic_search::{
-        EmbeddingsReader, SearchHit, SemanticSearchService, TopHit as AiTopHit,
+        EmbeddingsReader, SearchHit, TopHit as AiTopHit, build_search_hits,
     },
 };
 use zk_domain::{AuthScope, Capability, ChunkId, EmbeddingModelId, EmbeddingVector};
 
 use crate::{
-    ServerDb, ServerError, auth::AuthenticatedDevice, http::ApiError, repo::EmbeddingsRepo,
+    ServerDb, ServerError,
+    auth::AuthenticatedDevice,
+    http::{ApiError, run_blocking},
+    repo::EmbeddingsRepo,
     state::ServerState,
 };
 
@@ -73,19 +76,17 @@ async fn semantic_search(
         .select_embeddings(Capability::SemanticSearch)
         .map_err(ai_error_to_api_error)?;
     let capability = provider.capability().clone();
-    let service = SemanticSearchService::new(
-        provider,
-        ServerEmbeddingsReader {
-            db: state.db_handle(),
-        },
-    );
-    let hits = service
-        .query(
-            &request.query,
-            request.top_k.unwrap_or(DEFAULT_TOP_K).min(MAX_TOP_K),
-        )
+    let top_k = request.top_k.unwrap_or(DEFAULT_TOP_K).min(MAX_TOP_K);
+    let model = capability.model.clone();
+    let mut query_vector = embed_one(provider.as_ref(), request.query, model.clone())
         .await
         .map_err(ai_error_to_api_error)?;
+    query_vector.normalize_in_place();
+    let db = state.db_handle();
+    let hits = run_blocking("semantic search", move || {
+        semantic_search_blocking(db.as_ref(), &query_vector, top_k, &model)
+    })
+    .await?;
 
     Ok(Json(SemanticSearchResponse {
         hits: hits.into_iter().map(search_hit_dto).collect(),
@@ -128,60 +129,43 @@ fn ai_error_to_api_error(error: AiError) -> ApiError {
     }
 }
 
-#[derive(Clone)]
-struct ServerEmbeddingsReader {
-    db: Arc<ServerDb>,
-}
-
-impl EmbeddingsReader for ServerEmbeddingsReader {
-    fn top_k_cosine(
-        &self,
-        query: &EmbeddingVector,
-        k: usize,
-        model: &EmbeddingModelId,
-    ) -> AiResult<Vec<AiTopHit>> {
-        self.db
-            .with_conn(|connection| {
-                EmbeddingsRepo::new(connection)
-                    .top_k_cosine(query, k, model)
-                    .map(|hits| {
-                        hits.into_iter()
-                            .map(|hit| AiTopHit {
-                                note_id: hit.note_id,
-                                chunk_id: hit.chunk_id,
-                                similarity: hit.similarity,
-                            })
-                            .collect()
-                    })
+fn semantic_search_blocking(
+    db: &ServerDb,
+    query_vector: &EmbeddingVector,
+    top_k: usize,
+    model: &EmbeddingModelId,
+) -> crate::ServerResult<Vec<SearchHit>> {
+    db.with_conn(|connection| {
+        let repo = EmbeddingsRepo::new(connection);
+        let top_hits = repo
+            .top_k_cosine(query_vector, top_k, model)?
+            .into_iter()
+            .map(|hit| AiTopHit {
+                note_id: hit.note_id,
+                chunk_id: hit.chunk_id,
+                similarity: hit.similarity,
             })
-            .map_err(server_error_to_ai_error)
-    }
+            .collect::<Vec<_>>();
+        if top_hits.is_empty() {
+            return Ok(Vec::new());
+        }
 
-    fn list_chunk_text(&self, chunk_ids: &[ChunkId]) -> AiResult<Vec<(ChunkId, String)>> {
-        self.with_conn(|connection| {
-            EmbeddingsReader::list_chunk_text(&EmbeddingsRepo::new(connection), chunk_ids)
-        })
-    }
-}
+        let chunk_ids = top_hits
+            .iter()
+            .map(|hit| hit.chunk_id.clone())
+            .collect::<Vec<ChunkId>>();
+        let text_by_chunk = EmbeddingsReader::list_chunk_text(&repo, &chunk_ids)
+            .map_err(|error| ai_to_server_error(&error))?
+            .into_iter()
+            .collect::<HashMap<_, _>>();
 
-impl ServerEmbeddingsReader {
-    fn with_conn<R>(&self, f: impl FnOnce(&Connection) -> AiResult<R>) -> AiResult<R> {
-        self.db
-            .with_conn(|connection| f(connection).map_err(|error| ai_to_server_error(&error)))
-            .map_err(|error| AiError::Internal(format!("read server chunk text: {error}")))
-    }
+        build_search_hits(top_hits, &text_by_chunk).map_err(|error| ai_to_server_error(&error))
+    })
 }
 
 fn ai_to_server_error(error: &AiError) -> ServerError {
     match error {
         AiError::InvalidEmbeddingBlob { len } => ServerError::InvalidEmbeddingBlob { len: *len },
         other => ServerError::Internal(Box::new(io::Error::other(other.to_string()))),
-    }
-}
-
-fn server_error_to_ai_error(error: ServerError) -> AiError {
-    match error {
-        ServerError::InvalidEmbeddingBlob { len } => AiError::InvalidEmbeddingBlob { len },
-        other => AiError::Internal(format!("search server chunk embeddings: {other}")),
     }
 }
