@@ -23,7 +23,7 @@ use zk_domain::{
     ChunkEmbeddingRecord, ChunkId, ChunkRecord, ExecutionMode, ProviderId, ProviderSelectorPolicy,
     id::{ContentHash, NoteId, RelativePath},
 };
-use zk_index::{ChunksRepo, EmbeddingsRepo, NoteRepo};
+use zk_index::{ChunksRepo, EmbeddingsRepo, NoteRepo, UpsertNoteParams};
 use zk_sync::HttpTransport;
 
 const QUERY_TEXT: &str = "semantic topic";
@@ -397,15 +397,17 @@ async fn seeded_local_repo() -> LocalEmbeddingsRepoHandle {
     repo.with_index(|connection| {
         NoteRepo::upsert_note(
             connection,
-            &note_id,
-            &RelativePath::new("notes/topic.md"),
-            "Semantic Topic",
-            &ContentHash::from_bytes(b"topic"),
-            r#"{"id":"01JAR5A3PJEZ3SKG67PN8N6S6S","title":"Semantic Topic"}"#,
-            "2026-05-05T10:00:00Z",
-            "2026-05-05T10:00:00Z",
-            None,
-            false,
+            UpsertNoteParams {
+                note_id: &note_id,
+                path: &RelativePath::new("notes/topic.md"),
+                title: "Semantic Topic",
+                content_hash: &ContentHash::from_bytes(b"topic"),
+                frontmatter_json: r#"{"id":"01JAR5A3PJEZ3SKG67PN8N6S6S","title":"Semantic Topic"}"#,
+                created_at: "2026-05-05T10:00:00Z",
+                updated_at: "2026-05-05T10:00:00Z",
+                trashed_at: None,
+                is_trashed: false,
+            },
         )?;
         ChunksRepo::new(connection).replace_for_note(&note_id, &[chunk])?;
         EmbeddingsRepo::new(connection).upsert(&embedding)?;

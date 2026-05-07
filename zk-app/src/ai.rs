@@ -25,7 +25,7 @@ use zk_domain::{
     Capability, ChunkEmbeddingRecord, ChunkId, ChunkRecord, EmbeddingModelId, ExecutionMode,
     config::EffectiveConfig, id::NoteId,
 };
-use zk_index::{ChunksRepo, EmbeddingsRepo, IndexError, NoteInput, NoteRepo};
+use zk_index::{ChunksRepo, EmbeddingsRepo, IndexError, NoteInput, NoteRepo, UpsertNoteParams};
 use zk_sync::HttpTransport;
 use zk_vault::{TrashState, VaultScanResult};
 
@@ -516,15 +516,17 @@ fn upsert_note_rows(repo: &LocalEmbeddingsRepoHandle, note_inputs: &[NoteInput])
         for note in note_inputs {
             NoteRepo::upsert_note(
                 connection,
-                &note.note_id,
-                &note.path,
-                &note.title,
-                &note.content_hash,
-                &note.frontmatter_json,
-                &note.created_at,
-                &note.updated_at,
-                note.trashed_at.as_deref(),
-                note.is_trashed,
+                UpsertNoteParams {
+                    note_id: &note.note_id,
+                    path: &note.path,
+                    title: &note.title,
+                    content_hash: &note.content_hash,
+                    frontmatter_json: &note.frontmatter_json,
+                    created_at: &note.created_at,
+                    updated_at: &note.updated_at,
+                    trashed_at: note.trashed_at.as_deref(),
+                    is_trashed: note.is_trashed,
+                },
             )?;
         }
 

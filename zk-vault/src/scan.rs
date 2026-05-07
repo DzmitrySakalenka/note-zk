@@ -73,6 +73,14 @@ struct InvalidPathComponent {
     component_debug: String,
 }
 
+struct CandidateInput {
+    relative_path: RelativePath,
+    absolute_path: PathBuf,
+    is_note: bool,
+    trash_state: TrashState,
+    trashed_at: Option<String>,
+}
+
 /// Recursively scans the vault and classifies files into note and asset sets.
 ///
 /// # Errors
@@ -148,11 +156,13 @@ pub fn scan_vault_files(
                 push_candidate(
                     &mut notes,
                     &mut assets,
-                    relative_path,
-                    absolute_path,
-                    is_note,
-                    trash_state,
-                    trashed_at,
+                    CandidateInput {
+                        relative_path,
+                        absolute_path,
+                        is_note,
+                        trash_state,
+                        trashed_at,
+                    },
                     &config.folders,
                 );
             }
@@ -238,35 +248,30 @@ fn is_note_file(path: &Path, allowed_extensions: &[String]) -> bool {
         })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn push_candidate(
     notes: &mut Vec<NoteCandidate>,
     assets: &mut Vec<AssetCandidate>,
-    relative_path: RelativePath,
-    absolute_path: PathBuf,
-    is_note: bool,
-    trash_state: TrashState,
-    trashed_at: Option<String>,
+    candidate: CandidateInput,
     folders: &BTreeMap<String, FolderPolicy>,
 ) {
-    if is_note {
+    if candidate.is_note {
         notes.push(NoteCandidate {
-            is_immutable: if trash_state == TrashState::Trashed {
+            is_immutable: if candidate.trash_state == TrashState::Trashed {
                 false
             } else {
-                resolve_folder_immutable(&relative_path, folders)
+                resolve_folder_immutable(&candidate.relative_path, folders)
             },
-            relative_path,
-            absolute_path,
-            trash_state,
-            trashed_at,
+            relative_path: candidate.relative_path,
+            absolute_path: candidate.absolute_path,
+            trash_state: candidate.trash_state,
+            trashed_at: candidate.trashed_at,
         });
     } else {
         assets.push(AssetCandidate {
-            relative_path,
-            absolute_path,
-            trash_state,
-            trashed_at,
+            relative_path: candidate.relative_path,
+            absolute_path: candidate.absolute_path,
+            trash_state: candidate.trash_state,
+            trashed_at: candidate.trashed_at,
         });
     }
 }

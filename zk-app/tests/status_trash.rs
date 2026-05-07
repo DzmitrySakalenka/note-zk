@@ -14,7 +14,9 @@ use zk_domain::{
     note::NoteFrontmatter,
     sync_state::DeleteRecord,
 };
-use zk_index::{AssetRepo, DeleteRecordRepo, NoteRepo, ensure_schema, open_memory};
+use zk_index::{
+    AssetRepo, DeleteRecordRepo, NoteRepo, UpsertNoteParams, ensure_schema, open_memory,
+};
 
 fn sample_frontmatter(note_id: &str, title: &str) -> String {
     serde_json::to_string(&NoteFrontmatter {
@@ -42,15 +44,17 @@ fn upsert_note(
 ) {
     NoteRepo::upsert_note(
         conn,
-        &NoteId::new(note_id),
-        &RelativePath::new(path),
-        "Seeded Note",
-        &ContentHash::new(&format!("hash-{note_id}")),
-        &sample_frontmatter(note_id, "Seeded Note"),
-        "2026-04-20T10:00:00Z",
-        "2026-04-20T10:00:00Z",
-        trashed_at,
-        is_trashed,
+        UpsertNoteParams {
+            note_id: &NoteId::new(note_id),
+            path: &RelativePath::new(path),
+            title: "Seeded Note",
+            content_hash: &ContentHash::new(&format!("hash-{note_id}")),
+            frontmatter_json: &sample_frontmatter(note_id, "Seeded Note"),
+            created_at: "2026-04-20T10:00:00Z",
+            updated_at: "2026-04-20T10:00:00Z",
+            trashed_at,
+            is_trashed,
+        },
     )
     .expect("seeded note should upsert");
 }

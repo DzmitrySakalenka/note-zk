@@ -158,6 +158,29 @@ pub struct NoteIndexedMetadata {
     pub frontmatter_json: String,
 }
 
+/// Parameters for inserting or updating one note row.
+#[derive(Debug, Clone, Copy)]
+pub struct UpsertNoteParams<'a> {
+    /// Stable note identifier.
+    pub note_id: &'a NoteId,
+    /// Current vault-relative note path.
+    pub path: &'a RelativePath,
+    /// Effective note title stored for lookup.
+    pub title: &'a str,
+    /// Hash of the note file content.
+    pub content_hash: &'a ContentHash,
+    /// Serialized frontmatter JSON.
+    pub frontmatter_json: &'a str,
+    /// Note creation timestamp.
+    pub created_at: &'a str,
+    /// Note update timestamp.
+    pub updated_at: &'a str,
+    /// Timestamp when the note entered trash, if applicable.
+    pub trashed_at: Option<&'a str>,
+    /// Whether the current note path is inside the trash tree.
+    pub is_trashed: bool,
+}
+
 impl NoteRepo {
     /// Returns the total number of note rows in `notes_index`.
     ///
@@ -177,31 +200,19 @@ impl NoteRepo {
     /// # Errors
     ///
     /// Returns [`IndexError`] if the `SQLite` upsert fails.
-    #[allow(clippy::too_many_arguments)]
-    pub fn upsert_note(
-        conn: &Connection,
-        note_id: &NoteId,
-        path: &RelativePath,
-        title: &str,
-        content_hash: &ContentHash,
-        frontmatter_json: &str,
-        created_at: &str,
-        updated_at: &str,
-        trashed_at: Option<&str>,
-        is_trashed: bool,
-    ) -> Result<(), IndexError> {
+    pub fn upsert_note(conn: &Connection, params: UpsertNoteParams<'_>) -> Result<(), IndexError> {
         conn.execute(
             INSERT_OR_UPDATE_NOTE,
             rusqlite::params![
-                note_id.as_str(),
-                path.as_str(),
-                title,
-                content_hash.as_str(),
-                frontmatter_json,
-                created_at,
-                updated_at,
-                trashed_at,
-                i64::from(is_trashed),
+                params.note_id.as_str(),
+                params.path.as_str(),
+                params.title,
+                params.content_hash.as_str(),
+                params.frontmatter_json,
+                params.created_at,
+                params.updated_at,
+                params.trashed_at,
+                i64::from(params.is_trashed),
             ],
         )
         .map(|_| ())
@@ -216,32 +227,23 @@ impl NoteRepo {
     /// # Errors
     ///
     /// Returns [`IndexError`] if the `SQLite` upsert fails.
-    #[allow(clippy::too_many_arguments)]
     pub fn upsert_note_with_server_revision(
         conn: &Connection,
-        note_id: &NoteId,
-        path: &RelativePath,
-        title: &str,
-        content_hash: &ContentHash,
-        frontmatter_json: &str,
-        created_at: &str,
-        updated_at: &str,
-        trashed_at: Option<&str>,
-        is_trashed: bool,
+        params: UpsertNoteParams<'_>,
         server_revision: &ServerRevision,
     ) -> Result<(), IndexError> {
         conn.execute(
             INSERT_OR_UPDATE_NOTE_WITH_SERVER_REVISION,
             rusqlite::params![
-                note_id.as_str(),
-                path.as_str(),
-                title,
-                content_hash.as_str(),
-                frontmatter_json,
-                created_at,
-                updated_at,
-                trashed_at,
-                i64::from(is_trashed),
+                params.note_id.as_str(),
+                params.path.as_str(),
+                params.title,
+                params.content_hash.as_str(),
+                params.frontmatter_json,
+                params.created_at,
+                params.updated_at,
+                params.trashed_at,
+                i64::from(params.is_trashed),
                 server_revision.value(),
             ],
         )

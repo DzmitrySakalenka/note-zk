@@ -8,7 +8,9 @@ use zk_domain::{
     ChunkEmbeddingRecord, ChunkId, ChunkRecord, EmbeddingModelId, EmbeddingVector, ProviderId,
     id::{ContentHash, NoteId, RelativePath},
 };
-use zk_index::{ChunksRepo, EmbeddingsRepo, IndexError, NoteRepo, ensure_schema, open_memory};
+use zk_index::{
+    ChunksRepo, EmbeddingsRepo, IndexError, NoteRepo, UpsertNoteParams, ensure_schema, open_memory,
+};
 
 fn setup_connection() -> Connection {
     let connection = open_memory().expect("in-memory database should open");
@@ -25,18 +27,22 @@ fn parse_timestamp(value: &str) -> DateTime<Utc> {
 fn insert_note(connection: &Connection, note_id: &NoteId) {
     let path = RelativePath::new(&format!("notes/{note_id}.md"));
     let content_hash = ContentHash::from_bytes(note_id.as_str().as_bytes());
+    let title = format!("Title {note_id}");
+    let frontmatter_json = format!(r#"{{"id":"{note_id}","title":"Title {note_id}"}}"#);
 
     NoteRepo::upsert_note(
         connection,
-        note_id,
-        &path,
-        &format!("Title {note_id}"),
-        &content_hash,
-        &format!(r#"{{"id":"{note_id}","title":"Title {note_id}"}}"#),
-        "2026-05-05T10:00:00Z",
-        "2026-05-05T10:05:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id,
+            path: &path,
+            title: &title,
+            content_hash: &content_hash,
+            frontmatter_json: &frontmatter_json,
+            created_at: "2026-05-05T10:00:00Z",
+            updated_at: "2026-05-05T10:05:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("note row should be inserted");
 }

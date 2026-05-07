@@ -5,7 +5,9 @@ use zk_domain::{
     id::{AssetId, ServerRevision},
 };
 
-use crate::{AssetInput, AssetRepo, LinkRepo, NoteInput, NoteRepo, error::IndexError};
+use crate::{
+    AssetInput, AssetRepo, LinkRepo, NoteInput, NoteRepo, UpsertNoteParams, error::IndexError,
+};
 
 const CLEAR_DERIVED_TABLES_SQL: &str = r"
 DELETE FROM note_tags;
@@ -101,15 +103,17 @@ fn rebuild_notes(transaction: &Transaction<'_>, notes: &[NoteInput]) -> Result<(
     for note in notes {
         NoteRepo::upsert_note(
             transaction,
-            &note.note_id,
-            &note.path,
-            &note.title,
-            &note.content_hash,
-            &note.frontmatter_json,
-            &note.created_at,
-            &note.updated_at,
-            note.trashed_at.as_deref(),
-            note.is_trashed,
+            UpsertNoteParams {
+                note_id: &note.note_id,
+                path: &note.path,
+                title: &note.title,
+                content_hash: &note.content_hash,
+                frontmatter_json: &note.frontmatter_json,
+                created_at: &note.created_at,
+                updated_at: &note.updated_at,
+                trashed_at: note.trashed_at.as_deref(),
+                is_trashed: note.is_trashed,
+            },
         )?;
         NoteRepo::replace_tags(transaction, &note.note_id, &note.tags)?;
         NoteRepo::replace_aliases(transaction, &note.note_id, &note.aliases)?;

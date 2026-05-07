@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use zk_domain::{
     ItemKind, RestoreRequest, config::EffectiveConfig, id::RelativePath, sync::ItemType,
 };
-use zk_index::{AssetRepo, DeleteRecordRepo, NoteRepo};
+use zk_index::{AssetRepo, DeleteRecordRepo, NoteRepo, UpsertNoteParams};
 
 use crate::{
     Result, ensure_writable,
@@ -70,15 +70,17 @@ pub fn restore_note(
     let moved_result = (|| -> Result<RestoredItem> {
         NoteRepo::upsert_note(
             &transaction,
-            &resolved.note.note_id,
-            &destination_path,
-            &resolved.title,
-            &resolved.note.content_hash,
-            &resolved.frontmatter_json,
-            &resolved.note.created_at,
-            &resolved.note.updated_at,
-            None,
-            false,
+            UpsertNoteParams {
+                note_id: &resolved.note.note_id,
+                path: &destination_path,
+                title: &resolved.title,
+                content_hash: &resolved.note.content_hash,
+                frontmatter_json: &resolved.frontmatter_json,
+                created_at: &resolved.note.created_at,
+                updated_at: &resolved.note.updated_at,
+                trashed_at: None,
+                is_trashed: false,
+            },
         )?;
         let delete_target = delete_record_target(resolved.note.note_id.as_str(), ItemType::Note);
         DeleteRecordRepo::delete_delete_record(&transaction, &delete_target)?;

@@ -14,5 +14,5 @@ pub use delete_records::DeleteRecordRepo;
 pub use devices::DeviceRepo;
 pub use embeddings::{EmbeddingsRepo, TopHit};
 pub use links::LinkRepo;
-pub use notes::{NoteIndexedMetadata, NoteRepo};
+pub use notes::{NoteIndexedMetadata, NoteRepo, UpsertNoteParams};
 pub use sync_state::{SyncStateRepo, SyncedAssetStateInput, SyncedNoteStateInput};

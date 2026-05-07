@@ -14,7 +14,9 @@ use zk_domain::{
     sync::SyncStatus,
     sync_state::{DeviceRecord, NoteSyncState},
 };
-use zk_index::{DeviceRepo, NoteRepo, SyncStateRepo, ensure_schema, open_or_create};
+use zk_index::{
+    DeviceRepo, NoteRepo, SyncStateRepo, UpsertNoteParams, ensure_schema, open_or_create,
+};
 use zk_sync::{
     plan::{Clock, NotePlannedOperation, PlannedOp, PlannedOperation},
     pull::{PullApplyContext, apply_pull_response},
@@ -209,15 +211,17 @@ fn seed_note_row(
     write_file(vault, &identity.current_path, content.as_bytes());
     NoteRepo::upsert_note_with_server_revision(
         conn,
-        &note_id,
-        &path,
-        &title,
-        &content_hash,
-        &frontmatter_json,
-        "2026-04-01T00:00:00Z",
-        "2026-04-01T00:00:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &note_id,
+            path: &path,
+            title: &title,
+            content_hash: &content_hash,
+            frontmatter_json: &frontmatter_json,
+            created_at: "2026-04-01T00:00:00Z",
+            updated_at: "2026-04-01T00:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
         &server_revision,
     )
     .expect("benchmark note row should insert");

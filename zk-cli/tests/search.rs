@@ -16,7 +16,7 @@ use wiremock::{
     matchers::{body_json, header, method, path},
 };
 use zk_domain::id::{ContentHash, NoteId, RelativePath};
-use zk_index::NoteRepo;
+use zk_index::{NoteRepo, UpsertNoteParams};
 
 const QUERY_TEXT: &str = "vector search";
 const FIRST_NOTE_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S6S";
@@ -87,15 +87,17 @@ fn seed_title(db_path: &Path) {
 
     NoteRepo::upsert_note(
         &connection,
-        &NoteId::new(FIRST_NOTE_ID),
-        &RelativePath::new("notes/vector.md"),
-        "Vector indexing strategies",
-        &ContentHash::from_bytes(b"vector"),
-        r#"{"id":"01JAR5A3PJEZ3SKG67PN8N6S6S","title":"Vector indexing strategies"}"#,
-        "2026-05-05T10:00:00Z",
-        "2026-05-05T10:00:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &NoteId::new(FIRST_NOTE_ID),
+            path: &RelativePath::new("notes/vector.md"),
+            title: "Vector indexing strategies",
+            content_hash: &ContentHash::from_bytes(b"vector"),
+            frontmatter_json: r#"{"id":"01JAR5A3PJEZ3SKG67PN8N6S6S","title":"Vector indexing strategies"}"#,
+            created_at: "2026-05-05T10:00:00Z",
+            updated_at: "2026-05-05T10:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("note title should seed");
 }

@@ -8,6 +8,7 @@ use zk_domain::{
 };
 use zk_index::{
     DeleteRecordRepo, NoteIndexedMetadata, NoteRepo, SyncStateRepo, SyncedNoteStateInput,
+    UpsertNoteParams,
 };
 use zk_vault::{error::VaultError, parse_note_file};
 
@@ -151,15 +152,17 @@ fn apply_note_content_change(
 
     NoteRepo::upsert_note_with_server_revision(
         workspace.transaction,
-        &loaded.note_id,
-        &path,
-        &title,
-        &content_hash,
-        &frontmatter_json,
-        frontmatter.created.as_deref().unwrap_or(""),
-        frontmatter.updated.as_deref().unwrap_or(""),
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &loaded.note_id,
+            path: &path,
+            title: &title,
+            content_hash: &content_hash,
+            frontmatter_json: &frontmatter_json,
+            created_at: frontmatter.created.as_deref().unwrap_or(""),
+            updated_at: frontmatter.updated.as_deref().unwrap_or(""),
+            trashed_at: None,
+            is_trashed: false,
+        },
         &server_revision,
     )?;
     SyncStateRepo::upsert_synced_note_state(
@@ -448,15 +451,17 @@ fn upsert_note_metadata_row(
 ) -> SyncResult<()> {
     NoteRepo::upsert_note_with_server_revision(
         transaction,
-        note_id,
-        row.path,
-        &row.metadata.title,
-        &row.note.content_hash,
-        &row.metadata.frontmatter_json,
-        &row.note.created_at,
-        &row.note.updated_at,
-        row.trashed_at,
-        row.is_trashed,
+        UpsertNoteParams {
+            note_id,
+            path: row.path,
+            title: &row.metadata.title,
+            content_hash: &row.note.content_hash,
+            frontmatter_json: &row.metadata.frontmatter_json,
+            created_at: &row.note.created_at,
+            updated_at: &row.note.updated_at,
+            trashed_at: row.trashed_at,
+            is_trashed: row.is_trashed,
+        },
         row.server_revision,
     )?;
 
