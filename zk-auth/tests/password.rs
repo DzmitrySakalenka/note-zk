@@ -64,6 +64,11 @@ fn hash_with_test_params_is_fast_enough() {
 }
 
 #[test]
+// This timing characterization is ignored in CI because shared runners add
+// enough noise to make wall-clock variance flaky. Before publishing password
+// hashing or verification changes, run it on an idle local machine:
+// cargo test -p zk-auth --test password verify_constant_time_property -- --ignored
+// A failure means the constant-time property may have regressed.
 #[ignore = "timing-sensitive characterization; run manually on an idle machine"]
 fn verify_constant_time_property() {
     let phc = hash_password("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", TEST_PARAMS)

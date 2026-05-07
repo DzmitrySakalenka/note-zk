@@ -21,9 +21,16 @@ serde_yaml = "0.9.34"
 tracing = "0.1.44"
 chrono = { version = "0.4.44", default-features = false, features = ["alloc", "serde"] }
 zk-sync = { version = "0.1.0", path = "../zk-sync" }
+zk-ai = { version = "0.1.0", path = "../zk-ai", optional = true }
+tokio = { version = "1.52.2", features = ["time"], optional = true }
 
 [dev-dependencies]
 async-trait = "0.1.89"
 pollster = "0.4.0"
 tempfile = "3.27.0"
+tokio = { version = "1.52.2", features = ["rt", "macros", "test-util"] }
 tracing-subscriber = "0.3.23"
+wiremock = "0.6.5"
+
+[features]
+ai = ["dep:tokio", "dep:zk-ai", "zk-ai/provider-local"]

@@ -6,11 +6,16 @@ use std::{
     net::{AddrParseError, SocketAddr},
     num::NonZeroU32,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use serde::Deserialize;
 use thiserror::Error;
-use zk_domain::{BackupConfig, BackupConfigError, BackupEncryption, BackupSchedule};
+use zk_ai::provider::{LocalEmbeddingsConfig, RemoteEmbeddingsConfig};
+use zk_domain::{
+    AiIdentifierError, BackupConfig, BackupConfigError, BackupEncryption, BackupSchedule,
+    EmbeddingModelId, ExecutionMode, ExecutionModeParseError,
+};
 
 const DEFAULT_DATABASE_PATH: &str = "./zk-server.db";
 const DEFAULT_VAULT_PATH: &str = ".";
@@ -33,6 +38,16 @@ const ENV_BACKUP_SCHEDULE_CRON: &str = "ZK_SERVER_BACKUP_SCHEDULE_CRON";
 const ENV_BACKUP_AGE_RECIPIENT: &str = "ZK_SERVER_BACKUP_AGE_RECIPIENT";
 const ENV_BACKUP_INCLUDE_ATTACHMENTS: &str = "ZK_SERVER_BACKUP_INCLUDE_ATTACHMENTS";
 const ENV_BACKUP_INCLUDE_SERVER_DB: &str = "ZK_SERVER_BACKUP_INCLUDE_SERVER_DB";
+const ENV_AI_PROVIDER: &str = "ZK_SERVER_AI_PROVIDER";
+const ENV_AI_DEFAULT_MODE: &str = "ZK_SERVER_AI_DEFAULT_MODE";
+const ENV_AI_REMOTE_BASE_URL: &str = "ZK_SERVER_AI_REMOTE_BASE_URL";
+const ENV_AI_REMOTE_MODEL_ID: &str = "ZK_SERVER_AI_REMOTE_MODEL_ID";
+const ENV_AI_REMOTE_API_KEY_ENV_VAR: &str = "ZK_SERVER_AI_REMOTE_API_KEY_ENV_VAR";
+const ENV_AI_LOCAL_MODEL_DIR: &str = "ZK_SERVER_AI_LOCAL_MODEL_DIR";
+const ENV_AI_RECOMPUTE_CONCURRENCY: &str = "ZK_SERVER_AI_RECOMPUTE_CONCURRENCY";
+const ENV_AI_MAX_ATTEMPTS: &str = "ZK_SERVER_AI_MAX_ATTEMPTS";
+const DEFAULT_AI_RECOMPUTE_CONCURRENCY: u32 = 1;
+const DEFAULT_AI_MAX_ATTEMPTS: u32 = 3;
 
 /// Result alias used by server configuration APIs.
 pub type ConfigResult<T> = Result<T, ConfigError>;
@@ -166,6 +181,124 @@ pub enum ConfigError {
         #[source]
         source: zk_backup::BackupError,
     },
+    /// The configured AI provider kind is not recognized.
+    #[error("invalid AI provider '{value}': expected 'stub', 'remote-http', or 'local-candle'")]
+    InvalidAiProvider {
+        /// Raw provider kind that failed validation.
+        value: String,
+    },
+    /// The configured AI default execution mode is not recognized.
+    #[error("invalid AI default mode '{value}': {source}")]
+    InvalidAiDefaultMode {
+        /// Raw execution mode that failed validation.
+        value: String,
+        /// Source execution-mode parse error.
+        #[source]
+        source: ExecutionModeParseError,
+    },
+    /// An AI model identifier env override failed domain validation.
+    #[error("invalid {name} '{value}': {source}")]
+    InvalidAiIdentifier {
+        /// Env var name whose value failed validation.
+        name: &'static str,
+        /// Raw identifier value that failed validation.
+        value: String,
+        /// Source identifier validation error.
+        #[source]
+        source: AiIdentifierError,
+    },
+    /// The AI recompute-concurrency env override was not a valid unsigned integer.
+    #[error("invalid AI recompute concurrency '{raw}': not a valid number")]
+    MalformedAiRecomputeConcurrencyEnv {
+        /// Raw env override value that failed to parse.
+        raw: String,
+    },
+    /// The AI max-attempts env override was not a valid unsigned integer.
+    #[error("invalid AI max attempts '{raw}': not a valid number")]
+    MalformedAiMaxAttemptsEnv {
+        /// Raw env override value that failed to parse.
+        raw: String,
+    },
+    /// Remote HTTP was selected without a matching remote provider config.
+    #[error("AI provider 'remote-http' requires an [ai.remote] section")]
+    MissingAiRemoteConfig,
+    /// Local Candle was selected without a matching local provider config.
+    #[error("AI provider 'local-candle' requires an [ai.local] section")]
+    MissingAiLocalConfig,
+    /// A configured AI embedding dimension was zero.
+    #[error("invalid {section} dim '{value}': expected a value greater than zero")]
+    InvalidAiDim {
+        /// Config section whose dimension failed validation.
+        section: &'static str,
+        /// Parsed dimension that failed validation.
+        value: usize,
+    },
+    /// AI recompute concurrency was zero.
+    #[error("invalid AI recompute_concurrency '{value}': expected a value greater than zero")]
+    InvalidAiRecomputeConcurrency {
+        /// Parsed recompute concurrency that failed validation.
+        value: u32,
+    },
+    /// AI max attempts was zero.
+    #[error("invalid AI max_attempts '{value}': expected a value greater than zero")]
+    InvalidAiMaxAttempts {
+        /// Parsed max-attempts value that failed validation.
+        value: u32,
+    },
+}
+
+/// AI provider family selected by server configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiProviderKind {
+    /// Deterministic in-process stub provider.
+    #[default]
+    Stub,
+    /// OpenAI-compatible HTTP embeddings provider.
+    RemoteHttp,
+    /// Candle-backed local embeddings provider.
+    LocalCandle,
+}
+
+/// Optional deterministic stub embeddings provider configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct StubEmbeddingsConfig {
+    /// Embedding vector dimension produced by the stub provider.
+    pub dim: usize,
+}
+
+/// Optional server-side AI subsystem configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct AiConfig {
+    /// Primary provider family selected for server AI work.
+    pub provider: AiProviderKind,
+    /// Optional OpenAI-compatible HTTP provider configuration.
+    pub remote: Option<RemoteEmbeddingsConfig>,
+    /// Optional Candle-backed local provider configuration.
+    pub local: Option<LocalEmbeddingsConfig>,
+    /// Optional deterministic stub provider configuration.
+    pub stub: Option<StubEmbeddingsConfig>,
+    /// Default execution mode for provider selection.
+    pub default_mode: ExecutionMode,
+    /// Maximum number of notes recomputed concurrently by the AI worker.
+    pub recompute_concurrency: u32,
+    /// Maximum attempts before an AI job is marked failed.
+    pub max_attempts: u32,
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            provider: AiProviderKind::Stub,
+            remote: None,
+            local: None,
+            stub: None,
+            default_mode: ExecutionMode::Hybrid,
+            recompute_concurrency: DEFAULT_AI_RECOMPUTE_CONCURRENCY,
+            max_attempts: DEFAULT_AI_MAX_ATTEMPTS,
+        }
+    }
 }
 
 /// Runtime-ready server configuration.
@@ -195,6 +328,8 @@ pub struct ServerConfig {
     /// Optional backup configuration. `None` intentionally disables V1 backups
     /// unless the operator opts in through `[backup]` or backup output-dir env.
     pub backup: Option<BackupConfig>,
+    /// Optional AI subsystem configuration. `None` disables AI endpoints and workers.
+    pub ai: Option<AiConfig>,
 }
 
 impl Default for ServerConfig {
@@ -210,6 +345,7 @@ impl Default for ServerConfig {
             trash_retention_days: DEFAULT_TRASH_RETENTION_DAYS,
             max_batch_size: DEFAULT_MAX_BATCH_SIZE,
             backup: None,
+            ai: None,
         }
     }
 }
@@ -260,6 +396,9 @@ impl ServerConfig {
         if let Some(backup) = &self.backup {
             validate_backup_config(backup)?;
         }
+        if let Some(ai) = &self.ai {
+            validate_ai_config(ai)?;
+        }
         Ok(())
     }
 
@@ -287,6 +426,10 @@ impl ServerConfig {
         }
         if let Some(backup) = raw_config.backup {
             self.backup = Some(backup.into_backup_config());
+        }
+        if let Some(mut ai) = raw_config.ai {
+            normalize_ai_config_paths(&mut ai);
+            self.ai = Some(ai);
         }
 
         Ok(())
@@ -322,6 +465,7 @@ impl ServerConfig {
         if let Some(backup) = &mut self.backup {
             apply_backup_env_overrides(backup)?;
         }
+        apply_ai_env_overrides(&mut self.ai)?;
 
         Ok(())
     }
@@ -337,6 +481,7 @@ struct RawServerConfig {
     trash_retention_days: Option<u32>,
     max_batch_size: Option<u32>,
     backup: Option<RawBackupConfig>,
+    ai: Option<AiConfig>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -486,6 +631,107 @@ fn apply_backup_env_overrides(backup: &mut BackupConfig) -> ConfigResult<()> {
     Ok(())
 }
 
+fn apply_ai_env_overrides(ai: &mut Option<AiConfig>) -> ConfigResult<()> {
+    if let Ok(provider) = std::env::var(ENV_AI_PROVIDER) {
+        ai.get_or_insert_with(AiConfig::default).provider = parse_ai_provider_kind(&provider)?;
+    }
+    if let Ok(default_mode) = std::env::var(ENV_AI_DEFAULT_MODE) {
+        ai.get_or_insert_with(AiConfig::default).default_mode =
+            parse_ai_default_mode(&default_mode)?;
+    }
+    if let Ok(recompute_concurrency) = std::env::var(ENV_AI_RECOMPUTE_CONCURRENCY) {
+        ai.get_or_insert_with(AiConfig::default)
+            .recompute_concurrency = parse_ai_recompute_concurrency(&recompute_concurrency)?;
+    }
+    if let Ok(max_attempts) = std::env::var(ENV_AI_MAX_ATTEMPTS) {
+        ai.get_or_insert_with(AiConfig::default).max_attempts =
+            parse_ai_max_attempts(&max_attempts)?;
+    }
+
+    let Some(ai) = ai else {
+        return Ok(());
+    };
+
+    if let Some(remote) = &mut ai.remote {
+        apply_remote_ai_env_overrides(remote)?;
+    }
+    if let Some(local) = &mut ai.local {
+        apply_local_ai_env_overrides(local);
+    }
+
+    Ok(())
+}
+
+fn apply_remote_ai_env_overrides(remote: &mut RemoteEmbeddingsConfig) -> ConfigResult<()> {
+    if let Ok(base_url) = std::env::var(ENV_AI_REMOTE_BASE_URL) {
+        remote.base_url = base_url;
+    }
+    if let Ok(model_id) = std::env::var(ENV_AI_REMOTE_MODEL_ID) {
+        remote.model = parse_ai_model_id(ENV_AI_REMOTE_MODEL_ID, &model_id)?;
+    }
+    if let Ok(api_key_env_var) = std::env::var(ENV_AI_REMOTE_API_KEY_ENV_VAR) {
+        remote.api_key_env_var = api_key_env_var;
+    }
+
+    Ok(())
+}
+
+fn apply_local_ai_env_overrides(local: &mut LocalEmbeddingsConfig) {
+    if let Some(model_dir) = std::env::var_os(ENV_AI_LOCAL_MODEL_DIR) {
+        local.model_dir = expand_tilde(PathBuf::from(model_dir));
+    }
+}
+
+fn parse_ai_provider_kind(value: &str) -> ConfigResult<AiProviderKind> {
+    match value {
+        "stub" => Ok(AiProviderKind::Stub),
+        "remote-http" => Ok(AiProviderKind::RemoteHttp),
+        "local-candle" => Ok(AiProviderKind::LocalCandle),
+        other => Err(ConfigError::InvalidAiProvider {
+            value: other.to_string(),
+        }),
+    }
+}
+
+fn parse_ai_default_mode(value: &str) -> ConfigResult<ExecutionMode> {
+    ExecutionMode::from_str(value).map_err(|source| ConfigError::InvalidAiDefaultMode {
+        value: value.to_string(),
+        source,
+    })
+}
+
+fn parse_ai_model_id(name: &'static str, value: &str) -> ConfigResult<EmbeddingModelId> {
+    value
+        .parse()
+        .map_err(|source| ConfigError::InvalidAiIdentifier {
+            name,
+            value: value.to_string(),
+            source,
+        })
+}
+
+fn parse_ai_recompute_concurrency(value: &str) -> ConfigResult<u32> {
+    value
+        .parse()
+        .map_err(|_| ConfigError::MalformedAiRecomputeConcurrencyEnv {
+            raw: value.to_string(),
+        })
+}
+
+fn parse_ai_max_attempts(value: &str) -> ConfigResult<u32> {
+    value
+        .parse()
+        .map_err(|_| ConfigError::MalformedAiMaxAttemptsEnv {
+            raw: value.to_string(),
+        })
+}
+
+fn normalize_ai_config_paths(ai: &mut AiConfig) {
+    if let Some(local) = &mut ai.local {
+        local.model_dir = expand_tilde(local.model_dir.clone());
+    }
+}
+
 fn expand_tilde(path: PathBuf) -> PathBuf {
     let path_text = path.to_string_lossy();
     if path_text == "~" {
@@ -632,6 +878,52 @@ fn validate_backup_encryption(encryption: &BackupEncryption) -> ConfigResult<()>
                 source,
             },
         )?;
+    }
+
+    Ok(())
+}
+
+fn validate_ai_config(config: &AiConfig) -> ConfigResult<()> {
+    match config.provider {
+        AiProviderKind::Stub => {}
+        AiProviderKind::RemoteHttp => {
+            if config.remote.is_none() {
+                return Err(ConfigError::MissingAiRemoteConfig);
+            }
+        }
+        AiProviderKind::LocalCandle => {
+            if config.local.is_none() {
+                return Err(ConfigError::MissingAiLocalConfig);
+            }
+        }
+    }
+
+    if let Some(remote) = &config.remote {
+        validate_ai_dim("[ai.remote]", remote.dim)?;
+    }
+    if let Some(stub) = &config.stub {
+        validate_ai_dim("[ai.stub]", stub.dim)?;
+    }
+    if config.recompute_concurrency == 0 {
+        return Err(ConfigError::InvalidAiRecomputeConcurrency {
+            value: config.recompute_concurrency,
+        });
+    }
+    if config.max_attempts == 0 {
+        return Err(ConfigError::InvalidAiMaxAttempts {
+            value: config.max_attempts,
+        });
+    }
+    if config.default_mode == ExecutionMode::Offline && config.local.is_none() {
+        tracing::warn!("AI default_mode is offline but no [ai.local] section is configured");
+    }
+
+    Ok(())
+}
+
+fn validate_ai_dim(section: &'static str, value: usize) -> ConfigResult<()> {
+    if value == 0 {
+        return Err(ConfigError::InvalidAiDim { section, value });
     }
 
     Ok(())

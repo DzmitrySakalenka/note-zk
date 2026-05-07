@@ -22,6 +22,12 @@ use crate::{
 static MISSING_USER_DUMMY_HASH: OnceLock<String> = OnceLock::new();
 
 const MISSING_USER_DUMMY_PASSWORD: &str = "zk-server::missing-user::dummy";
+#[cfg(feature = "test-helpers")]
+const TEST_HASH_PARAMS: HashParams = HashParams {
+    memory_kib: 8 * 1024,
+    iterations: 2,
+    parallelism: 1,
+};
 
 /// User returned after successful registration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,12 +137,41 @@ pub fn register_user(
     password: &str,
     now: DateTime<Utc>,
 ) -> ServerResult<RegisteredUser> {
+    register_user_with_hash_params(conn, username, password, now, HashParams::default())
+}
+
+/// Registers one user with reduced Argon2id cost for integration tests only.
+///
+/// This helper uses 8 MiB memory, 2 iterations, and 1 lane. It preserves the
+/// same validation and persistence path as [`register_user`], but it MUST NOT
+/// be called from production code.
+///
+/// # Errors
+///
+/// Returns [`ServerError::InvalidRequest`] for invalid username or password
+/// shape, [`ServerError::Conflict`] when the username already exists, or
+/// [`ServerError`] if password hashing or persistence fails.
+#[cfg(feature = "test-helpers")]
+pub fn register_user_with_test_params(
+    conn: &Connection,
+    username: &str,
+    password: &str,
+) -> ServerResult<RegisteredUser> {
+    register_user_with_hash_params(conn, username, password, Utc::now(), TEST_HASH_PARAMS)
+}
+
+fn register_user_with_hash_params(
+    conn: &Connection,
+    username: &str,
+    password: &str,
+    now: DateTime<Utc>,
+    hash_params: HashParams,
+) -> ServerResult<RegisteredUser> {
     validate_username(username)?;
     validate_password(password)?;
 
     let user_id = NoteId::generate().to_string();
-    let password_hash =
-        hash_password(password, HashParams::default()).map_err(map_internal_auth_error)?;
+    let password_hash = hash_password(password, hash_params).map_err(map_internal_auth_error)?;
 
     UserRepo::create(conn, &user_id, username, &password_hash, now)?;
 
@@ -159,6 +194,8 @@ pub fn verify_password(
     password: &str,
 ) -> ServerResult<VerifiedUser> {
     let Some(row) = UserRepo::get_password_hash_for_login(conn, username)? else {
+        // Constant-time defence: keep Argon2 verification on the missing-user
+        // path so response time does not leak account existence.
         let _ = verify_password_hash(password, missing_user_dummy_hash());
         return Err(ServerError::Unauthorized);
     };

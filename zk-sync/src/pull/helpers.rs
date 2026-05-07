@@ -17,6 +17,8 @@ use zk_vault::{VaultRoot, atomic_move_file, error::VaultError};
 
 use crate::{SyncError, SyncResult};
 
+const MAX_COLLISION_ATTEMPTS: u32 = 1024;
+
 pub(super) fn ensure_file_content(
     vault: &VaultRoot,
     path: &RelativePath,
@@ -124,7 +126,7 @@ pub(super) fn next_trash_path(
     );
     let (stem, extension) = split_file_name(file_name);
 
-    for collision_index in 0.. {
+    for collision_index in 0..MAX_COLLISION_ATTEMPTS {
         let candidate_name =
             build_collision_name(file_name, stem, extension.as_deref(), collision_index);
         let candidate_relative_path =
@@ -145,7 +147,9 @@ pub(super) fn next_trash_path(
         }
     }
 
-    unreachable!("trash collision probing always returns or continues")
+    Err(SyncError::CollisionRetryExhausted {
+        attempts: MAX_COLLISION_ATTEMPTS,
+    })
 }
 
 fn split_file_name(file_name: &str) -> (&str, Option<String>) {
@@ -166,7 +170,7 @@ fn build_collision_name(
     original_name: &str,
     stem: &str,
     extension: Option<&str>,
-    collision_index: usize,
+    collision_index: u32,
 ) -> String {
     if collision_index == 0 {
         return original_name.to_string();

@@ -3,10 +3,13 @@ use zk_domain::{
     SyncChange, WireEventType,
     id::{NoteId, RelativePath, ServerRevision},
     note::{NoteRecord, RawNoteFrontmatter},
-    sync::{ItemType, SyncStatus},
+    sync::ItemType,
     sync_state::{DeleteRecord, DeleteRecordTarget, NoteSyncState},
 };
-use zk_index::{DeleteRecordRepo, NoteIndexedMetadata, NoteRepo, SyncStateRepo};
+use zk_index::{
+    DeleteRecordRepo, NoteIndexedMetadata, NoteRepo, SyncStateRepo, SyncedNoteStateInput,
+    UpsertNoteParams,
+};
 use zk_vault::{error::VaultError, parse_note_file};
 
 use crate::{
@@ -26,9 +29,7 @@ use super::{
         required_deleted_at, required_note_content, required_path, required_retention_until,
         required_server_revision, required_trashed_at,
     },
-    snapshot::{
-        NoteConflictStateInput, note_snapshot, synced_note_state, upsert_note_conflict_state,
-    },
+    snapshot::{NoteConflictStateInput, note_snapshot, upsert_note_conflict_state},
 };
 
 struct LoadedNoteState {
@@ -151,30 +152,27 @@ fn apply_note_content_change(
 
     NoteRepo::upsert_note_with_server_revision(
         workspace.transaction,
-        &loaded.note_id,
-        &path,
-        &title,
-        &content_hash,
-        &frontmatter_json,
-        frontmatter.created.as_deref().unwrap_or(""),
-        frontmatter.updated.as_deref().unwrap_or(""),
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &loaded.note_id,
+            path: &path,
+            title: &title,
+            content_hash: &content_hash,
+            frontmatter_json: &frontmatter_json,
+            created_at: frontmatter.created.as_deref().unwrap_or(""),
+            updated_at: frontmatter.updated.as_deref().unwrap_or(""),
+            trashed_at: None,
+            is_trashed: false,
+        },
         &server_revision,
     )?;
-    SyncStateRepo::upsert_note_sync_state(
+    SyncStateRepo::upsert_synced_note_state(
         workspace.transaction,
-        &NoteSyncState {
-            item_id: loaded.note_id.clone(),
-            device_id: workspace.device_id.clone(),
-            last_local_hash: Some(content_hash.clone()),
-            last_synced_hash: Some(content_hash),
-            last_synced_path: Some(path),
-            last_known_server_revision: Some(server_revision),
-            sync_status: SyncStatus::Synced,
-            last_sync_attempt_at: None,
-            last_sync_error: None,
-            pending_operation: None,
+        &SyncedNoteStateInput {
+            item_id: &loaded.note_id,
+            device_id: workspace.device_id,
+            content_hash: &content_hash,
+            path: &path,
+            server_revision: &server_revision,
         },
     )?;
     workspace.outcome.applied += 1;
@@ -228,15 +226,15 @@ fn apply_note_move(
             server_revision: &server_revision,
         },
     )?;
-    SyncStateRepo::upsert_note_sync_state(
+    SyncStateRepo::upsert_synced_note_state(
         workspace.transaction,
-        &synced_note_state(
-            workspace.device_id,
-            &loaded.note_id,
-            &note.content_hash,
-            path,
-            server_revision,
-        ),
+        &SyncedNoteStateInput {
+            item_id: &loaded.note_id,
+            device_id: workspace.device_id,
+            content_hash: &note.content_hash,
+            path: &path,
+            server_revision: &server_revision,
+        },
     )?;
     workspace.outcome.applied += 1;
 
@@ -308,15 +306,15 @@ fn apply_note_trash(
             delete_revision: None,
         },
     )?;
-    SyncStateRepo::upsert_note_sync_state(
+    SyncStateRepo::upsert_synced_note_state(
         workspace.transaction,
-        &synced_note_state(
-            workspace.device_id,
-            &loaded.note_id,
-            &note.content_hash,
-            local_trash_path,
-            server_revision,
-        ),
+        &SyncedNoteStateInput {
+            item_id: &loaded.note_id,
+            device_id: workspace.device_id,
+            content_hash: &note.content_hash,
+            path: &local_trash_path,
+            server_revision: &server_revision,
+        },
     )?;
     workspace.outcome.applied += 1;
 
@@ -371,15 +369,15 @@ fn apply_note_restore(
     )?;
     let target = DeleteRecordTarget::Note(loaded.note_id.clone());
     remove_delete_record_if_not_deleted(workspace.transaction, &target)?;
-    SyncStateRepo::upsert_note_sync_state(
+    SyncStateRepo::upsert_synced_note_state(
         workspace.transaction,
-        &synced_note_state(
-            workspace.device_id,
-            &loaded.note_id,
-            &note.content_hash,
-            path,
-            server_revision,
-        ),
+        &SyncedNoteStateInput {
+            item_id: &loaded.note_id,
+            device_id: workspace.device_id,
+            content_hash: &note.content_hash,
+            path: &path,
+            server_revision: &server_revision,
+        },
     )?;
     workspace.outcome.applied += 1;
 
@@ -431,15 +429,15 @@ fn apply_note_purge(
         &deleted_at,
         Some(&server_revision),
     )?;
-    SyncStateRepo::upsert_note_sync_state(
+    SyncStateRepo::upsert_synced_note_state(
         workspace.transaction,
-        &synced_note_state(
-            workspace.device_id,
-            &loaded.note_id,
-            &note.content_hash,
-            note.current_path.clone(),
-            server_revision,
-        ),
+        &SyncedNoteStateInput {
+            item_id: &loaded.note_id,
+            device_id: workspace.device_id,
+            content_hash: &note.content_hash,
+            path: &note.current_path,
+            server_revision: &server_revision,
+        },
     )?;
     workspace.outcome.applied += 1;
 
@@ -453,15 +451,17 @@ fn upsert_note_metadata_row(
 ) -> SyncResult<()> {
     NoteRepo::upsert_note_with_server_revision(
         transaction,
-        note_id,
-        row.path,
-        &row.metadata.title,
-        &row.note.content_hash,
-        &row.metadata.frontmatter_json,
-        &row.note.created_at,
-        &row.note.updated_at,
-        row.trashed_at,
-        row.is_trashed,
+        UpsertNoteParams {
+            note_id,
+            path: row.path,
+            title: &row.metadata.title,
+            content_hash: &row.note.content_hash,
+            frontmatter_json: &row.metadata.frontmatter_json,
+            created_at: &row.note.created_at,
+            updated_at: &row.note.updated_at,
+            trashed_at: row.trashed_at,
+            is_trashed: row.is_trashed,
+        },
         row.server_revision,
     )?;
 

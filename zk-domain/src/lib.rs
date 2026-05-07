@@ -3,6 +3,8 @@
 #![cfg_attr(test, allow(unused_crate_dependencies))]
 //! Core domain models shared across vault, app, sync, and CLI layers.
 
+/// AI-derived chunk, embedding, and semantic edge models.
+pub mod ai;
 /// Asset metadata and index-facing asset record models.
 pub mod asset;
 /// Authentication users, sessions, tokens, and scope models.
@@ -34,6 +36,12 @@ pub mod write;
 /// Write-request models for trash, restore, and purge operations.
 pub mod write_request;
 
+pub use ai::{
+    AiIdentifierError, Capability, ChunkEmbeddingRecord, ChunkId, ChunkIdParseError, ChunkRecord,
+    EmbeddingModelId, EmbeddingVector, EmbeddingVectorError, EmbeddingVectorResult, ExecutionMode,
+    ExecutionModeParseError, JobId, JobIdParseError, ProviderId, ProviderSelectorPolicy,
+    SemanticEdgeRecord, decode_vector, encode_vector,
+};
 pub use auth::{AuthScope, AuthScopeParseError, DeviceTokenRecord, PasswordUser, WebSessionRecord};
 pub use auth_wire::{
     CreateUserRequest, CreateUserResponse, IssueTokenRequest, IssueTokenResponse,

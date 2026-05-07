@@ -5,7 +5,7 @@ use zk_domain::{
     id::{ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     note::NoteRecord,
 };
-use zk_index::{NoteRepo, ensure_schema, open_memory};
+use zk_index::{NoteRepo, UpsertNoteParams, ensure_schema, open_memory};
 
 fn sample_note_id() -> NoteId {
     NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP")
@@ -31,15 +31,17 @@ fn insert_sample_note(conn: &rusqlite::Connection) {
     let record = sample_note_record();
     NoteRepo::upsert_note(
         conn,
-        &record.note_id,
-        &record.current_path,
-        "Knowledge Graph Basics",
-        &record.content_hash,
-        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
-        &record.created_at,
-        &record.updated_at,
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &record.note_id,
+            path: &record.current_path,
+            title: "Knowledge Graph Basics",
+            content_hash: &record.content_hash,
+            frontmatter_json: r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
+            created_at: &record.created_at,
+            updated_at: &record.updated_at,
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("sample note should be inserted");
 }
@@ -65,15 +67,17 @@ fn count_returns_inserted_row_total() {
     let second_hash = ContentHash::from_bytes(b"sqlite content");
     NoteRepo::upsert_note(
         &connection,
-        &second_note_id,
-        &second_path,
-        "SQLite Indexing",
-        &second_hash,
-        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YPN","title":"SQLite Indexing"}"#,
-        "2026-04-05T09:00:00Z",
-        "2026-04-05T09:00:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &second_note_id,
+            path: &second_path,
+            title: "SQLite Indexing",
+            content_hash: &second_hash,
+            frontmatter_json: r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YPN","title":"SQLite Indexing"}"#,
+            created_at: "2026-04-05T09:00:00Z",
+            updated_at: "2026-04-05T09:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("second note should insert");
 
@@ -107,15 +111,17 @@ fn upsert_note_with_changed_path_updates_existing_row() {
 
     NoteRepo::upsert_note(
         &connection,
-        &note_id,
-        &updated_path,
-        "Knowledge Graph Basics Renamed",
-        &updated_hash,
-        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics Renamed"}"#,
-        "2026-04-02T00:00:00Z",
-        "2026-04-03T12:00:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &note_id,
+            path: &updated_path,
+            title: "Knowledge Graph Basics Renamed",
+            content_hash: &updated_hash,
+            frontmatter_json: r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics Renamed"}"#,
+            created_at: "2026-04-02T00:00:00Z",
+            updated_at: "2026-04-03T12:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("upsert should succeed");
 
@@ -252,15 +258,17 @@ fn get_notes_by_tag_filters_matching_notes() {
     let second_hash = ContentHash::from_bytes(b"sqlite content");
     NoteRepo::upsert_note(
         &connection,
-        &second_note_id,
-        &second_path,
-        "SQLite Indexing",
-        &second_hash,
-        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YPN","title":"SQLite Indexing"}"#,
-        "2026-04-05T09:00:00Z",
-        "2026-04-05T09:00:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &second_note_id,
+            path: &second_path,
+            title: "SQLite Indexing",
+            content_hash: &second_hash,
+            frontmatter_json: r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YPN","title":"SQLite Indexing"}"#,
+            created_at: "2026-04-05T09:00:00Z",
+            updated_at: "2026-04-05T09:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("second note should insert");
 
@@ -317,15 +325,17 @@ fn list_notes_returns_all_rows_in_deterministic_order() {
     let second_hash = ContentHash::from_bytes(b"sqlite content");
     NoteRepo::upsert_note(
         &connection,
-        &second_note_id,
-        &second_path,
-        "SQLite Indexing",
-        &second_hash,
-        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YPN","title":"SQLite Indexing"}"#,
-        "2026-04-05T09:00:00Z",
-        "2026-04-05T09:00:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &second_note_id,
+            path: &second_path,
+            title: "SQLite Indexing",
+            content_hash: &second_hash,
+            frontmatter_json: r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YPN","title":"SQLite Indexing"}"#,
+            created_at: "2026-04-05T09:00:00Z",
+            updated_at: "2026-04-05T09:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("second note should insert");
 

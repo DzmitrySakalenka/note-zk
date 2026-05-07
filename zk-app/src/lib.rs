@@ -27,6 +27,9 @@ mod trash_path;
 mod write;
 mod write_policy;
 
+/// Feature-gated AI facade for semantic search and local recompute workflows.
+#[cfg(feature = "ai")]
+pub mod ai;
 /// Config loading, merge, and validation helpers for facade entry points.
 pub mod config;
 /// High-level sync transport orchestration for register, bootstrap, push, and pull.
@@ -88,5 +91,11 @@ pub use retention::{
 pub use sync::{
     BootstrapOutcome, DeviceSyncStatus, PullApplyOutcome, PushApplyOutcome, SyncContext, bootstrap,
     get_device_sync_status, plan_and_push, pull_and_apply, register_device,
+};
+#[cfg(feature = "ai")]
+#[rustfmt::skip]
+pub use ai::{
+    AiFacade, AiFacadeDeps, LocalEmbeddingsRepoHandle, RecomputeLocalSummary,
+    SemanticSearchRequest,
 };
 pub use write_policy::{ensure_writable, is_path_immutable};

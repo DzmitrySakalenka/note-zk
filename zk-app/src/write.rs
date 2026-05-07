@@ -21,7 +21,7 @@ use zk_domain::{
     sync_state::NoteSyncState,
     write::{BatchWriteRequest, CreateNoteRequest, UpdateNoteRequest},
 };
-use zk_index::{IndexError, NoteRepo, SyncStateRepo};
+use zk_index::{IndexError, NoteRepo, SyncStateRepo, UpsertNoteParams};
 
 use crate::{
     AppError, Result, config::validate_effective_config, ensure_writable, is_path_immutable,
@@ -272,15 +272,17 @@ fn persist_written_note(
 
     NoteRepo::upsert_note(
         &transaction,
-        &frontmatter.id,
-        relative_path,
-        &frontmatter.title,
-        &content_hash,
-        &frontmatter_json,
-        frontmatter.created.as_deref().unwrap_or_default(),
-        frontmatter.updated.as_deref().unwrap_or_default(),
-        trashed_at,
-        is_trashed,
+        UpsertNoteParams {
+            note_id: &frontmatter.id,
+            path: relative_path,
+            title: &frontmatter.title,
+            content_hash: &content_hash,
+            frontmatter_json: &frontmatter_json,
+            created_at: frontmatter.created.as_deref().unwrap_or_default(),
+            updated_at: frontmatter.updated.as_deref().unwrap_or_default(),
+            trashed_at,
+            is_trashed,
+        },
     )?;
     upsert_note_local_hash(
         &transaction,

@@ -10,7 +10,7 @@ use zk_domain::{
 use crate::{NormalizationResult, VaultScanResult, resolve_vault_links};
 
 mod overrides;
-mod rules;
+pub(crate) mod rules;
 mod summary;
 mod support;
 
@@ -55,7 +55,7 @@ pub fn validate_vault_with_parsed_indexes(
     )
 }
 
-#[allow(dead_code)]
+#[cfg(any(test, feature = "test-helpers"))]
 pub(crate) fn validate_vault_with_rules_and_parsed_indexes(
     scan_result: &VaultScanResult,
     parsed_indexes: &[ParsedNoteIndex],
@@ -70,6 +70,19 @@ pub(crate) fn validate_vault_with_rules_and_parsed_indexes(
         &rule_refs,
     )
 }
+
+#[cfg(test)]
+type ValidateVaultWithRulesAndParsedIndexesFn = fn(
+    &VaultScanResult,
+    &[ParsedNoteIndex],
+    &EffectiveConfig,
+    &[Box<dyn ValidationRule>],
+) -> ValidationReport;
+
+// Integration tests include this module and call the helper from their own
+// crate; this reference keeps the library test target from reporting it dead.
+#[cfg(test)]
+const _: ValidateVaultWithRulesAndParsedIndexesFn = validate_vault_with_rules_and_parsed_indexes;
 
 fn validate_vault_with_rule_refs_and_parsed_indexes(
     scan_result: &VaultScanResult,

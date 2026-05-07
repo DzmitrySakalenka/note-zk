@@ -53,6 +53,14 @@ pub struct EnvGuard {
     zk_server_backup_age_recipient: Option<OsString>,
     zk_server_backup_include_attachments: Option<OsString>,
     zk_server_backup_include_server_db: Option<OsString>,
+    zk_server_ai_provider: Option<OsString>,
+    zk_server_ai_default_mode: Option<OsString>,
+    zk_server_ai_remote_base_url: Option<OsString>,
+    zk_server_ai_remote_model_id: Option<OsString>,
+    zk_server_ai_remote_api_key_env_var: Option<OsString>,
+    zk_server_ai_local_model_dir: Option<OsString>,
+    zk_server_ai_recompute_concurrency: Option<OsString>,
+    zk_server_ai_max_attempts: Option<OsString>,
     home: Option<OsString>,
     xdg_config_home: Option<OsString>,
 }
@@ -83,6 +91,18 @@ impl EnvGuard {
             zk_server_backup_include_server_db: std::env::var_os(
                 "ZK_SERVER_BACKUP_INCLUDE_SERVER_DB",
             ),
+            zk_server_ai_provider: std::env::var_os("ZK_SERVER_AI_PROVIDER"),
+            zk_server_ai_default_mode: std::env::var_os("ZK_SERVER_AI_DEFAULT_MODE"),
+            zk_server_ai_remote_base_url: std::env::var_os("ZK_SERVER_AI_REMOTE_BASE_URL"),
+            zk_server_ai_remote_model_id: std::env::var_os("ZK_SERVER_AI_REMOTE_MODEL_ID"),
+            zk_server_ai_remote_api_key_env_var: std::env::var_os(
+                "ZK_SERVER_AI_REMOTE_API_KEY_ENV_VAR",
+            ),
+            zk_server_ai_local_model_dir: std::env::var_os("ZK_SERVER_AI_LOCAL_MODEL_DIR"),
+            zk_server_ai_recompute_concurrency: std::env::var_os(
+                "ZK_SERVER_AI_RECOMPUTE_CONCURRENCY",
+            ),
+            zk_server_ai_max_attempts: std::env::var_os("ZK_SERVER_AI_MAX_ATTEMPTS"),
             home: std::env::var_os("HOME"),
             xdg_config_home: std::env::var_os("XDG_CONFIG_HOME"),
         }
@@ -157,6 +177,35 @@ impl Drop for EnvGuard {
         restore_env_var(
             "ZK_SERVER_BACKUP_INCLUDE_SERVER_DB",
             self.zk_server_backup_include_server_db.as_ref(),
+        );
+        restore_env_var("ZK_SERVER_AI_PROVIDER", self.zk_server_ai_provider.as_ref());
+        restore_env_var(
+            "ZK_SERVER_AI_DEFAULT_MODE",
+            self.zk_server_ai_default_mode.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_REMOTE_BASE_URL",
+            self.zk_server_ai_remote_base_url.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_REMOTE_MODEL_ID",
+            self.zk_server_ai_remote_model_id.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_REMOTE_API_KEY_ENV_VAR",
+            self.zk_server_ai_remote_api_key_env_var.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_LOCAL_MODEL_DIR",
+            self.zk_server_ai_local_model_dir.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_RECOMPUTE_CONCURRENCY",
+            self.zk_server_ai_recompute_concurrency.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_MAX_ATTEMPTS",
+            self.zk_server_ai_max_attempts.as_ref(),
         );
         restore_env_var("HOME", self.home.as_ref());
         restore_env_var("XDG_CONFIG_HOME", self.xdg_config_home.as_ref());

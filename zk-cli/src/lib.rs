@@ -39,6 +39,19 @@ pub fn run(cli: Cli) -> Result<i32, CliError> {
 
     match command {
         Command::Admin(command) => commands::admin::run(command, &shared),
+        Command::Ai(command) => {
+            #[cfg(feature = "ai")]
+            {
+                commands::ai::run(command, &shared)
+            }
+            #[cfg(not(feature = "ai"))]
+            {
+                let _ = command;
+                Err(CliError::Argument(
+                    "recompute-local requires zk-cli built with the ai feature".to_string(),
+                ))
+            }
+        }
         Command::Auth(cli::AuthCommand::IssueToken(args)) => auth::run_issue_token(&args, &shared),
         Command::Scan(args) => commands::scan::run(&args, &shared),
         Command::Status(args) => commands::status::run(&args, &shared),
@@ -47,6 +60,19 @@ pub fn run(cli: Cli) -> Result<i32, CliError> {
         Command::Restore(args) => commands::restore::run(&args, &shared),
         Command::Purge(args) => commands::purge::run(&args, &shared),
         Command::Sync(args) => commands::sync::run(&args, &shared),
+        Command::Search(args) => {
+            #[cfg(feature = "ai")]
+            {
+                commands::search::run(&args, &shared)
+            }
+            #[cfg(not(feature = "ai"))]
+            {
+                let _ = args;
+                Err(CliError::Argument(
+                    "semantic search requires zk-cli built with the ai feature".to_string(),
+                ))
+            }
+        }
         Command::ResolveConflict(args) => commands::resolve_conflict::run(&args, &shared),
     }
 }

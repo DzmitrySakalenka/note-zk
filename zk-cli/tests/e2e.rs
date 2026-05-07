@@ -135,7 +135,7 @@ fn e2e_status_rejects_future_index_schema_version() {
     let connection = open_or_create(&database_path).expect("database should open");
     ensure_schema(&connection).expect("schema should be created");
     connection
-        .execute("UPDATE schema_version SET version = 3", [])
+        .execute("UPDATE schema_version SET version = 4", [])
         .expect("schema version should be writable for fixture setup");
 
     base_command(&home_root)
@@ -146,7 +146,7 @@ fn e2e_status_rejects_future_index_schema_version() {
         .arg(&database_path)
         .assert()
         .code(2)
-        .stderr(predicate::str::contains("unsupported schema version 3"));
+        .stderr(predicate::str::contains("unsupported schema version 4"));
 }
 
 #[test]

@@ -9,7 +9,7 @@ use serde::Serialize;
 use zk_domain::{
     config::EffectiveConfig,
     id::{ContentHash, NoteId, RelativePath},
-    note::{DiagnosticLevel, NoteDocument, NoteFrontmatter, RuleId, ScanDiagnostic},
+    note::{DiagnosticLevel, NoteDocument, NoteFrontmatter, ScanDiagnostic},
 };
 
 use crate::{
@@ -618,7 +618,7 @@ fn trashed_unknown_identity_diagnostic(
         path: candidate.relative_path.clone(),
         message: format!(
             "{}: {reason_text}",
-            RuleId::TrashedUnknownIdentity.description()
+            crate::validate::rules::trashed_unknown_identity::description()
         ),
     }
 }

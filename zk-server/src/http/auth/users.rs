@@ -5,9 +5,9 @@ use chrono::Utc;
 use zk_domain::{AuthScope, CreateUserRequest, CreateUserResponse};
 
 use crate::{
-    ServerError,
+    ServerError, ServerResult,
     auth::{self, AuthenticatedUser},
-    http::ApiError,
+    http::{ApiError, run_blocking},
     service,
     state::ServerState,
 };
@@ -21,10 +21,16 @@ async fn create(
     authenticated_user: Option<AuthenticatedUser>,
     Json(request): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<CreateUserResponse>), ApiError> {
-    let bootstrap = authorize_create_user(&state, authenticated_user.as_ref())?;
-    let registered = state.db().with_conn(|connection| {
-        service::register_user(connection, &request.username, &request.password, Utc::now())
-    })?;
+    let blocking_state = state.clone();
+    let (registered, bootstrap) = run_blocking("create user", move || {
+        let bootstrap = authorize_create_user(&blocking_state, authenticated_user.as_ref())?;
+        let registered = blocking_state.db().with_conn(|connection| {
+            service::register_user(connection, &request.username, &request.password, Utc::now())
+        })?;
+
+        Ok((registered, bootstrap))
+    })
+    .await?;
 
     if bootstrap {
         tracing::info!(
@@ -45,13 +51,13 @@ async fn create(
 fn authorize_create_user(
     state: &ServerState,
     authenticated_user: Option<&AuthenticatedUser>,
-) -> Result<bool, ApiError> {
+) -> ServerResult<bool> {
     if auth::is_bootstrap_eligible(state)? && authenticated_user.is_none() {
         return Ok(true);
     }
 
     let Some(authenticated_user) = authenticated_user else {
-        return Err(ApiError::from(ServerError::Unauthorized));
+        return Err(ServerError::Unauthorized);
     };
 
     // V1 password-login sessions all carry admin
@@ -62,7 +68,5 @@ fn authorize_create_user(
         return Ok(false);
     }
 
-    Err(ApiError::from(ServerError::Forbidden(
-        "admin scope required".to_string(),
-    )))
+    Err(ServerError::Forbidden("admin scope required".to_string()))
 }

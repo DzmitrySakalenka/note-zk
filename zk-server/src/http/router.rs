@@ -10,15 +10,16 @@ use zk_domain::AuthScope;
 
 use crate::{
     ServerError, ServerResult,
+    ai::worker::{AiWorkerDeps, spawn_ai_job_worker},
     auth::{require_auth_layer, require_scope_layer},
-    http::{ApiError, admin_routes, auth_routes, health::health, sync_routes},
+    http::{ApiError, admin_routes, auth_routes, health::health, search_routes, sync_routes},
     scheduler::{backup::spawn_backup_scheduler, purge::spawn_purge_scheduler},
     state::ServerState,
 };
 
 /// Builds the top-level HTTP router for the server.
 pub fn build_router(state: ServerState) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/health", get(health))
         .merge(
             sync_routes()
@@ -31,7 +32,17 @@ pub fn build_router(state: ServerState) -> Router {
         .merge(auth_routes(&state))
         // `/admin/*` handlers use `AuthenticatedAdmin`; every route requires
         // the admin scope for either a device token or a browser session.
-        .merge(admin_routes())
+        .merge(admin_routes());
+    let router = if state.config().ai.is_some() {
+        router.merge(search_routes().route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_auth_layer,
+        )))
+    } else {
+        router
+    };
+
+    router
         .fallback(not_found)
         .layer(
             ServiceBuilder::new()
@@ -63,6 +74,8 @@ pub async fn serve(state: ServerState) -> ServerResult<()> {
     let state = Arc::new(state);
     let backup_scheduler = spawn_backup_scheduler(Arc::clone(&state), shutdown.clone());
     let purge_scheduler = spawn_purge_scheduler(Arc::clone(&state), shutdown.clone());
+    let ai_ingest = spawn_configured_ai_ingest_loop(&state, shutdown.clone());
+    let ai_worker = spawn_configured_ai_worker(&state, shutdown.clone());
     let shutdown_signal = shutdown_signal(shutdown.clone())?;
 
     tracing::info!(addr = %listener_addr, "server listening");
@@ -75,9 +88,48 @@ pub async fn serve(state: ServerState) -> ServerResult<()> {
     if let Some(backup_scheduler) = backup_scheduler {
         backup_scheduler.join().await;
     }
+    if let Some(ai_ingest) = ai_ingest
+        && let Err(error) = ai_ingest.await
+    {
+        tracing::error!(error = %error, "AI ingest task failed");
+    }
+    if let Some(ai_worker) = ai_worker
+        && let Err(error) = ai_worker.await
+    {
+        tracing::error!(error = %error, "AI worker task failed");
+    }
     purge_scheduler.join().await;
 
     serve_result
+}
+
+fn spawn_configured_ai_ingest_loop(
+    state: &Arc<ServerState>,
+    shutdown: CancellationToken,
+) -> Option<tokio::task::JoinHandle<()>> {
+    let enqueuer = state.ai_ingest()?;
+
+    Some(tokio::spawn(async move {
+        enqueuer.flush_loop(shutdown).await;
+    }))
+}
+
+fn spawn_configured_ai_worker(
+    state: &Arc<ServerState>,
+    shutdown: CancellationToken,
+) -> Option<tokio::task::JoinHandle<()>> {
+    let config = state.config().ai.as_ref()?.clone();
+    let selector = state.ai_selector()?;
+
+    Some(spawn_ai_job_worker(
+        AiWorkerDeps {
+            db: state.db_handle(),
+            selector,
+            config,
+            vault_root: state.config().vault_path.clone(),
+        },
+        shutdown,
+    ))
 }
 
 fn shutdown_signal(

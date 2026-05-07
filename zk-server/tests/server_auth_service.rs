@@ -17,8 +17,9 @@ use zk_server::{
     repo::{DeviceTokenRepo, UserRepo, WebSessionInsert, WebSessionRepo},
     service::{
         CreateSessionSpec, IssueTokenSpec, RotateTokenSpec, SessionLifetime, create_web_session,
-        issue_device_token, refresh_web_session, register_user, revoke_device_token,
-        revoke_web_session, rotate_device_token, sweep_expired_sessions, verify_password,
+        issue_device_token, refresh_web_session, register_user, register_user_with_test_params,
+        revoke_device_token, revoke_web_session, rotate_device_token, sweep_expired_sessions,
+        verify_password,
     },
 };
 
@@ -125,10 +126,10 @@ fn insert_web_session_fixture(
 #[test]
 fn register_then_verify_succeeds() {
     let connection = setup_connection();
-    let now = parse_timestamp("2026-04-29T12:00:00Z");
 
-    let registered = register_user(&connection, "alice_1", "correct horse battery", now)
-        .expect("user registration should succeed");
+    let registered =
+        register_user_with_test_params(&connection, "alice_1", "correct horse battery")
+            .expect("user registration should succeed");
     let verified = verify_password(&connection, "alice_1", "correct horse battery")
         .expect("password verification should succeed");
     let login_row = UserRepo::get_password_hash_for_login(&connection, "alice_1")
@@ -184,13 +185,8 @@ fn register_with_duplicate_username_returns_conflict() {
     let connection = setup_connection();
     create_user_fixture(&connection, "user-1", "alice", "existing password");
 
-    let error = register_user(
-        &connection,
-        "alice",
-        "correct horse battery",
-        parse_timestamp("2026-04-29T12:00:00Z"),
-    )
-    .expect_err("duplicate username should fail");
+    let error = register_user_with_test_params(&connection, "alice", "correct horse battery")
+        .expect_err("duplicate username should fail");
 
     assert!(
         matches!(error, ServerError::Conflict(message) if message == "username already exists")

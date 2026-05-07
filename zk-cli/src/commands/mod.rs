@@ -6,6 +6,9 @@ use zk_app::{AppError, ItemKind, RelativePath, TargetSelector};
 
 /// Handles remote operator administration subcommands.
 pub mod admin;
+/// Handles local AI cache subcommands.
+#[cfg(feature = "ai")]
+pub mod ai;
 /// Handles the `doctor` subcommand.
 pub mod doctor;
 /// Handles the `purge` subcommand.
@@ -16,6 +19,9 @@ pub mod resolve_conflict;
 pub mod restore;
 /// Handles the `scan` subcommand.
 pub mod scan;
+/// Handles the `search` subcommand.
+#[cfg(feature = "ai")]
+pub mod search;
 /// Handles the `status` subcommand.
 pub mod status;
 /// Handles the `sync` subcommand.

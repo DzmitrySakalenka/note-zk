@@ -6,6 +6,8 @@ mod conflict;
 mod devices;
 mod events;
 
+#[cfg(feature = "test-helpers")]
+pub use auth::register_user_with_test_params;
 pub use auth::{
     CreateSessionSpec, IssueTokenSpec, IssuedSession, IssuedToken, RegisteredUser, RotateTokenSpec,
     SessionLifetime, VerifiedUser, create_web_session, issue_device_token, refresh_web_session,

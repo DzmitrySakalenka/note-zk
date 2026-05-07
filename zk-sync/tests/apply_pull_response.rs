@@ -14,13 +14,16 @@ use zk_domain::{
     sync_state::{AssetSyncState, DeleteRecord, DeleteRecordTarget, DeviceRecord, NoteSyncState},
 };
 use zk_index::{
-    AssetRepo, DeleteRecordRepo, DeviceRepo, NoteRepo, SyncStateRepo, ensure_schema, open_memory,
+    AssetRepo, DeleteRecordRepo, DeviceRepo, NoteRepo, SyncStateRepo, UpsertNoteParams,
+    ensure_schema, open_memory,
 };
 use zk_sync::{
     SyncError,
     plan::Clock,
     pull::{PullApplyContext, apply_pull_response},
 };
+
+const TEST_COLLISION_ATTEMPTS: u32 = 1024;
 
 #[derive(Debug, Clone, Copy)]
 struct FixedClock {
@@ -354,6 +357,27 @@ fn apply(
     apply_pull_response(connection, &ctx, response)
 }
 
+fn seed_pull_trash_collision_candidates(vault: &TempDir, dated_dir: &str, file_name: &str) {
+    let (stem, extension) = file_name
+        .rsplit_once('.')
+        .map_or((file_name, None), |(stem, extension)| {
+            (stem, Some(extension))
+        });
+
+    for suffix in 0..TEST_COLLISION_ATTEMPTS {
+        let candidate_name = match (suffix, extension) {
+            (0, _) => file_name.to_string(),
+            (_, Some(extension)) => format!("{stem}-{suffix}.{extension}"),
+            (_, None) => format!("{stem}-{suffix}"),
+        };
+        write_vault_file(
+            vault.path(),
+            &RelativePath::new(&format!("{dated_dir}/{candidate_name}")),
+            b"existing trash candidate",
+        );
+    }
+}
+
 #[test]
 fn apply_pull_response_rejects_out_of_order_batches_without_advancing_cursor() {
     let vault = TempDir::new().expect("temp vault should create");
@@ -419,23 +443,27 @@ fn apply_pull_response_is_idempotent_on_same_batch() {
     );
     let trash_hash = ContentHash::from_bytes(trash_body.as_bytes());
     write_vault_file(vault.path(), &trash_note_path, trash_body.as_bytes());
+    let trash_note = NoteId::new(trash_note_id);
+    let trash_frontmatter_json = serde_json::json!({
+        "id": trash_note_id,
+        "title": "Trash Me",
+        "created": "2026-04-01T00:00:00Z",
+        "updated": "2026-04-20T08:00:00Z"
+    })
+    .to_string();
     NoteRepo::upsert_note(
         &connection,
-        &NoteId::new(trash_note_id),
-        &trash_note_path,
-        "Trash Me",
-        &trash_hash,
-        &serde_json::json!({
-            "id": trash_note_id,
-            "title": "Trash Me",
-            "created": "2026-04-01T00:00:00Z",
-            "updated": "2026-04-20T08:00:00Z"
-        })
-        .to_string(),
-        "2026-04-01T00:00:00Z",
-        "2026-04-20T08:00:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &trash_note,
+            path: &trash_note_path,
+            title: "Trash Me",
+            content_hash: &trash_hash,
+            frontmatter_json: &trash_frontmatter_json,
+            created_at: "2026-04-01T00:00:00Z",
+            updated_at: "2026-04-20T08:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("note should seed");
     upsert_note_state(
@@ -698,23 +726,29 @@ fn apply_pull_response_writes_conflict_copy_for_diverged_note_update() {
         &RelativePath::new("notes/alpha.md"),
         local_body.as_bytes(),
     );
+    let local_note = NoteId::new(note_id);
+    let local_path = RelativePath::new("notes/alpha.md");
+    let local_hash = ContentHash::from_bytes(local_body.as_bytes());
+    let local_frontmatter_json = serde_json::json!({
+        "id": note_id,
+        "title": "Alpha",
+        "created": "2026-04-01T00:00:00Z",
+        "updated": "2026-04-20T08:00:00Z"
+    })
+    .to_string();
     NoteRepo::upsert_note(
         &connection,
-        &NoteId::new(note_id),
-        &RelativePath::new("notes/alpha.md"),
-        "Alpha",
-        &ContentHash::from_bytes(local_body.as_bytes()),
-        &serde_json::json!({
-            "id": note_id,
-            "title": "Alpha",
-            "created": "2026-04-01T00:00:00Z",
-            "updated": "2026-04-20T08:00:00Z"
-        })
-        .to_string(),
-        "2026-04-01T00:00:00Z",
-        "2026-04-20T08:00:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &local_note,
+            path: &local_path,
+            title: "Alpha",
+            content_hash: &local_hash,
+            frontmatter_json: &local_frontmatter_json,
+            created_at: "2026-04-01T00:00:00Z",
+            updated_at: "2026-04-20T08:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("note should seed");
     upsert_note_state(
@@ -785,23 +819,29 @@ fn apply_pull_response_handles_replayed_remote_note_update() {
         &RelativePath::new("notes/replay.md"),
         remote_body.as_bytes(),
     );
+    let replay_note = NoteId::new(note_id);
+    let replay_path = RelativePath::new("notes/replay.md");
+    let replay_hash = ContentHash::from_bytes(remote_body.as_bytes());
+    let replay_frontmatter_json = serde_json::json!({
+        "id": note_id,
+        "title": "Replay",
+        "created": "2026-04-01T00:00:00Z",
+        "updated": "2026-04-22T18:00:00Z"
+    })
+    .to_string();
     NoteRepo::upsert_note(
         &connection,
-        &NoteId::new(note_id),
-        &RelativePath::new("notes/replay.md"),
-        "Replay",
-        &ContentHash::from_bytes(remote_body.as_bytes()),
-        &serde_json::json!({
-            "id": note_id,
-            "title": "Replay",
-            "created": "2026-04-01T00:00:00Z",
-            "updated": "2026-04-22T18:00:00Z"
-        })
-        .to_string(),
-        "2026-04-01T00:00:00Z",
-        "2026-04-22T18:00:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &replay_note,
+            path: &replay_path,
+            title: "Replay",
+            content_hash: &replay_hash,
+            frontmatter_json: &replay_frontmatter_json,
+            created_at: "2026-04-01T00:00:00Z",
+            updated_at: "2026-04-22T18:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("note should seed");
     upsert_note_state(
@@ -857,23 +897,27 @@ fn apply_pull_response_trashes_and_restores_note_using_original_path() {
     let body = note_body(note_id, "Trash Me", "2026-04-20T08:00:00Z", "# Trash Me");
     let body_hash = ContentHash::from_bytes(body.as_bytes());
     write_vault_file(vault.path(), &note_path, body.as_bytes());
+    let note = NoteId::new(note_id);
+    let frontmatter_json = serde_json::json!({
+        "id": note_id,
+        "title": "Trash Me",
+        "created": "2026-04-01T00:00:00Z",
+        "updated": "2026-04-20T08:00:00Z"
+    })
+    .to_string();
     NoteRepo::upsert_note(
         &connection,
-        &NoteId::new(note_id),
-        &note_path,
-        "Trash Me",
-        &body_hash,
-        &serde_json::json!({
-            "id": note_id,
-            "title": "Trash Me",
-            "created": "2026-04-01T00:00:00Z",
-            "updated": "2026-04-20T08:00:00Z"
-        })
-        .to_string(),
-        "2026-04-01T00:00:00Z",
-        "2026-04-20T08:00:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &note,
+            path: &note_path,
+            title: "Trash Me",
+            content_hash: &body_hash,
+            frontmatter_json: &frontmatter_json,
+            created_at: "2026-04-01T00:00:00Z",
+            updated_at: "2026-04-20T08:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("note should seed");
     upsert_note_state(
@@ -963,6 +1007,80 @@ fn apply_pull_response_trashes_and_restores_note_using_original_path() {
 }
 
 #[test]
+fn apply_pull_response_returns_collision_exhausted_when_trash_candidates_exist() {
+    let vault = TempDir::new().expect("temp vault should create");
+    let mut connection = open_sync_connection();
+    DeviceRepo::upsert_device(&connection, &device_record(Some(20))).expect("device should insert");
+
+    let note_id = "01TG16034NOTETRASHCOLLISION1";
+    let note_path = RelativePath::new("notes/trash-me.md");
+    let body = note_body(note_id, "Trash Me", "2026-04-20T08:00:00Z", "# Trash Me");
+    let body_hash = ContentHash::from_bytes(body.as_bytes());
+    write_vault_file(vault.path(), &note_path, body.as_bytes());
+    seed_pull_trash_collision_candidates(&vault, ".zk-trash/2026-04-22", "trash-me.md");
+    let note = NoteId::new(note_id);
+    let frontmatter_json = serde_json::json!({
+        "id": note_id,
+        "title": "Trash Me",
+        "created": "2026-04-01T00:00:00Z",
+        "updated": "2026-04-20T08:00:00Z"
+    })
+    .to_string();
+    NoteRepo::upsert_note(
+        &connection,
+        UpsertNoteParams {
+            note_id: &note,
+            path: &note_path,
+            title: "Trash Me",
+            content_hash: &body_hash,
+            frontmatter_json: &frontmatter_json,
+            created_at: "2026-04-01T00:00:00Z",
+            updated_at: "2026-04-20T08:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
+    )
+    .expect("note should seed");
+    upsert_note_state(
+        &connection,
+        note_id,
+        Some(&body_hash),
+        Some(&body_hash),
+        Some(&note_path),
+        Some(7),
+        None,
+    );
+
+    let response = SyncPullResponse {
+        changes: vec![SyncChange {
+            event_seq: 21,
+            item_id: note_id.to_string(),
+            item_type: WireItemType::Note,
+            event_type: WireEventType::Trash,
+            path: Some(note_path.to_string()),
+            content: None,
+            asset_bytes_base64: None,
+            content_hash: None,
+            server_revision: Some(8),
+            trashed_at: Some("2026-04-22T18:07:33Z".to_string()),
+            retention_until: Some("2026-05-22T18:07:33Z".to_string()),
+            deleted_at: None,
+        }],
+        next_cursor: Some(21),
+    };
+
+    let error = apply(&mut connection, &vault, &response)
+        .expect_err("saturated trash destination candidates should fail");
+
+    assert!(matches!(
+        error,
+        SyncError::CollisionRetryExhausted {
+            attempts: TEST_COLLISION_ATTEMPTS
+        }
+    ));
+}
+
+#[test]
 fn apply_pull_response_purges_clean_note_and_keeps_delete_record() {
     let vault = TempDir::new().expect("temp vault should create");
     let mut connection = open_sync_connection();
@@ -973,23 +1091,27 @@ fn apply_pull_response_purges_clean_note_and_keeps_delete_record() {
     let body = note_body(note_id, "Purge Me", "2026-04-20T08:00:00Z", "# Purge Me");
     let body_hash = ContentHash::from_bytes(body.as_bytes());
     write_vault_file(vault.path(), &trashed_path, body.as_bytes());
+    let note = NoteId::new(note_id);
+    let frontmatter_json = serde_json::json!({
+        "id": note_id,
+        "title": "Purge Me",
+        "created": "2026-04-01T00:00:00Z",
+        "updated": "2026-04-20T08:00:00Z"
+    })
+    .to_string();
     NoteRepo::upsert_note(
         &connection,
-        &NoteId::new(note_id),
-        &trashed_path,
-        "Purge Me",
-        &body_hash,
-        &serde_json::json!({
-            "id": note_id,
-            "title": "Purge Me",
-            "created": "2026-04-01T00:00:00Z",
-            "updated": "2026-04-20T08:00:00Z"
-        })
-        .to_string(),
-        "2026-04-01T00:00:00Z",
-        "2026-04-20T08:00:00Z",
-        Some("2026-04-22T18:07:33Z"),
-        true,
+        UpsertNoteParams {
+            note_id: &note,
+            path: &trashed_path,
+            title: "Purge Me",
+            content_hash: &body_hash,
+            frontmatter_json: &frontmatter_json,
+            created_at: "2026-04-01T00:00:00Z",
+            updated_at: "2026-04-20T08:00:00Z",
+            trashed_at: Some("2026-04-22T18:07:33Z"),
+            is_trashed: true,
+        },
     )
     .expect("note should seed");
     upsert_note_state(

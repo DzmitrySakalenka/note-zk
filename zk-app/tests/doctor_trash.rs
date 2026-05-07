@@ -14,7 +14,7 @@ use zk_domain::{
     sync::ItemType,
     sync_state::DeleteRecord,
 };
-use zk_index::{DeleteRecordRepo, NoteRepo, ensure_schema, open_memory};
+use zk_index::{DeleteRecordRepo, NoteRepo, UpsertNoteParams, ensure_schema, open_memory};
 
 fn sample_frontmatter(note_id: &str, title: &str) -> String {
     serde_json::to_string(&NoteFrontmatter {
@@ -133,15 +133,17 @@ fn doctor_report_reports_expired_retention_with_purge_hint() {
     ensure_schema(&conn).expect("schema should exist");
     NoteRepo::upsert_note(
         &conn,
-        &NoteId::new("01TG10RETENTIONDUE0000000001"),
-        &RelativePath::new("99_trash/2026-04-01/expired.md"),
-        "Expired Trash",
-        &ContentHash::new("hash-expired-trash"),
-        &sample_frontmatter("01TG10RETENTIONDUE0000000001", "Expired Trash"),
-        "2026-04-01T10:00:00Z",
-        "2026-04-01T10:00:00Z",
-        Some("2026-04-01T10:00:00Z"),
-        true,
+        UpsertNoteParams {
+            note_id: &NoteId::new("01TG10RETENTIONDUE0000000001"),
+            path: &RelativePath::new("99_trash/2026-04-01/expired.md"),
+            title: "Expired Trash",
+            content_hash: &ContentHash::new("hash-expired-trash"),
+            frontmatter_json: &sample_frontmatter("01TG10RETENTIONDUE0000000001", "Expired Trash"),
+            created_at: "2026-04-01T10:00:00Z",
+            updated_at: "2026-04-01T10:00:00Z",
+            trashed_at: Some("2026-04-01T10:00:00Z"),
+            is_trashed: true,
+        },
     )
     .expect("trashed note should upsert");
     DeleteRecordRepo::insert_delete_record(

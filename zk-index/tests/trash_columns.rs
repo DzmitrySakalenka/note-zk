@@ -8,7 +8,7 @@ use zk_domain::{
     id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     note::NoteRecord,
 };
-use zk_index::{AssetRepo, NoteRepo, ensure_schema, open_memory};
+use zk_index::{AssetRepo, NoteRepo, UpsertNoteParams, ensure_schema, open_memory};
 
 fn sample_note_id() -> NoteId {
     NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP")
@@ -34,15 +34,17 @@ fn insert_sample_note(conn: &rusqlite::Connection) {
     let record = sample_note_record();
     NoteRepo::upsert_note(
         conn,
-        &record.note_id,
-        &record.current_path,
-        "Knowledge Graph Basics",
-        &record.content_hash,
-        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
-        &record.created_at,
-        &record.updated_at,
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &record.note_id,
+            path: &record.current_path,
+            title: "Knowledge Graph Basics",
+            content_hash: &record.content_hash,
+            frontmatter_json: r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
+            created_at: &record.created_at,
+            updated_at: &record.updated_at,
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("sample note should be inserted");
 }
@@ -82,15 +84,17 @@ fn upsert_note_persists_and_clears_trash_fields() {
 
     NoteRepo::upsert_note(
         &connection,
-        &note_id,
-        &trashed_path,
-        "Knowledge Graph Basics",
-        &content_hash,
-        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
-        "2026-04-02T10:00:00Z",
-        "2026-04-02T12:00:00Z",
-        Some("2026-04-20T08:00:00Z"),
-        true,
+        UpsertNoteParams {
+            note_id: &note_id,
+            path: &trashed_path,
+            title: "Knowledge Graph Basics",
+            content_hash: &content_hash,
+            frontmatter_json: r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
+            created_at: "2026-04-02T10:00:00Z",
+            updated_at: "2026-04-02T12:00:00Z",
+            trashed_at: Some("2026-04-20T08:00:00Z"),
+            is_trashed: true,
+        },
     )
     .expect("trashed note upsert should succeed");
 
@@ -103,15 +107,17 @@ fn upsert_note_persists_and_clears_trash_fields() {
 
     NoteRepo::upsert_note(
         &connection,
-        &note_id,
-        &live_path,
-        "Knowledge Graph Basics",
-        &content_hash,
-        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
-        "2026-04-02T10:00:00Z",
-        "2026-04-02T12:00:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &note_id,
+            path: &live_path,
+            title: "Knowledge Graph Basics",
+            content_hash: &content_hash,
+            frontmatter_json: r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
+            created_at: "2026-04-02T10:00:00Z",
+            updated_at: "2026-04-02T12:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("live note upsert should succeed");
 
@@ -140,15 +146,17 @@ fn upsert_note_preserves_delete_columns_while_toggling_trash_fields() {
 
     NoteRepo::upsert_note(
         &connection,
-        &note_id,
-        &RelativePath::new("99_trash/knowledge-graph.md"),
-        "Knowledge Graph Basics",
-        &ContentHash::from_bytes(b"sample content"),
-        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
-        "2026-04-02T10:00:00Z",
-        "2026-04-20T08:00:00Z",
-        Some("2026-04-20T08:00:00Z"),
-        true,
+        UpsertNoteParams {
+            note_id: &note_id,
+            path: &RelativePath::new("99_trash/knowledge-graph.md"),
+            title: "Knowledge Graph Basics",
+            content_hash: &ContentHash::from_bytes(b"sample content"),
+            frontmatter_json: r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
+            created_at: "2026-04-02T10:00:00Z",
+            updated_at: "2026-04-20T08:00:00Z",
+            trashed_at: Some("2026-04-20T08:00:00Z"),
+            is_trashed: true,
+        },
     )
     .expect("trashed note upsert should succeed");
 
@@ -162,15 +170,17 @@ fn upsert_note_preserves_delete_columns_while_toggling_trash_fields() {
 
     NoteRepo::upsert_note(
         &connection,
-        &note_id,
-        &RelativePath::new("notes/knowledge-graph.md"),
-        "Knowledge Graph Basics",
-        &ContentHash::from_bytes(b"sample content"),
-        r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
-        "2026-04-02T10:00:00Z",
-        "2026-04-21T08:00:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &note_id,
+            path: &RelativePath::new("notes/knowledge-graph.md"),
+            title: "Knowledge Graph Basics",
+            content_hash: &ContentHash::from_bytes(b"sample content"),
+            frontmatter_json: r#"{"id":"01HZ3KQBFG9T2R5XJ4N8VW6YMP","title":"Knowledge Graph Basics"}"#,
+            created_at: "2026-04-02T10:00:00Z",
+            updated_at: "2026-04-21T08:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("restored note upsert should succeed");
 

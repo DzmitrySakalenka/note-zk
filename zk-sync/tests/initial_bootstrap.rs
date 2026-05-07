@@ -12,12 +12,15 @@ use zk_domain::{
     sync::SyncStatus,
     sync_state::{DeleteRecord, DeleteRecordTarget, NoteSyncState},
 };
-use zk_index::{AssetRepo, DeleteRecordRepo, NoteRepo, SyncStateRepo, ensure_schema, open_memory};
+use zk_index::{
+    AssetRepo, DeleteRecordRepo, NoteRepo, SyncStateRepo, UpsertNoteParams, ensure_schema,
+    open_memory,
+};
 use zk_sync::{
     SyncError,
     bootstrap::{
-        InitialSyncMode, LocalBootstrapProbe, RemoteBootstrapProbe, detect_initial_mode,
-        plan_empty_local_bootstrap, plan_empty_remote_bootstrap,
+        InitialSyncMode, LocalBootstrapProbe, RemoteBootstrapProbe, ValidatedInitialSyncMode,
+        detect_initial_mode, plan_empty_local_bootstrap, plan_empty_remote_bootstrap,
     },
     plan::{Clock, PlannerContext},
 };
@@ -136,13 +139,13 @@ fn require_unambiguous_rejects_both_mode_only() {
         InitialSyncMode::EmptyLocal
             .require_unambiguous()
             .expect("empty-local mode should succeed"),
-        InitialSyncMode::EmptyLocal
+        ValidatedInitialSyncMode::EmptyLocal
     );
     assert_eq!(
         InitialSyncMode::EmptyRemote
             .require_unambiguous()
             .expect("empty-remote mode should succeed"),
-        InitialSyncMode::EmptyRemote
+        ValidatedInitialSyncMode::EmptyRemote
     );
     assert!(matches!(
         InitialSyncMode::Both.require_unambiguous(),
@@ -302,15 +305,17 @@ fn seed_empty_remote_bootstrap_fixture(
 fn insert_note(conn: &rusqlite::Connection, record: &NoteRecord) {
     NoteRepo::upsert_note(
         conn,
-        &record.note_id,
-        &record.current_path,
-        "TG11 note",
-        &record.content_hash,
-        r#"{"id":"01TG11NOTE","title":"TG11 note"}"#,
-        &record.created_at,
-        &record.updated_at,
-        record.trashed_at.as_deref(),
-        record.is_trashed,
+        UpsertNoteParams {
+            note_id: &record.note_id,
+            path: &record.current_path,
+            title: "TG11 note",
+            content_hash: &record.content_hash,
+            frontmatter_json: r#"{"id":"01TG11NOTE","title":"TG11 note"}"#,
+            created_at: &record.created_at,
+            updated_at: &record.updated_at,
+            trashed_at: record.trashed_at.as_deref(),
+            is_trashed: record.is_trashed,
+        },
     )
     .expect("note should be inserted");
 

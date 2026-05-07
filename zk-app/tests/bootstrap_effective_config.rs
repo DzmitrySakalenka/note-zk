@@ -210,7 +210,7 @@ fn bootstrap_index_connection_creates_parent_dirs_and_applies_schema() {
         })
         .expect("schema version query should succeed");
 
-    assert_eq!(schema_version, 2);
+    assert_eq!(schema_version, 3);
     assert!(database_path.exists());
     assert!(
         database_path
@@ -230,5 +230,5 @@ fn bootstrap_preview_index_connection_applies_schema_to_memory_database() {
         })
         .expect("schema version query should succeed");
 
-    assert_eq!(schema_version, 2);
+    assert_eq!(schema_version, 3);
 }

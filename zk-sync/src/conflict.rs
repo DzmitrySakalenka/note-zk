@@ -32,6 +32,8 @@ use zk_vault::{VaultRoot, atomic_write_file, error::VaultError};
 
 use crate::{SyncError, SyncResult, plan::Clock};
 
+const MAX_COLLISION_ATTEMPTS: u32 = 1024;
+
 /// Minimal sync-state facts needed to detect local/remote divergence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncStateSnapshot {
@@ -139,7 +141,7 @@ pub fn write_conflict_copy(
     let timestamp = input.clock.now().format("%Y%m%dT%H%M%SZ").to_string();
     let base_relative_path = build_conflict_copy_path(input.local_path, &timestamp, 0);
 
-    for collision_index in 0.. {
+    for collision_index in 0..MAX_COLLISION_ATTEMPTS {
         let candidate_relative_path = if collision_index == 0 {
             base_relative_path.clone()
         } else {
@@ -162,13 +164,15 @@ pub fn write_conflict_copy(
         }
     }
 
-    unreachable!("conflict copy collision probing always returns or continues")
+    Err(SyncError::CollisionRetryExhausted {
+        attempts: MAX_COLLISION_ATTEMPTS,
+    })
 }
 
 fn build_conflict_copy_path(
     local_path: &RelativePath,
     timestamp: &str,
-    collision_suffix: usize,
+    collision_suffix: u32,
 ) -> RelativePath {
     let path = Path::new(local_path.as_str());
     let parent = path.parent().unwrap_or_else(|| Path::new(""));

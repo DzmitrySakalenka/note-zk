@@ -3,11 +3,11 @@
 use std::io;
 
 use anyhow::Context;
-use zk_app::{PurgeRequest, PurgeScope, SystemClock, purge_expired, purge_item};
+use zk_app::{PurgeRequest, PurgeScope as AppPurgeScope, SystemClock, purge_expired, purge_item};
 
 use crate::{
     bootstrap::{load_effective_config, open_index_connection, resolve_vault_root},
-    cli::{OutputMode, PurgeArgs, SharedFlags},
+    cli::{OutputMode, PurgeArgs, PurgeScope, SharedFlags},
     error::{CliError, EXIT_OK},
     output::{LifecycleJsonOutput, write_json_line, write_purge_human},
 };
@@ -25,14 +25,14 @@ pub fn run(args: &PurgeArgs, shared: &SharedFlags) -> Result<i32, CliError> {
     let dry_run = args.dry_run || !args.yes;
     let request = build_request(args, dry_run);
     let purge_outcome = match request.scope {
-        PurgeScope::Expired => purge_expired(
+        AppPurgeScope::Expired => purge_expired(
             &vault_root,
             &config,
             &mut connection,
             &request,
             &SystemClock,
         ),
-        PurgeScope::Item { .. } => purge_item(
+        AppPurgeScope::Item { .. } => purge_item(
             &vault_root,
             &config,
             &mut connection,
@@ -60,12 +60,12 @@ pub fn run(args: &PurgeArgs, shared: &SharedFlags) -> Result<i32, CliError> {
 }
 
 fn build_request(args: &PurgeArgs, dry_run: bool) -> PurgeRequest {
-    let scope = match &args.target {
-        Some(target) => PurgeScope::Item {
-            kind: super::kind_from_as_asset(args.as_asset),
-            target: super::infer_target_selector(target),
+    let scope = match args.scope() {
+        PurgeScope::Target { id, as_asset } => AppPurgeScope::Item {
+            kind: super::kind_from_as_asset(as_asset),
+            target: super::infer_target_selector(&id),
         },
-        None => PurgeScope::Expired,
+        PurgeScope::AllExpired => AppPurgeScope::Expired,
     };
 
     PurgeRequest {

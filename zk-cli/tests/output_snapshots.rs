@@ -4,9 +4,10 @@
 use insta::assert_snapshot;
 use zk_app::{DoctorIssue, DoctorReport, StatusSummary};
 use zk_cli::output::{
-    ResolveConflictCommandPayload, ScanCommandPayload, ScanSummary, SyncCommandPayload,
-    SyncPullSummary, SyncPushSummary, SyncRegistrationSummary, write_doctor_human,
-    write_resolve_conflict_human, write_scan_human, write_status_human, write_sync_human,
+    ResolveConflictCommandPayload, ScanCommandPayload, ScanJsonOutput, ScanSummary,
+    SyncCommandPayload, SyncPullSummary, SyncPushSummary, SyncRegistrationSummary,
+    saturating_output_count, write_doctor_human, write_resolve_conflict_human, write_scan_human,
+    write_status_human, write_sync_human,
 };
 use zk_domain::{id::RelativePath, note::DiagnosticLevel, sync::ItemType};
 use zk_vault::NormalizationSummary;
@@ -193,6 +194,43 @@ fn scan_check_human_snapshot() {
 #[test]
 fn scan_write_human_snapshot() {
     assert_snapshot!("scan_write_human", render_scan(&scan_write_fixture()));
+}
+
+#[test]
+fn scan_count_helper_saturates_overflowing_usize() {
+    let overflowing_count =
+        usize::try_from(u64::from(u32::MAX) + 1).expect("test target should fit u32::MAX + 1");
+
+    assert_eq!(
+        saturating_output_count("notes_scanned", overflowing_count),
+        u32::MAX
+    );
+}
+
+#[test]
+fn scan_json_large_count_stays_json_number() {
+    let output = ScanJsonOutput {
+        command: "scan",
+        payload: ScanCommandPayload::Check {
+            summary: ScanSummary {
+                notes_scanned: u32::MAX,
+                assets_scanned: 0,
+                errors: 0,
+                warnings: 0,
+                infos: 0,
+                duplicate_ids: 0,
+                unresolved_links: 0,
+            },
+        },
+    };
+
+    let value = serde_json::to_value(output).expect("scan output should serialize");
+
+    assert!(value["summary"]["notes_scanned"].is_number());
+    assert_eq!(
+        value["summary"]["notes_scanned"].as_u64(),
+        Some(u64::from(u32::MAX))
+    );
 }
 
 #[test]

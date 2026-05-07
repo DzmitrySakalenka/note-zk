@@ -45,6 +45,7 @@ fn test_config(database_path: PathBuf) -> ServerConfig {
         trash_retention_days: 30,
         max_batch_size: 2,
         backup: None,
+        ai: None,
     }
 }
 
@@ -357,6 +358,27 @@ async fn pull_clamps_requested_batch_size() {
         2
     );
     assert_eq!(oversized_json["next_cursor"], 2);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn concurrent_pull_requests_complete_successfully() {
+    let harness = build_harness();
+    seed_note_create(&harness.state, "note-a", 1);
+    seed_note_create(&harness.state, "note-b", 2);
+    let app = test_router(harness.state);
+
+    let first = app
+        .clone()
+        .oneshot(pull_request("device-a", Some(0), Some(2)));
+    let second = app.oneshot(pull_request("device-b", Some(0), Some(2)));
+    let (first_response, second_response) = tokio::join!(first, second);
+    let first_response = first_response.expect("first pull request should complete");
+    let second_response = second_response.expect("second pull request should complete");
+
+    assert_eq!(first_response.status(), StatusCode::OK);
+    assert_eq!(second_response.status(), StatusCode::OK);
+    assert_eq!(response_json(first_response).await["next_cursor"], 2);
+    assert_eq!(response_json(second_response).await["next_cursor"], 2);
 }
 
 #[tokio::test]

@@ -25,6 +25,7 @@ pub struct HealthResponse {
 /// Returns [`ApiError`] when the server cannot read its schema version.
 pub async fn health(State(state): State<ServerState>) -> Result<Json<HealthResponse>, ApiError> {
     let now = Utc::now();
+    // Deliberately inline: health only performs one-row readiness/schema probes.
     let db_ok = match state.db().with_conn(|connection| {
         connection
             .query_row("SELECT 1", [], |_| Ok(()))

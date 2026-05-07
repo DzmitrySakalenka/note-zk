@@ -124,6 +124,7 @@ async fn show_resolves_short_prefix_and_prints_manifest() {
     let stdout = stdout_text(assert.get_output());
 
     assert!(stdout.contains(&format!("backup_id: {BACKUP_ID}")));
+    assert!(stdout.contains("schema_version: 1"));
     assert!(stdout.contains("created_at: 2026-05-02T10:00:00Z"));
     assert!(stdout.contains(&format!("archive: backup-{BACKUP_ID}.tar.zst")));
     assert!(

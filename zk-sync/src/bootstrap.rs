@@ -27,6 +27,15 @@ pub enum InitialSyncMode {
     Both,
 }
 
+/// First-sync mode after rejecting the ambiguous both-sides-have-content case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidatedInitialSyncMode {
+    /// The local side is empty, so bootstrap should pull from the remote side.
+    EmptyLocal,
+    /// The remote side is empty, so bootstrap should push all local items.
+    EmptyRemote,
+}
+
 impl InitialSyncMode {
     /// Returns the mode unchanged unless it is ambiguous for V1 bootstrap.
     ///
@@ -34,10 +43,11 @@ impl InitialSyncMode {
     ///
     /// Returns [`SyncError::AmbiguousBootstrap`] when both local and remote
     /// already contain content.
-    pub fn require_unambiguous(self) -> SyncResult<Self> {
+    pub fn require_unambiguous(self) -> SyncResult<ValidatedInitialSyncMode> {
         match self {
             Self::Both => Err(SyncError::AmbiguousBootstrap),
-            other => Ok(other),
+            Self::EmptyLocal => Ok(ValidatedInitialSyncMode::EmptyLocal),
+            Self::EmptyRemote => Ok(ValidatedInitialSyncMode::EmptyRemote),
         }
     }
 }

@@ -508,17 +508,18 @@ Outcome:
 
 - browser and editor UX
 
-## Current State (2026-05-03)
+## Current State (2026-05-06)
 
 Milestones A, B, and C are CLOSED. Milestone D is IN PROGRESS:
 TG14 (auth) and TG15 (backup, restore, and server purge scheduler)
-are DONE; TG18 (operational hardening) remains. Milestones E, E2,
-and F are NOT STARTED.
+are DONE; TG18 (operational hardening) remains. Milestone E is IN
+PROGRESS: TG16 (AI foundations) is DONE and TG17 (chat) remains.
+Milestones E2 and F are NOT STARTED.
 
 `.tasks/.local/progress.md` is the authoritative task and milestone
-status source. A new contributor today should start at TG18 operational
-hardening or pick up the post-Milestone-C asset upload transport tracked
-there.
+status source. A new contributor today should start at TG17 chat for
+Milestone E, or TG18 operational hardening if prioritizing the remaining
+Milestone D track.
 
 ## Original Phase Ordering
 

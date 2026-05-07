@@ -37,6 +37,7 @@ fn test_config(database_path: PathBuf) -> ServerConfig {
         trash_retention_days: 30,
         max_batch_size: 250,
         backup: None,
+        ai: None,
     }
 }
 
@@ -158,5 +159,5 @@ async fn register_device_is_idempotent_for_existing_device() {
             .expect("schema version lookup should succeed"),
         schema_version_after_first
     );
-    assert_eq!(schema_version_after_first, 2);
+    assert_eq!(schema_version_after_first, 3);
 }

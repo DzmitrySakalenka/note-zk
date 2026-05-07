@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use zk_domain::{
     ItemKind, TrashRequest, config::EffectiveConfig, id::RelativePath, sync::ItemType,
 };
-use zk_index::{AssetInput, AssetRepo, NoteInput, NoteRepo};
+use zk_index::{AssetInput, AssetRepo, NoteInput, NoteRepo, UpsertNoteParams};
 
 use crate::{
     Clock, Result, SystemClock, compute_retention_until, ensure_writable,
@@ -511,15 +511,17 @@ fn upsert_trashed_note(
     let note_input = build_note_input(resolved, path, trashed_at);
     NoteRepo::upsert_note(
         transaction,
-        &resolved.note.note_id,
-        &note_input.path,
-        &note_input.title,
-        &note_input.content_hash,
-        &note_input.frontmatter_json,
-        &note_input.created_at,
-        &note_input.updated_at,
-        note_input.trashed_at.as_deref(),
-        note_input.is_trashed,
+        UpsertNoteParams {
+            note_id: &resolved.note.note_id,
+            path: &note_input.path,
+            title: &note_input.title,
+            content_hash: &note_input.content_hash,
+            frontmatter_json: &note_input.frontmatter_json,
+            created_at: &note_input.created_at,
+            updated_at: &note_input.updated_at,
+            trashed_at: note_input.trashed_at.as_deref(),
+            is_trashed: note_input.is_trashed,
+        },
     )?;
 
     Ok(note_input)

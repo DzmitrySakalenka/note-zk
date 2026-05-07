@@ -16,7 +16,7 @@ use crate::{
     bootstrap::{
         load_effective_config, open_index_connection, resolve_sync_settings, resolve_vault_root,
     },
-    cli::{OutputMode, SharedFlags, SyncArgs},
+    cli::{OutputMode, SharedFlags, SyncArgs, SyncMode},
     error::{CliError, EXIT_ISSUES, EXIT_OK},
     output::{
         SyncCommandPayload, SyncJsonOutput, SyncPullSummary, SyncPushSummary,
@@ -49,7 +49,9 @@ pub fn run(args: &SyncArgs, shared: &SharedFlags) -> Result<i32, CliError> {
         .map_err(CliError::Internal)?;
     let trash_dir = zk_app::RelativePath::new(&config.trash_dir);
     let clock = SystemClock;
-    let should_bootstrap = args.bootstrap || device_status.last_sync_cursor.is_none();
+    let mode = args.mode();
+    let should_bootstrap =
+        matches!(mode, SyncMode::Bootstrap) || device_status.last_sync_cursor.is_none();
     let mut context = SyncRunContext {
         connection: &mut connection,
         vault_root: &vault_root,
@@ -61,7 +63,7 @@ pub fn run(args: &SyncArgs, shared: &SharedFlags) -> Result<i32, CliError> {
 
     let payload = runtime
         .block_on(execute_sync_workflow(
-            args,
+            mode,
             &mut context,
             !device_status.registered,
             should_bootstrap,
@@ -105,7 +107,7 @@ struct SyncRunContext<'a> {
 }
 
 async fn execute_sync_workflow(
-    args: &SyncArgs,
+    mode: SyncMode,
     context: &mut SyncRunContext<'_>,
     first_registration: bool,
     should_bootstrap: bool,
@@ -128,10 +130,10 @@ async fn execute_sync_workflow(
     if should_bootstrap {
         run_bootstrap(context, &mut payload).await?;
     } else {
-        if !args.pull_only {
+        if !matches!(mode, SyncMode::PullOnly) {
             run_push(context, &mut payload).await?;
         }
-        if !args.push_only {
+        if !matches!(mode, SyncMode::PushOnly) {
             run_pull(context, &mut payload).await?;
         }
     }

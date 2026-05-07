@@ -66,6 +66,20 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+Run sync hot-path benchmarks one at a time so the measurements do not
+compete for CPU or allocator resources:
+
+```bash
+cargo bench -p zk-sync --bench sync_apply -- apply_pull_response_10k_notes
+cargo bench -p zk-sync --bench sync_apply -- build_push_request_10k_local_changes
+```
+
+To compile all workspace benches without running them:
+
+```bash
+cargo bench --workspace --no-run
+```
+
 Release archives contain both tools: `zk-cli` for local vault operations and
 `zk-server` for the HTTP sync server.
 
@@ -81,6 +95,30 @@ log_filter = "info,zk_server=debug"
 stub_auth_token_sha256_hex = "<sha256-of-bearer-token>"
 trash_retention_days = 14
 max_batch_size = 1000
+
+[ai]
+provider = "remote-http"
+default_mode = "connected"
+recompute_concurrency = 2
+max_attempts = 3
+
+[ai.remote]
+base_url = "https://api.openai.com"
+model_id = "text-embedding-3-small"
+dim = 1536
+api_key_env_var = "OPENAI_API_KEY"
+max_batch_size = 256
+timeout_secs = 30
+
+[ai.local]
+model_dir = "/var/lib/zk-server/models/all-minilm-l6-v2"
+model_id = "local/all-minilm-l6-v2"
+max_seq_len = 512
+max_batch_size = 32
+device = "cpu"
+
+[ai.stub]
+dim = 384
 ```
 
 ```bash
@@ -90,7 +128,12 @@ ZK_SERVER_CONFIG=server.toml zk-server
 Server config can also be supplied through environment overrides:
 `ZK_SERVER_DATABASE_PATH`, `ZK_SERVER_LISTEN_ADDR`,
 `ZK_SERVER_LOG_FILTER`, `ZK_SERVER_TOKEN_SHA256`,
-`ZK_SERVER_TRASH_RETENTION_DAYS`, and `ZK_SERVER_MAX_BATCH_SIZE`.
+`ZK_SERVER_TRASH_RETENTION_DAYS`, `ZK_SERVER_MAX_BATCH_SIZE`,
+`ZK_SERVER_AI_PROVIDER`, `ZK_SERVER_AI_DEFAULT_MODE`,
+`ZK_SERVER_AI_REMOTE_BASE_URL`, `ZK_SERVER_AI_REMOTE_MODEL_ID`,
+`ZK_SERVER_AI_REMOTE_API_KEY_ENV_VAR`, `ZK_SERVER_AI_LOCAL_MODEL_DIR`,
+`ZK_SERVER_AI_RECOMPUTE_CONCURRENCY`, and
+`ZK_SERVER_AI_MAX_ATTEMPTS`.
 `ZK_SERVER_TOKEN_SHA256` is the lowercase SHA-256 hex digest of the
 bearer token that clients send.
 
@@ -163,6 +206,60 @@ zk-cli auth issue-token \
 Store the printed plaintext in `ZK_DEVICE_TOKEN` on the device. The
 server only keeps the SHA-256 hash; the plaintext cannot be retrieved
 later.
+
+## AI
+
+Server-side AI is optional; production embedding providers can be remote
+HTTP or a local Candle model:
+
+```toml
+[ai]
+provider = "stub" # "stub", "remote-http", or "local-candle"
+default_mode = "connected"
+recompute_concurrency = 2
+max_attempts = 3
+
+[ai.stub]
+dim = 384
+
+[ai.remote]
+base_url = "https://api.openai.com"
+model_id = "text-embedding-3-small"
+dim = 1536
+api_key_env_var = "OPENAI_API_KEY"
+
+[ai.local]
+model_dir = "/var/lib/zk-server/models/all-minilm-l6-v2"
+model_id = "local/all-minilm-l6-v2"
+device = "cpu"
+```
+
+Run server-side embedding jobs with an admin-scoped token:
+
+```bash
+zk-cli admin ai recompute --scope vault
+zk-cli admin ai jobs
+zk-cli admin ai cancel <job-id>
+```
+
+Search and refresh the local offline cache from a vault client:
+
+```bash
+zk-cli search --semantic "<query>"
+zk-cli ai recompute-local --vault <path>
+```
+
+Local model runtime support is feature-gated:
+
+```bash
+cargo build --features zk-cli/ai-local
+```
+
+`provider-local-metal` and `provider-local-cuda` are opt-in hardware
+features and require platform support. See
+`docs/architecture/llm-execution-model.md` for execution modes and
+`docs/decisions/0004-server-first-ai-with-local-fallback.md` for the
+server-first local fallback decision.
 
 ## Backup and Restore
 

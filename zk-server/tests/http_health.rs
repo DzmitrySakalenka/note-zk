@@ -38,6 +38,7 @@ fn test_config(database_path: PathBuf) -> ServerConfig {
         trash_retention_days: 14,
         max_batch_size: 1000,
         backup: None,
+        ai: None,
     }
 }
 
@@ -119,7 +120,7 @@ async fn health_endpoint_returns_expected_body_after_bootstrap() {
     assert_eq!(content_type, "application/json");
     assert_eq!(health_response.status, "ok");
     assert!(health_response.db_ok);
-    assert_eq!(health_response.schema_version, 2);
+    assert_eq!(health_response.schema_version, 3);
     assert!(health_response.uptime_seconds >= 0);
 }
 

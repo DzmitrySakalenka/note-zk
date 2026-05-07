@@ -21,6 +21,12 @@ pub enum ServerError {
     /// Client supplied an invalid request payload or parameter.
     #[error("invalid request: {0}")]
     InvalidRequest(String),
+    /// Stored embedding bytes are not a non-empty sequence of little-endian `f32`s.
+    #[error("invalid embedding blob length {len}; expected a non-empty multiple of 4 bytes")]
+    InvalidEmbeddingBlob {
+        /// Raw byte length of the malformed blob.
+        len: usize,
+    },
     /// Requested resource does not exist.
     #[error("not found: {0}")]
     NotFound(String),
@@ -30,6 +36,9 @@ pub enum ServerError {
     /// Requested operation is temporarily unavailable.
     #[error("service unavailable: {0}")]
     ServiceUnavailable(String),
+    /// Upstream service failed a gateway-style request.
+    #[error("bad gateway: {0}")]
+    BadGateway(String),
     /// Request lacks valid authentication credentials.
     #[error("unauthorized")]
     Unauthorized,

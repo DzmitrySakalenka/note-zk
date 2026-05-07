@@ -40,6 +40,13 @@ fn sync_error_variants_have_expected_display_and_sources() {
     );
     assert!(ambiguous_bootstrap.source().is_none());
 
+    let collision_retry_exhausted = SyncError::CollisionRetryExhausted { attempts: 1024 };
+    assert_eq!(
+        collision_retry_exhausted.to_string(),
+        "collision retry exhausted after 1024 attempts"
+    );
+    assert!(collision_retry_exhausted.source().is_none());
+
     let unsupported = SyncError::Unsupported("resolve_conflict");
     assert_eq!(
         unsupported.to_string(),

@@ -13,7 +13,7 @@ use zk_domain::{
 };
 use zk_index::{
     AssetInput, AssetRepo, DeleteRecordRepo, DeviceRepo, LinkRepo, NoteInput, NoteRepo,
-    RebuildStats, SyncStateRepo, ensure_schema, open_memory, rebuild_index,
+    RebuildStats, SyncStateRepo, UpsertNoteParams, ensure_schema, open_memory, rebuild_index,
 };
 
 fn alpha_note_id() -> NoteId {
@@ -468,15 +468,19 @@ fn rebuild_preserves_delete_columns_while_updating_trash_columns() {
 
     NoteRepo::upsert_note(
         &connection,
-        &alpha_note_id(),
-        &RelativePath::new("notes/alpha.md"),
-        "Alpha",
-        &ContentHash::new("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-        r#"{"id":"01HZ3NOTE000000000000000A","title":"Alpha"}"#,
-        "2026-04-02T10:00:00Z",
-        "2026-04-02T12:00:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &alpha_note_id(),
+            path: &RelativePath::new("notes/alpha.md"),
+            title: "Alpha",
+            content_hash: &ContentHash::new(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ),
+            frontmatter_json: r#"{"id":"01HZ3NOTE000000000000000A","title":"Alpha"}"#,
+            created_at: "2026-04-02T10:00:00Z",
+            updated_at: "2026-04-02T12:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("seed note should upsert successfully");
     connection
@@ -798,15 +802,19 @@ fn rebuild_preserves_stale_base_rows_but_rebuilds_only_current_derived_rows() {
     ensure_schema(&connection).expect("schema should be ready");
     NoteRepo::upsert_note(
         &connection,
-        &NoteId::new("01HZ3NOTE00000000000000ZZ"),
-        &RelativePath::new("notes/stale.md"),
-        "Stale",
-        &ContentHash::new("9999999999999999999999999999999999999999999999999999999999999999"),
-        r#"{"id":"01HZ3NOTE00000000000000ZZ","title":"Stale"}"#,
-        "2026-04-01T00:00:00Z",
-        "2026-04-01T00:00:00Z",
-        None,
-        false,
+        UpsertNoteParams {
+            note_id: &NoteId::new("01HZ3NOTE00000000000000ZZ"),
+            path: &RelativePath::new("notes/stale.md"),
+            title: "Stale",
+            content_hash: &ContentHash::new(
+                "9999999999999999999999999999999999999999999999999999999999999999",
+            ),
+            frontmatter_json: r#"{"id":"01HZ3NOTE00000000000000ZZ","title":"Stale"}"#,
+            created_at: "2026-04-01T00:00:00Z",
+            updated_at: "2026-04-01T00:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
     )
     .expect("stale note upsert should succeed");
     NoteRepo::replace_tags(

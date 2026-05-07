@@ -3,13 +3,16 @@
 use axum::{Json, extract::State};
 use chrono::{DateTime, Days, Utc};
 use rusqlite::Connection;
-use zk_domain::{PushAssetItem, PushItemResult, PushNoteItem, SyncPushRequest, SyncPushResponse};
+use zk_domain::{
+    PushAssetItem, PushItemResult, PushNoteItem, SyncPushRequest, SyncPushResponse, WireOperation,
+    id::NoteId,
+};
 
 use super::dto;
 use crate::{
     ServerError, ServerResult,
     auth::AuthenticatedDevice,
-    http::ApiError,
+    http::{ApiError, run_blocking},
     repo::{AssetRow, AssetsRepo, DeleteRecordRow, DeleteRecordsRepo, NoteRow, NotesRepo},
     service::{
         self, AcceptOutcome, RecordAssetChange, RecordNoteChange, accept_or_conflict,
@@ -26,24 +29,54 @@ pub(super) async fn sync_push(
     service::validate_device_id(&body.device_id)?;
 
     let now = Utc::now();
-    let editor_device_id = auth.device_id.as_deref().unwrap_or(&body.device_id);
+    let editor_device_id = auth.device_id.unwrap_or_else(|| body.device_id.clone());
+    let ai_ingest = state.ai_ingest();
+    let blocking_state = state.clone();
+    let outcome = run_blocking("sync push", move || {
+        process_push_batch(&blocking_state, &body, &editor_device_id, now)
+    })
+    .await?;
+
+    if let Some(enqueuer) = ai_ingest {
+        for note_id in outcome.recompute_note_ids {
+            enqueuer.note_changed(note_id);
+        }
+    }
+
+    Ok(Json(outcome.response))
+}
+
+struct PushBlockingOutcome {
+    response: SyncPushResponse,
+    recompute_note_ids: Vec<NoteId>,
+}
+
+fn process_push_batch(
+    state: &ServerState,
+    body: &SyncPushRequest,
+    editor_device_id: &str,
+    now: DateTime<Utc>,
+) -> ServerResult<PushBlockingOutcome> {
     let mut results = Vec::with_capacity(body.notes.len().saturating_add(body.assets.len()));
+    let mut recompute_note_ids = Vec::new();
 
     for item in &body.notes {
-        results.push(process_note_item(
-            &state,
-            item,
-            &body.device_id,
-            editor_device_id,
-            now,
-        )?);
+        let result = process_note_item(state, item, &body.device_id, editor_device_id, now)?;
+        if result.accepted && operation_recomputes_embeddings(item.operation) {
+            recompute_note_ids.push(NoteId::new(&item.note_id));
+        }
+
+        results.push(result);
     }
 
     for item in &body.assets {
-        results.push(process_asset_item(&state, item, &body.device_id, now)?);
+        results.push(process_asset_item(state, item, &body.device_id, now)?);
     }
 
-    Ok(Json(SyncPushResponse { results }))
+    Ok(PushBlockingOutcome {
+        response: SyncPushResponse { results },
+        recompute_note_ids,
+    })
 }
 
 fn process_note_item(
@@ -146,6 +179,16 @@ fn process_asset_item(
             }
         }
     })
+}
+
+fn operation_recomputes_embeddings(operation: WireOperation) -> bool {
+    matches!(
+        operation,
+        WireOperation::Create
+            | WireOperation::Update
+            | WireOperation::Move
+            | WireOperation::Restore
+    )
 }
 
 struct DeleteRecordSync<'a> {

@@ -52,4 +52,10 @@ pub enum IndexError {
         /// Invalid raw value read from storage.
         value: String,
     },
+    /// Stored embedding bytes are not a non-empty sequence of little-endian `f32`s.
+    #[error("invalid embedding blob length {len}; expected a non-empty multiple of 4 bytes")]
+    InvalidEmbeddingBlob {
+        /// Raw byte length of the malformed blob.
+        len: usize,
+    },
 }

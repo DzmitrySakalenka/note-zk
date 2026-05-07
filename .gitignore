@@ -23,6 +23,7 @@ target
 /target
 .env
 tmp/
+zk-ai/tests/fixtures/models/
 .vscode/*
 .tasks/.local/
 !.tasks/*.md

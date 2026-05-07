@@ -114,6 +114,26 @@ pub(crate) const CREATE_TABLE_DEVICES: &str = r"CREATE TABLE devices (
   last_sync_cursor INTEGER
 );";
 
+pub(crate) const CREATE_TABLE_NOTE_CHUNKS: &str = r"CREATE TABLE note_chunks (
+  chunk_id TEXT PRIMARY KEY,
+  note_id TEXT NOT NULL REFERENCES notes_index(note_id) ON DELETE CASCADE,
+  ordinal INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  text TEXT NOT NULL,
+  token_count INTEGER,
+  created_at TEXT NOT NULL
+);";
+
+pub(crate) const CREATE_TABLE_CHUNK_EMBEDDINGS: &str = r"CREATE TABLE chunk_embeddings (
+  chunk_id TEXT NOT NULL REFERENCES note_chunks(chunk_id) ON DELETE CASCADE,
+  embedding_model TEXT NOT NULL,
+  provider_id TEXT NOT NULL,
+  dim INTEGER NOT NULL,
+  vector BLOB NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (chunk_id, embedding_model)
+);";
+
 pub(crate) const CREATE_INDEX_NOTES_INDEX_PATH: &str =
     "CREATE INDEX idx_notes_index_path ON notes_index(current_path);";
 pub(crate) const CREATE_INDEX_NOTE_TAGS_TAG: &str =
@@ -128,6 +148,10 @@ pub(crate) const CREATE_INDEX_NOTE_SYNC_STATE_STATUS: &str =
     "CREATE INDEX idx_note_sync_state_status ON note_sync_state(sync_status);";
 pub(crate) const CREATE_INDEX_ASSET_SYNC_STATE_STATUS: &str =
     "CREATE INDEX idx_asset_sync_state_status ON asset_sync_state(sync_status);";
+pub(crate) const CREATE_INDEX_NOTE_CHUNKS_NOTE: &str =
+    "CREATE INDEX idx_note_chunks_note ON note_chunks(note_id, ordinal);";
+pub(crate) const CREATE_INDEX_CHUNK_EMBEDDINGS_MODEL: &str =
+    "CREATE INDEX idx_chunk_embeddings_model ON chunk_embeddings(embedding_model);";
 
 pub(crate) const V1_TABLE_DDL: &[&str] = &[
     CREATE_TABLE_NOTES_INDEX,
@@ -152,4 +176,11 @@ pub(crate) const V1_INDEX_DDL: &[&str] = &[
     CREATE_INDEX_DELETE_RECORDS_RETENTION,
     CREATE_INDEX_NOTE_SYNC_STATE_STATUS,
     CREATE_INDEX_ASSET_SYNC_STATE_STATUS,
+];
+
+pub(crate) const V3_TABLE_DDL: &[&str] = &[CREATE_TABLE_NOTE_CHUNKS, CREATE_TABLE_CHUNK_EMBEDDINGS];
+
+pub(crate) const V3_INDEX_DDL: &[&str] = &[
+    CREATE_INDEX_NOTE_CHUNKS_NOTE,
+    CREATE_INDEX_CHUNK_EMBEDDINGS_MODEL,
 ];

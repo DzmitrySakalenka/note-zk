@@ -20,7 +20,8 @@ fn error_message(error: &zk_server::ServerError) -> String {
         zk_server::ServerError::Conflict(message)
         | zk_server::ServerError::InvalidRequest(message)
         | zk_server::ServerError::NotFound(message)
-        | zk_server::ServerError::ServiceUnavailable(message) => format!("Error: {message}"),
+        | zk_server::ServerError::ServiceUnavailable(message)
+        | zk_server::ServerError::BadGateway(message) => format!("Error: {message}"),
         zk_server::ServerError::Internal(error) => error_chain_message(error.as_ref()),
         _ => format!("Error: {error}"),
     }

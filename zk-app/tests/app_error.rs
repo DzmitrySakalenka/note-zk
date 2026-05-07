@@ -137,6 +137,7 @@ fn preserves_trash_lifecycle_error_payloads() {
     let status_count_overflow = AppError::StatusCountOverflow {
         field: "duplicate_id_count",
     };
+    let collision_retry_exhausted = AppError::CollisionRetryExhausted { attempts: 1024 };
     let retention_not_expired = AppError::RetentionNotExpired {
         target: "notes/fresh.md".to_string(),
         retention_until: "2026-05-01T00:00:00Z".to_string(),
@@ -168,6 +169,10 @@ fn preserves_trash_lifecycle_error_payloads() {
     assert!(matches!(
         status_count_overflow,
         AppError::StatusCountOverflow { field } if field == "duplicate_id_count"
+    ));
+    assert!(matches!(
+        collision_retry_exhausted,
+        AppError::CollisionRetryExhausted { attempts } if attempts == 1024
     ));
     assert!(matches!(
         retention_not_expired,

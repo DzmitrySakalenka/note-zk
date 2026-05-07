@@ -4,9 +4,17 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use tokio::sync::Mutex;
+use zk_ai::selector::ProviderSelector;
 
 use crate::{
-    ServerError, ServerResult, config::ServerConfig, db::ServerDb, service::sweep_expired_sessions,
+    ServerError, ServerResult,
+    ai::{
+        ingest::{DEFAULT_INGEST_DEBOUNCE, IngestEnqueuer},
+        worker::provider_selector_from_config,
+    },
+    config::ServerConfig,
+    db::ServerDb,
+    service::sweep_expired_sessions,
 };
 
 /// Cheap-to-clone server state shared across HTTP handlers.
@@ -17,7 +25,9 @@ pub struct ServerState {
 
 struct StateInner {
     config: ServerConfig,
-    db: ServerDb,
+    db: Arc<ServerDb>,
+    ai_ingest: Option<Arc<IngestEnqueuer>>,
+    ai_selector: Option<Arc<ProviderSelector>>,
     started_at: DateTime<Utc>,
     in_flight_backup_id: Mutex<Option<String>>,
 }
@@ -35,6 +45,24 @@ impl ServerState {
         &self.inner.db
     }
 
+    /// Returns the shared server database handle for background tasks.
+    #[must_use]
+    pub(crate) fn db_handle(&self) -> Arc<ServerDb> {
+        Arc::clone(&self.inner.db)
+    }
+
+    /// Returns the optional AI ingest enqueuer for sync-push note changes.
+    #[must_use]
+    pub fn ai_ingest(&self) -> Option<Arc<IngestEnqueuer>> {
+        self.inner.ai_ingest.as_ref().map(Arc::clone)
+    }
+
+    /// Returns the optional AI provider selector.
+    #[must_use]
+    pub fn ai_selector(&self) -> Option<Arc<ProviderSelector>> {
+        self.inner.ai_selector.as_ref().map(Arc::clone)
+    }
+
     /// Returns the server startup timestamp.
     #[must_use]
     pub fn started_at(&self) -> DateTime<Utc> {
@@ -48,10 +76,21 @@ impl ServerState {
     }
 
     fn from_parts(config: ServerConfig, db: ServerDb, started_at: DateTime<Utc>) -> Self {
+        let db = Arc::new(db);
+        let ai_ingest = config.ai.as_ref().map(|_| {
+            Arc::new(IngestEnqueuer::new(
+                Arc::clone(&db),
+                DEFAULT_INGEST_DEBOUNCE,
+            ))
+        });
+        let ai_selector = config.ai.as_ref().map(provider_selector_from_config);
+
         Self {
             inner: Arc::new(StateInner {
                 config,
                 db,
+                ai_ingest,
+                ai_selector,
                 started_at,
                 in_flight_backup_id: Mutex::new(None),
             }),

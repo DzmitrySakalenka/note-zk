@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, builder::BoolishValueParser};
 use url::Url;
+use zk_domain::ExecutionMode;
 
 /// Top-level command-line parser for the `zk-cli` binary.
 #[derive(Debug, Clone, Parser)]
@@ -23,6 +24,9 @@ pub enum Command {
     /// Remote operator administration commands.
     #[command(subcommand)]
     Admin(AdminCommand),
+    /// Local AI cache commands.
+    #[command(subcommand)]
+    Ai(AiCommand),
     /// Authenticate against a running server for operator tasks.
     #[command(subcommand)]
     Auth(AuthCommand),
@@ -40,6 +44,8 @@ pub enum Command {
     Purge(PurgeArgs),
     /// Run one foreground sync cycle against the configured server.
     Sync(SyncArgs),
+    /// Search the vault. Keyword search is reserved; semantic search is available with `--semantic`.
+    Search(SearchArgs),
     /// Resolve one server-side sync conflict explicitly.
     ResolveConflict(ResolveConflictArgs),
 }
@@ -51,12 +57,22 @@ pub enum AuthCommand {
     IssueToken(IssueTokenArgs),
 }
 
+/// Local AI command set exposed by the CLI.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum AiCommand {
+    /// Recompute the local chunks and embeddings cache for one vault.
+    RecomputeLocal(AiRecomputeLocalArgs),
+}
+
 /// Remote operator administration command set exposed by the CLI.
 #[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
 pub enum AdminCommand {
     /// Inspect and trigger backups through the server admin HTTP API.
     #[command(subcommand)]
     Backup(AdminBackupCommand),
+    /// Inspect and trigger server-side AI recompute jobs.
+    #[command(subcommand)]
+    Ai(AdminAiCommand),
 }
 
 /// Remote backup administration command set exposed by the CLI.
@@ -68,6 +84,24 @@ pub enum AdminBackupCommand {
     Show(AdminBackupShowArgs),
     /// Trigger one server-side backup run.
     Trigger(AdminBackupTriggerArgs),
+}
+
+/// Remote AI administration command set exposed by the CLI.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum AdminAiCommand {
+    /// Enqueue one server-side AI recompute job.
+    Recompute(AdminAiRecomputeArgs),
+    /// List server-side AI jobs.
+    Jobs(AdminAiJobsArgs),
+    /// Cancel one pending server-side AI job.
+    Cancel(AdminAiCancelArgs),
+}
+
+/// Explicit recompute scope accepted by `admin ai recompute`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminAiRecomputeScope {
+    /// Recompute the whole vault.
+    Vault,
 }
 
 /// Arguments for `auth issue-token`.
@@ -120,6 +154,59 @@ pub struct AdminBackupTriggerArgs {
     /// Environment variable that stores the bearer token.
     #[arg(long = "token-env", default_value = "ZK_DEVICE_TOKEN")]
     pub token_env: String,
+}
+
+/// Arguments for `admin ai recompute`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("admin_ai_recompute_scope").args(["scope", "note"]).multiple(false)))]
+pub struct AdminAiRecomputeArgs {
+    /// Recompute scope. Only `vault` is accepted; use `--note` for note-scoped jobs.
+    #[arg(long, value_parser = parse_admin_ai_recompute_scope)]
+    pub scope: Option<AdminAiRecomputeScope>,
+    /// Note id for a note-scoped recompute job.
+    #[arg(long)]
+    pub note: Option<String>,
+    /// Environment variable that stores the bearer token.
+    #[arg(long = "token-env", default_value = "ZK_DEVICE_TOKEN")]
+    pub token_env: String,
+}
+
+/// Arguments for `admin ai jobs`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AdminAiJobsArgs {
+    /// Optional job status filter: pending, in-flight, done, or failed.
+    #[arg(long, value_parser = parse_admin_ai_status)]
+    pub status: Option<String>,
+    /// Maximum number of jobs to return.
+    #[arg(long)]
+    pub limit: Option<u32>,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+    /// Environment variable that stores the bearer token.
+    #[arg(long = "token-env", default_value = "ZK_DEVICE_TOKEN")]
+    pub token_env: String,
+}
+
+/// Arguments for `admin ai cancel`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AdminAiCancelArgs {
+    /// AI job id to cancel.
+    pub job_id: String,
+    /// Environment variable that stores the bearer token.
+    #[arg(long = "token-env", default_value = "ZK_DEVICE_TOKEN")]
+    pub token_env: String,
+}
+
+/// Arguments for `ai recompute-local`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AiRecomputeLocalArgs {
+    /// Directory containing tokenizer, model config, and local model weights.
+    #[arg(long = "model-dir")]
+    pub model_dir: Option<PathBuf>,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Shared per-invocation flags that later map onto `CliOverrides`.
@@ -181,6 +268,42 @@ impl From<bool> for OutputMode {
     fn from(json: bool) -> Self {
         if json { Self::Json } else { Self::Human }
     }
+}
+
+/// Resolved scope for the `purge` subcommand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PurgeScope {
+    /// Purge every expired delete record.
+    AllExpired,
+    /// Purge one explicit note or asset target.
+    Target {
+        /// Note or asset identifier, or vault-relative path.
+        id: String,
+        /// Whether the target should be treated as an asset.
+        as_asset: bool,
+    },
+}
+
+/// Resolved mode for the `sync` subcommand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncMode {
+    /// Run the normal push and pull cycle.
+    Full,
+    /// Force an initial-sync bootstrap call.
+    Bootstrap,
+    /// Run only the push half of the cycle.
+    PushOnly,
+    /// Run only the pull half of the cycle.
+    PullOnly,
+}
+
+/// Resolved conflict strategy for the `resolve-conflict` subcommand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveStrategy {
+    /// Resolve by keeping the local version.
+    KeepLocal,
+    /// Resolve by keeping the remote version.
+    KeepRemote,
 }
 
 /// Arguments for the `scan` subcommand.
@@ -254,17 +377,9 @@ pub struct RestoreArgs {
 
 /// Arguments for the `purge` subcommand.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
-#[command(group(ArgGroup::new("purge_scope").args(["expired", "target"]).multiple(false)))]
-#[allow(clippy::struct_excessive_bools)]
 pub struct PurgeArgs {
-    /// Purge every expired delete record. Default when no target is supplied.
-    #[arg(long)]
-    pub expired: bool,
-    /// Explicit note or asset identifier, or vault-relative path, to purge.
-    pub target: Option<String>,
-    /// Force asset handling instead of the default note handling.
-    #[arg(long = "as-asset")]
-    pub as_asset: bool,
+    #[command(flatten)]
+    scope: PurgeScopeFlags,
     /// Confirm destructive execution.
     #[arg(long)]
     pub yes: bool,
@@ -276,42 +391,150 @@ pub struct PurgeArgs {
     pub json: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("purge_scope").args(["expired", "target"]).multiple(false)))]
+struct PurgeScopeFlags {
+    /// Purge every expired delete record. Default when no target is supplied.
+    #[arg(long)]
+    expired: bool,
+    /// Explicit note or asset identifier, or vault-relative path, to purge.
+    target: Option<String>,
+    /// Force asset handling instead of the default note handling.
+    #[arg(long = "as-asset")]
+    as_asset: bool,
+}
+
+impl PurgeArgs {
+    /// Resolves clap flags and positional target into one purge scope.
+    #[must_use]
+    pub fn scope(&self) -> PurgeScope {
+        match (&self.scope.target, self.scope.expired) {
+            (Some(id), _) => PurgeScope::Target {
+                id: id.clone(),
+                as_asset: self.scope.as_asset,
+            },
+            (None, _) => PurgeScope::AllExpired,
+        }
+    }
+}
+
 /// Arguments for the `sync` subcommand.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
-#[command(group(ArgGroup::new("sync_mode").args(["push_only", "pull_only", "bootstrap"]).multiple(false)))]
-#[allow(clippy::struct_excessive_bools)]
 pub struct SyncArgs {
+    #[command(flatten)]
+    mode: SyncModeFlags,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("sync_mode").args(["push_only", "pull_only", "bootstrap"]).multiple(false)))]
+struct SyncModeFlags {
     /// Force one initial-sync bootstrap call before push/pull.
     #[arg(long)]
-    pub bootstrap: bool,
+    bootstrap: bool,
     /// Run only the push half of the cycle.
     #[arg(long = "push-only")]
-    pub push_only: bool,
+    push_only: bool,
     /// Run only the pull half of the cycle.
     #[arg(long = "pull-only")]
-    pub pull_only: bool,
-    /// Render compact JSON to stdout.
+    pull_only: bool,
+}
+
+impl SyncArgs {
+    /// Resolves clap flags into one sync mode.
+    #[must_use]
+    pub fn mode(&self) -> SyncMode {
+        if self.mode.bootstrap {
+            SyncMode::Bootstrap
+        } else if self.mode.push_only {
+            SyncMode::PushOnly
+        } else if self.mode.pull_only {
+            SyncMode::PullOnly
+        } else {
+            SyncMode::Full
+        }
+    }
+}
+
+/// Arguments for the `search` subcommand.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct SearchArgs {
+    /// Enable semantic search. Plain keyword search is reserved for a future command.
+    #[arg(long)]
+    pub semantic: bool,
+    /// Free-text query to search for.
+    pub query: String,
+    /// Maximum number of hits to return.
+    #[arg(long = "top-k", default_value_t = 10, value_parser = parse_top_k)]
+    pub top_k: usize,
+    /// AI execution mode: connected, offline, or auto.
+    #[arg(long, default_value = "auto")]
+    pub mode: ExecutionMode,
+    /// Render pretty JSON to stdout.
     #[arg(long)]
     pub json: bool,
 }
 
 /// Arguments for the `resolve-conflict` subcommand.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
-#[command(group(ArgGroup::new("resolve_kind").args(["keep_local", "keep_remote"]).required(true).multiple(false)))]
-#[allow(clippy::struct_excessive_bools)]
 pub struct ResolveConflictArgs {
     /// Identifier of the conflicting note or asset.
     pub target: String,
     /// Treat target as an asset id rather than a note id.
     #[arg(long = "as-asset")]
     pub as_asset: bool,
-    /// Resolve by keeping the local version.
-    #[arg(long = "keep-local")]
-    pub keep_local: bool,
-    /// Resolve by keeping the remote version.
-    #[arg(long = "keep-remote")]
-    pub keep_remote: bool,
+    #[command(flatten)]
+    strategy: ResolveStrategyFlags,
     /// Render compact JSON to stdout.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("resolve_kind").args(["keep_local", "keep_remote"]).required(true).multiple(false)))]
+struct ResolveStrategyFlags {
+    /// Resolve by keeping the local version.
+    #[arg(long = "keep-local")]
+    keep_local: bool,
+    /// Resolve by keeping the remote version.
+    #[arg(long = "keep-remote")]
+    keep_remote: bool,
+}
+
+impl ResolveConflictArgs {
+    /// Resolves clap flags into one conflict resolution strategy.
+    #[must_use]
+    pub fn strategy(&self) -> ResolveStrategy {
+        match (self.strategy.keep_local, self.strategy.keep_remote) {
+            (true, _) => ResolveStrategy::KeepLocal,
+            _ => ResolveStrategy::KeepRemote,
+        }
+    }
+}
+
+fn parse_top_k(value: &str) -> Result<usize, String> {
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|error| format!("top-k must be an integer: {error}"))?;
+    if parsed > 100 {
+        return Err("top-k must be 100 or less".to_string());
+    }
+
+    Ok(parsed)
+}
+
+fn parse_admin_ai_recompute_scope(value: &str) -> Result<AdminAiRecomputeScope, String> {
+    match value {
+        "vault" => Ok(AdminAiRecomputeScope::Vault),
+        other => Err(format!("unknown recompute scope: {other}")),
+    }
+}
+
+fn parse_admin_ai_status(value: &str) -> Result<String, String> {
+    match value {
+        "pending" | "in-flight" | "done" | "failed" => Ok(value.to_string()),
+        other => Err(format!("unknown AI job status: {other}")),
+    }
 }

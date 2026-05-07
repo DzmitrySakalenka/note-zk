@@ -4,6 +4,7 @@
 #![doc = "HTTP server for the filesystem-first knowledge system. Hosts sync endpoints and supporting services."]
 
 mod admin;
+pub mod ai;
 pub mod auth;
 mod cli;
 pub mod config;
@@ -47,6 +48,7 @@ fn run_serve() -> ServerResult<()> {
     initialize_tracing(&config.log_filter)?;
 
     let state = state::bootstrap_with_config(config)?;
+    log_if_ai_disabled(&state);
     warn_if_auth_disabled(&state)?;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -68,6 +70,12 @@ fn initialize_tracing(log_filter: &str) -> ServerResult<()> {
         .map_err(ServerError::Internal)?;
 
     Ok(())
+}
+
+fn log_if_ai_disabled(state: &state::ServerState) {
+    if state.config().ai.is_none() {
+        tracing::info!("ai disabled: no [ai] section in config");
+    }
 }
 
 fn warn_if_auth_disabled(state: &state::ServerState) -> ServerResult<()> {
