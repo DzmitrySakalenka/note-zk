@@ -134,12 +134,46 @@ pub struct ResolveConflictJsonOutput {
     pub payload: ResolveConflictCommandPayload,
 }
 
+/// Converts a `usize` count into the CLI's stable `u32` output shape.
+#[must_use]
+pub fn saturating_output_count(field: &'static str, count: usize) -> u32 {
+    if let Ok(value) = u32::try_from(count) {
+        return value;
+    }
+
+    tracing::warn!(
+        field,
+        count,
+        saturated = u32::MAX,
+        "cli output count exceeded u32::MAX; saturating"
+    );
+    u32::MAX
+}
+
 /// Derives the user-facing `scan` counters from a full `ScanOutcome`.
 #[must_use]
 pub fn build_scan_summary(scan_outcome: &ScanOutcome) -> ScanSummary {
+    let unresolved_links = scan_outcome
+        .parsed_indexes
+        .iter()
+        .map(|parsed_index| {
+            parsed_index
+                .outbound_note_links
+                .iter()
+                .filter(|link| link.target_note_id.is_none())
+                .count()
+        })
+        .sum();
+
     ScanSummary {
-        notes_scanned: scan_outcome.scan_result.notes.len() as u32,
-        assets_scanned: scan_outcome.scan_result.assets.len() as u32,
+        notes_scanned: saturating_output_count(
+            "notes_scanned",
+            scan_outcome.scan_result.notes.len(),
+        ),
+        assets_scanned: saturating_output_count(
+            "assets_scanned",
+            scan_outcome.scan_result.assets.len(),
+        ),
         errors: count_findings(
             &scan_outcome.validation_report.findings,
             &DiagnosticLevel::Error,
@@ -152,18 +186,11 @@ pub fn build_scan_summary(scan_outcome: &ScanOutcome) -> ScanSummary {
             &scan_outcome.validation_report.findings,
             &DiagnosticLevel::Info,
         ),
-        duplicate_ids: scan_outcome.scan_result.duplicate_ids.len() as u32,
-        unresolved_links: scan_outcome
-            .parsed_indexes
-            .iter()
-            .map(|parsed_index| {
-                parsed_index
-                    .outbound_note_links
-                    .iter()
-                    .filter(|link| link.target_note_id.is_none())
-                    .count() as u32
-            })
-            .sum(),
+        duplicate_ids: saturating_output_count(
+            "duplicate_ids",
+            scan_outcome.scan_result.duplicate_ids.len(),
+        ),
+        unresolved_links: saturating_output_count("unresolved_links", unresolved_links),
     }
 }
 
@@ -257,9 +284,9 @@ pub fn write_doctor_human(out: &mut dyn io::Write, report: &DoctorReport) -> io:
     }
 
     let width = value_width(&[
-        report.errors.len() as u32,
-        report.warnings.len() as u32,
-        report.infos.len() as u32,
+        saturating_output_count("doctor_errors", report.errors.len()),
+        saturating_output_count("doctor_warnings", report.warnings.len()),
+        saturating_output_count("doctor_infos", report.infos.len()),
     ]);
 
     let sections = [
@@ -448,10 +475,20 @@ pub fn write_resolve_conflict_human(
 }
 
 fn count_findings(findings: &[ValidationFinding], level: &DiagnosticLevel) -> u32 {
-    findings
+    let count = findings
         .iter()
         .filter(|finding| &finding.level == level)
-        .count() as u32
+        .count();
+
+    saturating_output_count(finding_count_field(level), count)
+}
+
+fn finding_count_field(level: &DiagnosticLevel) -> &'static str {
+    match level {
+        DiagnosticLevel::Error => "errors",
+        DiagnosticLevel::Warning => "warnings",
+        DiagnosticLevel::Info => "infos",
+    }
 }
 
 fn scan_value_width(payload: &ScanCommandPayload) -> usize {
@@ -486,9 +523,9 @@ fn scan_value_width(payload: &ScanCommandPayload) -> usize {
 
 fn value_width(values: &[u32]) -> usize {
     let max_value = values.iter().copied().fold(0, u32::max);
-    max_value
-        .checked_ilog10()
-        .map_or(1, |digits| digits as usize + 1)
+    max_value.checked_ilog10().map_or(1, |digits| {
+        usize::try_from(digits).expect("u32 digit count fits usize") + 1
+    })
 }
 
 fn write_scan_summary_block(
