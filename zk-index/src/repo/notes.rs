@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use rusqlite::{Connection, OptionalExtension};
 use zk_domain::{
     id::{ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
@@ -7,6 +9,30 @@ use zk_domain::{
 use crate::error::IndexError;
 
 const DEFAULT_SERVER_REVISION: i64 = 0;
+const NOTE_COLUMNS: &str = r"    note_id,
+    current_path,
+    title,
+    content_hash,
+    frontmatter_json,
+    created_at,
+    updated_at,
+    trashed_at,
+    deleted_at,
+    is_trashed,
+    is_deleted,
+    last_editor_device_id,
+    server_revision";
+const NOTE_RECORD_COLUMNS: &str = r"    note_id,
+    current_path,
+    content_hash,
+    created_at,
+    updated_at,
+    trashed_at,
+    deleted_at,
+    is_trashed,
+    is_deleted,
+    last_editor_device_id,
+    server_revision";
 const MARK_NOTE_DELETED: &str = r"
 UPDATE notes_index
 SET
@@ -26,21 +52,11 @@ SET
     server_revision = ?3
 WHERE note_id = ?1
 ";
-const INSERT_OR_UPDATE_NOTE: &str = r"
+static INSERT_OR_UPDATE_NOTE: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
 INSERT INTO notes_index (
-    note_id,
-    current_path,
-    title,
-    content_hash,
-    frontmatter_json,
-    created_at,
-    updated_at,
-    trashed_at,
-    deleted_at,
-    is_trashed,
-    is_deleted,
-    last_editor_device_id,
-    server_revision
+{NOTE_COLUMNS}
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, 0, NULL, 0
 )
@@ -52,22 +68,14 @@ ON CONFLICT(note_id) DO UPDATE SET
     updated_at = excluded.updated_at,
     trashed_at = excluded.trashed_at,
     is_trashed = excluded.is_trashed
-";
-const INSERT_OR_UPDATE_NOTE_WITH_SERVER_REVISION: &str = r"
+"
+    )
+});
+static INSERT_OR_UPDATE_NOTE_WITH_SERVER_REVISION: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
 INSERT INTO notes_index (
-    note_id,
-    current_path,
-    title,
-    content_hash,
-    frontmatter_json,
-    created_at,
-    updated_at,
-    trashed_at,
-    deleted_at,
-    is_trashed,
-    is_deleted,
-    last_editor_device_id,
-    server_revision
+{NOTE_COLUMNS}
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, 0, NULL, ?10
 )
@@ -81,56 +89,40 @@ ON CONFLICT(note_id) DO UPDATE SET
     is_trashed = excluded.is_trashed,
     is_deleted = excluded.is_deleted,
     server_revision = excluded.server_revision
-";
+"
+    )
+});
 const DELETE_NOTE_BY_ID: &str = "DELETE FROM notes_index WHERE note_id = ?1";
-const SELECT_NOTE_BY_ID: &str = r"
+static SELECT_NOTE_BY_ID: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
 SELECT
-    note_id,
-    current_path,
-    content_hash,
-    created_at,
-    updated_at,
-    trashed_at,
-    deleted_at,
-    is_trashed,
-    is_deleted,
-    last_editor_device_id,
-    server_revision
+{NOTE_RECORD_COLUMNS}
 FROM notes_index
 WHERE note_id = ?1
-";
-const SELECT_NOTE_BY_PATH: &str = r"
+"
+    )
+});
+static SELECT_NOTE_BY_PATH: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
 SELECT
-    note_id,
-    current_path,
-    content_hash,
-    created_at,
-    updated_at,
-    trashed_at,
-    deleted_at,
-    is_trashed,
-    is_deleted,
-    last_editor_device_id,
-    server_revision
+{NOTE_RECORD_COLUMNS}
 FROM notes_index
 WHERE current_path = ?1
-";
-const LIST_NOTES_SQL: &str = r"
+"
+    )
+});
+static LIST_NOTES_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
 SELECT
-    note_id,
-    current_path,
-    content_hash,
-    created_at,
-    updated_at,
-    trashed_at,
-    deleted_at,
-    is_trashed,
-    is_deleted,
-    last_editor_device_id,
-    server_revision
+{NOTE_RECORD_COLUMNS}
 FROM notes_index
 ORDER BY current_path ASC
-";
+"
+    )
+});
 const DELETE_TAGS_FOR_NOTE: &str = "DELETE FROM note_tags WHERE note_id = ?1";
 const INSERT_TAG_FOR_NOTE: &str = "INSERT INTO note_tags (note_id, tag) VALUES (?1, ?2)";
 const DELETE_ALIASES_FOR_NOTE: &str = "DELETE FROM note_aliases WHERE note_id = ?1";
@@ -202,7 +194,7 @@ impl NoteRepo {
     /// Returns [`IndexError`] if the `SQLite` upsert fails.
     pub fn upsert_note(conn: &Connection, params: UpsertNoteParams<'_>) -> Result<(), IndexError> {
         conn.execute(
-            INSERT_OR_UPDATE_NOTE,
+            INSERT_OR_UPDATE_NOTE.as_str(),
             rusqlite::params![
                 params.note_id.as_str(),
                 params.path.as_str(),
@@ -233,7 +225,7 @@ impl NoteRepo {
         server_revision: &ServerRevision,
     ) -> Result<(), IndexError> {
         conn.execute(
-            INSERT_OR_UPDATE_NOTE_WITH_SERVER_REVISION,
+            INSERT_OR_UPDATE_NOTE_WITH_SERVER_REVISION.as_str(),
             rusqlite::params![
                 params.note_id.as_str(),
                 params.path.as_str(),
@@ -317,12 +309,16 @@ impl NoteRepo {
     ///
     /// Returns [`IndexError`] if the query fails or row decoding is invalid.
     pub fn get_note(conn: &Connection, note_id: &NoteId) -> Result<Option<NoteRecord>, IndexError> {
-        conn.query_row(SELECT_NOTE_BY_ID, [note_id.as_str()], decode_note_record)
-            .optional()
-            .map_err(|source| IndexError::Sqlite {
-                source,
-                context: "get note by id".to_string(),
-            })
+        conn.query_row(
+            SELECT_NOTE_BY_ID.as_str(),
+            [note_id.as_str()],
+            decode_note_record,
+        )
+        .optional()
+        .map_err(|source| IndexError::Sqlite {
+            source,
+            context: "get note by id".to_string(),
+        })
     }
 
     /// Fetches indexed title/frontmatter metadata for one note by `note_id`.
@@ -356,12 +352,16 @@ impl NoteRepo {
         conn: &Connection,
         path: &RelativePath,
     ) -> Result<Option<NoteRecord>, IndexError> {
-        conn.query_row(SELECT_NOTE_BY_PATH, [path.as_str()], decode_note_record)
-            .optional()
-            .map_err(|source| IndexError::Sqlite {
-                source,
-                context: "get note by path".to_string(),
-            })
+        conn.query_row(
+            SELECT_NOTE_BY_PATH.as_str(),
+            [path.as_str()],
+            decode_note_record,
+        )
+        .optional()
+        .map_err(|source| IndexError::Sqlite {
+            source,
+            context: "get note by path".to_string(),
+        })
     }
 
     /// Lists all note rows in deterministic path order.
@@ -370,12 +370,12 @@ impl NoteRepo {
     ///
     /// Returns [`IndexError`] if the query fails or row decoding is invalid.
     pub fn list_notes(conn: &Connection) -> Result<Vec<NoteRecord>, IndexError> {
-        let mut statement = conn
-            .prepare(LIST_NOTES_SQL)
-            .map_err(|source| IndexError::Sqlite {
-                source,
-                context: "prepare list notes query".to_string(),
-            })?;
+        let mut statement =
+            conn.prepare(LIST_NOTES_SQL.as_str())
+                .map_err(|source| IndexError::Sqlite {
+                    source,
+                    context: "prepare list notes query".to_string(),
+                })?;
         let rows = statement
             .query_map([], decode_note_record)
             .map_err(|source| IndexError::Sqlite {
