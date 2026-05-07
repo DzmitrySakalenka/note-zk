@@ -39,8 +39,8 @@ pub(crate) fn recompute(
 
     writeln!(
         stdout,
-        "Enqueued recompute job {} (scope: {scope_label})",
-        response.job_id
+        "Enqueued recompute job {} (scope: {scope_label}, status: {})",
+        response.job_id, response.status
     )
     .context("while attempting to write admin AI recompute output")
     .map_err(CliError::Internal)?;
@@ -167,19 +167,60 @@ fn write_jobs_human(jobs: &[ListedJob]) -> io::Result<()> {
     }
 
     for job in jobs {
+        let kind = job_kind_display(job);
+        let status = job_status_display(job);
+        let details = job_time_details(job);
+
         writeln!(
             stdout,
             "Job {}   {}   {}   {}/{}   {}",
             job.job_id,
-            job.kind,
-            job.status,
+            kind,
+            status,
             job.attempts,
             DEFAULT_MAX_ATTEMPTS_DISPLAY,
-            job.enqueued_at
+            details.join("   ")
         )?;
     }
 
     Ok(())
+}
+
+fn job_kind_display(job: &ListedJob) -> String {
+    if job.kind == "recompute_note" {
+        if let Some(note_id) = &job.note_id {
+            return format!("{}[{}]", job.kind, note_id);
+        }
+    }
+
+    job.kind.clone()
+}
+
+fn job_status_display(job: &ListedJob) -> String {
+    if job.status == "failed" {
+        if let Some(last_error) = &job.last_error {
+            return format!("{}: {}", job.status, last_error);
+        }
+    }
+
+    job.status.clone()
+}
+
+fn job_time_details(job: &ListedJob) -> Vec<String> {
+    let mut details = vec![format!("enqueued at {}", job.enqueued_at)];
+
+    if job.status == "in_flight" {
+        if let Some(started_at) = &job.started_at {
+            details.push(format!("started at {started_at}"));
+        }
+    }
+    if job.status == "done" {
+        if let Some(finished_at) = &job.finished_at {
+            details.push(format!("finished at {finished_at}"));
+        }
+    }
+
+    details
 }
 
 fn map_transport_error(error: &SyncError, token_env: &str) -> CliError {
@@ -228,7 +269,6 @@ struct ApiErrorBody {
 #[derive(Debug, Deserialize)]
 struct RecomputeResponse {
     job_id: String,
-    #[allow(dead_code)]
     status: String,
 }
 
@@ -241,15 +281,11 @@ struct CancelResponse {
 struct ListedJob {
     job_id: String,
     kind: String,
-    #[allow(dead_code)]
     note_id: Option<String>,
     status: String,
     attempts: u32,
-    #[allow(dead_code)]
     last_error: Option<String>,
     enqueued_at: String,
-    #[allow(dead_code)]
     started_at: Option<String>,
-    #[allow(dead_code)]
     finished_at: Option<String>,
 }

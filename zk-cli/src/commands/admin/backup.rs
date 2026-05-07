@@ -310,6 +310,7 @@ fn write_manifest_human(manifest: &BackupManifest) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
 
     writeln!(stdout, "backup_id: {}", manifest.backup_id)?;
+    writeln!(stdout, "schema_version: {}", manifest.schema_version)?;
     writeln!(stdout, "created_at: {}", manifest.created_at)?;
     writeln!(stdout, "archive: {}", manifest.archive.file_name)?;
     writeln!(stdout, "sha256: {}", manifest.archive.sha256_hex)?;
@@ -396,7 +397,6 @@ struct ListedBackup {
     encryption_type: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct BackupManifest {
     schema_version: u32,

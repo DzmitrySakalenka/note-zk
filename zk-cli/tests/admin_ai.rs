@@ -14,6 +14,9 @@ const TOKEN: &str = "admin-token";
 const JOB_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S6S";
 const NOTE_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S6R";
 const ENQUEUED_AT: &str = "2026-05-04T12:34:56Z";
+const STARTED_AT: &str = "2026-05-04T12:35:01Z";
+const FINISHED_AT: &str = "2026-05-04T12:36:30Z";
+const LAST_ERROR: &str = "provider unavailable";
 
 #[tokio::test(flavor = "current_thread")]
 async fn recompute_defaults_to_vault_scope_and_posts_body() {
@@ -26,7 +29,7 @@ async fn recompute_defaults_to_vault_scope_and_posts_body() {
         .assert()
         .success()
         .stdout(predicate::str::contains(format!(
-            "Enqueued recompute job {JOB_ID} (scope: vault)"
+            "Enqueued recompute job {JOB_ID} (scope: vault, status: pending)"
         )))
         .stderr(predicate::str::is_empty());
 
@@ -62,7 +65,7 @@ async fn recompute_note_posts_note_body() {
         .assert()
         .success()
         .stdout(predicate::str::contains(format!(
-            "Enqueued recompute job {JOB_ID} (scope: note {NOTE_ID})"
+            "Enqueued recompute job {JOB_ID} (scope: note {NOTE_ID}, status: pending)"
         )))
         .stderr(predicate::str::is_empty());
 
@@ -92,7 +95,13 @@ async fn jobs_status_filter_and_limit_pass_through() {
         .and(query_param("status", "in_flight"))
         .and(query_param("limit", "2"))
         .and(header("authorization", format!("Bearer {TOKEN}")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([job("in_flight")])))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!([job_with_times(
+                "in_flight",
+                Some(STARTED_AT),
+                None,
+            )])),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -109,10 +118,38 @@ async fn jobs_status_filter_and_limit_pass_through() {
     let stdout = stdout_text(assert.get_output());
 
     assert!(stdout.contains(&format!("Job {JOB_ID}")));
-    assert!(stdout.contains("recompute_note"));
+    assert!(stdout.contains(&format!("recompute_note[{NOTE_ID}]")));
     assert!(stdout.contains("in_flight"));
     assert!(stdout.contains("1/3"));
     assert!(stdout.contains(ENQUEUED_AT));
+    assert!(stdout.contains(&format!("started at {STARTED_AT}")));
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn jobs_human_prints_failure_and_completion_details() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/admin/ai/jobs"))
+        .and(header("authorization", format!("Bearer {TOKEN}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            failed_job(),
+            job_with_times("done", None, Some(FINISHED_AT)),
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let assert = admin_ai_command(&server)
+        .arg("jobs")
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = stdout_text(assert.get_output());
+
+    assert!(stdout.contains(&format!("failed: {LAST_ERROR}")));
+    assert!(stdout.contains(&format!("finished at {FINISHED_AT}")));
     server.verify().await;
 }
 
@@ -243,16 +280,38 @@ async fn mount_cancel(server: &MockServer, cancelled: bool) {
 }
 
 fn job(status: &str) -> Value {
+    job_with_fields(status, None, None, None)
+}
+
+fn job_with_times(status: &str, started_at: Option<&str>, finished_at: Option<&str>) -> Value {
+    job_with_fields(status, None, started_at, finished_at)
+}
+
+fn failed_job() -> Value {
+    job_with_fields(
+        "failed",
+        Some(LAST_ERROR),
+        Some(STARTED_AT),
+        Some(FINISHED_AT),
+    )
+}
+
+fn job_with_fields(
+    status: &str,
+    last_error: Option<&str>,
+    started_at: Option<&str>,
+    finished_at: Option<&str>,
+) -> Value {
     json!({
         "job_id": JOB_ID,
         "kind": "recompute_note",
         "note_id": NOTE_ID,
         "status": status,
         "attempts": 1,
-        "last_error": null,
+        "last_error": last_error,
         "enqueued_at": ENQUEUED_AT,
-        "started_at": null,
-        "finished_at": null,
+        "started_at": started_at,
+        "finished_at": finished_at,
     })
 }
 
