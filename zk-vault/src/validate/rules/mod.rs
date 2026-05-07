@@ -14,7 +14,6 @@ pub(crate) mod suspicious_path_naming;
 pub(crate) mod title_derived_from_filename;
 pub(crate) mod title_derived_from_h1;
 pub(crate) mod title_h1_mismatch;
-#[allow(dead_code)]
 pub(crate) mod trashed_unknown_identity;
 pub(crate) mod unresolved_link;
 

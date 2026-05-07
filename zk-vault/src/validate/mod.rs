@@ -10,7 +10,7 @@ use zk_domain::{
 use crate::{NormalizationResult, VaultScanResult, resolve_vault_links};
 
 mod overrides;
-mod rules;
+pub(crate) mod rules;
 mod summary;
 mod support;
 
