@@ -194,6 +194,8 @@ pub fn verify_password(
     password: &str,
 ) -> ServerResult<VerifiedUser> {
     let Some(row) = UserRepo::get_password_hash_for_login(conn, username)? else {
+        // Constant-time defence: keep Argon2 verification on the missing-user
+        // path so response time does not leak account existence.
         let _ = verify_password_hash(password, missing_user_dummy_hash());
         return Err(ServerError::Unauthorized);
     };
