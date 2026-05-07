@@ -99,7 +99,7 @@ pub fn plan_local_changes(ctx: &PlannerContext<'_>) -> SyncResult<Vec<PlannedOpe
             continue;
         }
 
-        if let Some(operation) = plan_note_change(ctx, &note)? {
+        if let Some(operation) = plan_note_change(ctx, note)? {
             planned.push(PlannedOperation::Note(operation));
         }
     }
@@ -109,13 +109,13 @@ pub fn plan_local_changes(ctx: &PlannerContext<'_>) -> SyncResult<Vec<PlannedOpe
             continue;
         }
 
-        if let Some(operation) = plan_asset_change(ctx, &asset)? {
+        if let Some(operation) = plan_asset_change(ctx, asset)? {
             planned.push(PlannedOperation::Asset(operation));
         }
     }
 
     for delete_record in DeleteRecordRepo::list_all(ctx.conn)? {
-        if let Some(operation) = plan_delete_change(ctx, &delete_record)? {
+        if let Some(operation) = plan_delete_change(ctx, delete_record)? {
             planned.push(operation);
         }
     }
@@ -165,16 +165,10 @@ pub(crate) fn plan_all_local_items_as_creates(
 
 fn plan_note_change(
     ctx: &PlannerContext<'_>,
-    note: &NoteRecord,
+    note: NoteRecord,
 ) -> SyncResult<Option<NotePlannedOperation>> {
     let Some(state) = note_sync_state_for_device(ctx, &note.note_id)? else {
-        return Ok(Some(NotePlannedOperation {
-            note_id: note.note_id.clone(),
-            current_path: note.current_path.clone(),
-            op: PlannedOp::Create,
-            local_hash: note.content_hash.clone(),
-            base_server_revision: None,
-        }));
+        return Ok(Some(note_planned_operation(note, PlannedOp::Create, None)));
     };
 
     if state.sync_status == SyncStatus::Conflict {
@@ -182,13 +176,7 @@ fn plan_note_change(
     }
 
     if state.last_synced_hash.is_none() && state.last_known_server_revision.is_none() {
-        return Ok(Some(NotePlannedOperation {
-            note_id: note.note_id.clone(),
-            current_path: note.current_path.clone(),
-            op: PlannedOp::Create,
-            local_hash: note.content_hash.clone(),
-            base_server_revision: None,
-        }));
+        return Ok(Some(note_planned_operation(note, PlannedOp::Create, None)));
     }
 
     let last_synced_in_trash = state
@@ -200,56 +188,51 @@ fn plan_note_change(
         && state.pending_operation != Some(PendingOperation::Trash)
         && !last_synced_in_trash
     {
-        return Ok(Some(NotePlannedOperation {
-            note_id: note.note_id.clone(),
-            current_path: note.current_path.clone(),
-            op: PlannedOp::Trash,
-            local_hash: note.content_hash.clone(),
-            base_server_revision: state.last_known_server_revision.clone(),
-        }));
+        return Ok(Some(note_planned_operation(
+            note,
+            PlannedOp::Trash,
+            state.last_known_server_revision,
+        )));
     }
 
     if !note.is_trashed && last_synced_in_trash {
-        return Ok(Some(NotePlannedOperation {
-            note_id: note.note_id.clone(),
-            current_path: note.current_path.clone(),
-            op: PlannedOp::Restore,
-            local_hash: note.content_hash.clone(),
-            base_server_revision: state.last_known_server_revision.clone(),
-        }));
+        return Ok(Some(note_planned_operation(
+            note,
+            PlannedOp::Restore,
+            state.last_known_server_revision,
+        )));
     }
 
-    if let Some(last_synced_path) = &state.last_synced_path {
-        if note.current_path != *last_synced_path
-            && note.is_trashed == path_is_under_trash(last_synced_path, ctx.trash_dir)
+    if let Some(last_synced_path) = state.last_synced_path {
+        if note.current_path != last_synced_path
+            && note.is_trashed == path_is_under_trash(&last_synced_path, ctx.trash_dir)
             && state.last_synced_hash.as_ref() == Some(&note.content_hash)
         {
-            return Ok(Some(NotePlannedOperation {
-                note_id: note.note_id.clone(),
-                current_path: note.current_path.clone(),
-                op: PlannedOp::Move {
-                    from: last_synced_path.clone(),
+            return Ok(Some(note_planned_operation(
+                note,
+                PlannedOp::Move {
+                    from: last_synced_path,
                 },
-                local_hash: note.content_hash.clone(),
-                base_server_revision: state.last_known_server_revision.clone(),
-            }));
+                state.last_known_server_revision,
+            )));
         }
-    }
 
-    if !note.is_trashed
-        && state.last_synced_hash.as_ref() != Some(&note.content_hash)
-        && state
-            .last_synced_path
-            .as_ref()
-            .is_none_or(|path| *path == note.current_path)
-    {
-        return Ok(Some(NotePlannedOperation {
-            note_id: note.note_id.clone(),
-            current_path: note.current_path.clone(),
-            op: PlannedOp::Update,
-            local_hash: note.content_hash.clone(),
-            base_server_revision: state.last_known_server_revision.clone(),
-        }));
+        if !note.is_trashed
+            && state.last_synced_hash.as_ref() != Some(&note.content_hash)
+            && note.current_path == last_synced_path
+        {
+            return Ok(Some(note_planned_operation(
+                note,
+                PlannedOp::Update,
+                state.last_known_server_revision,
+            )));
+        }
+    } else if !note.is_trashed && state.last_synced_hash.as_ref() != Some(&note.content_hash) {
+        return Ok(Some(note_planned_operation(
+            note,
+            PlannedOp::Update,
+            state.last_known_server_revision,
+        )));
     }
 
     Ok(None)
@@ -257,16 +240,14 @@ fn plan_note_change(
 
 fn plan_asset_change(
     ctx: &PlannerContext<'_>,
-    asset: &AssetRecord,
+    asset: AssetRecord,
 ) -> SyncResult<Option<AssetPlannedOperation>> {
     let Some(state) = asset_sync_state_for_device(ctx, &asset.asset_id)? else {
-        return Ok(Some(AssetPlannedOperation {
-            asset_id: asset.asset_id.clone(),
-            current_path: asset.current_path.clone(),
-            op: PlannedOp::Create,
-            local_hash: asset.content_hash.clone(),
-            base_server_revision: None,
-        }));
+        return Ok(Some(asset_planned_operation(
+            asset,
+            PlannedOp::Create,
+            None,
+        )));
     };
 
     if state.sync_status == SyncStatus::Conflict {
@@ -282,72 +263,95 @@ fn plan_asset_change(
         && state.pending_operation != Some(PendingOperation::Trash)
         && !last_synced_in_trash
     {
-        return Ok(Some(AssetPlannedOperation {
-            asset_id: asset.asset_id.clone(),
-            current_path: asset.current_path.clone(),
-            op: PlannedOp::Trash,
-            local_hash: asset.content_hash.clone(),
-            base_server_revision: state.last_known_server_revision.clone(),
-        }));
+        return Ok(Some(asset_planned_operation(
+            asset,
+            PlannedOp::Trash,
+            state.last_known_server_revision,
+        )));
     }
 
     if !asset.is_trashed && last_synced_in_trash {
-        return Ok(Some(AssetPlannedOperation {
-            asset_id: asset.asset_id.clone(),
-            current_path: asset.current_path.clone(),
-            op: PlannedOp::Restore,
-            local_hash: asset.content_hash.clone(),
-            base_server_revision: state.last_known_server_revision.clone(),
-        }));
+        return Ok(Some(asset_planned_operation(
+            asset,
+            PlannedOp::Restore,
+            state.last_known_server_revision,
+        )));
     }
 
-    if let Some(last_synced_path) = &state.last_synced_path {
-        if asset.current_path != *last_synced_path
-            && asset.is_trashed == path_is_under_trash(last_synced_path, ctx.trash_dir)
+    if let Some(last_synced_path) = state.last_synced_path {
+        if asset.current_path != last_synced_path
+            && asset.is_trashed == path_is_under_trash(&last_synced_path, ctx.trash_dir)
             && state.last_synced_hash.as_ref() == Some(&asset.content_hash)
         {
-            return Ok(Some(AssetPlannedOperation {
-                asset_id: asset.asset_id.clone(),
-                current_path: asset.current_path.clone(),
-                op: PlannedOp::Move {
-                    from: last_synced_path.clone(),
+            return Ok(Some(asset_planned_operation(
+                asset,
+                PlannedOp::Move {
+                    from: last_synced_path,
                 },
-                local_hash: asset.content_hash.clone(),
-                base_server_revision: state.last_known_server_revision.clone(),
-            }));
+                state.last_known_server_revision,
+            )));
         }
-    }
 
-    if !asset.is_trashed
-        && state.last_synced_hash.as_ref() != Some(&asset.content_hash)
-        && state
-            .last_synced_path
-            .as_ref()
-            .is_none_or(|path| *path == asset.current_path)
-    {
-        return Ok(Some(AssetPlannedOperation {
-            asset_id: asset.asset_id.clone(),
-            current_path: asset.current_path.clone(),
-            op: PlannedOp::Update,
-            local_hash: asset.content_hash.clone(),
-            base_server_revision: state.last_known_server_revision.clone(),
-        }));
+        if !asset.is_trashed
+            && state.last_synced_hash.as_ref() != Some(&asset.content_hash)
+            && asset.current_path == last_synced_path
+        {
+            return Ok(Some(asset_planned_operation(
+                asset,
+                PlannedOp::Update,
+                state.last_known_server_revision,
+            )));
+        }
+    } else if !asset.is_trashed && state.last_synced_hash.as_ref() != Some(&asset.content_hash) {
+        return Ok(Some(asset_planned_operation(
+            asset,
+            PlannedOp::Update,
+            state.last_known_server_revision,
+        )));
     }
 
     Ok(None)
 }
 
+fn note_planned_operation(
+    note: NoteRecord,
+    op: PlannedOp,
+    base_server_revision: Option<ServerRevision>,
+) -> NotePlannedOperation {
+    NotePlannedOperation {
+        note_id: note.note_id,
+        current_path: note.current_path,
+        op,
+        local_hash: note.content_hash,
+        base_server_revision,
+    }
+}
+
+fn asset_planned_operation(
+    asset: AssetRecord,
+    op: PlannedOp,
+    base_server_revision: Option<ServerRevision>,
+) -> AssetPlannedOperation {
+    AssetPlannedOperation {
+        asset_id: asset.asset_id,
+        current_path: asset.current_path,
+        op,
+        local_hash: asset.content_hash,
+        base_server_revision,
+    }
+}
+
 fn plan_delete_change(
     ctx: &PlannerContext<'_>,
-    delete_record: &DeleteRecord,
+    delete_record: DeleteRecord,
 ) -> SyncResult<Option<PlannedOperation>> {
     if delete_record.deleted_at.is_none() || delete_record.delete_revision.is_some() {
         return Ok(None);
     }
 
-    match &delete_record.target {
+    match delete_record.target {
         DeleteRecordTarget::Note(note_id) => {
-            let state = note_sync_state_for_device(ctx, note_id)?;
+            let state = note_sync_state_for_device(ctx, &note_id)?;
             if state
                 .as_ref()
                 .is_some_and(|sync_state| sync_state.sync_status == SyncStatus::Conflict)
@@ -355,12 +359,12 @@ fn plan_delete_change(
                 return Ok(None);
             }
 
-            let note = NoteRepo::get_note(ctx.conn, note_id)?
+            let note = NoteRepo::get_note(ctx.conn, &note_id)?
                 .ok_or_else(|| SyncError::ItemMissing(note_id.to_string()))?;
 
             Ok(Some(PlannedOperation::Note(NotePlannedOperation {
-                note_id: note_id.clone(),
-                current_path: delete_record.original_path.clone(),
+                note_id,
+                current_path: delete_record.original_path,
                 op: PlannedOp::Delete,
                 local_hash: note.content_hash,
                 base_server_revision: state
@@ -368,7 +372,7 @@ fn plan_delete_change(
             })))
         }
         DeleteRecordTarget::Asset(asset_id) => {
-            let state = asset_sync_state_for_device(ctx, asset_id)?;
+            let state = asset_sync_state_for_device(ctx, &asset_id)?;
             if state
                 .as_ref()
                 .is_some_and(|sync_state| sync_state.sync_status == SyncStatus::Conflict)
@@ -376,12 +380,12 @@ fn plan_delete_change(
                 return Ok(None);
             }
 
-            let asset = AssetRepo::get_asset(ctx.conn, asset_id)?
+            let asset = AssetRepo::get_asset(ctx.conn, &asset_id)?
                 .ok_or_else(|| SyncError::ItemMissing(asset_id.to_string()))?;
 
             Ok(Some(PlannedOperation::Asset(AssetPlannedOperation {
-                asset_id: asset_id.clone(),
-                current_path: delete_record.original_path.clone(),
+                asset_id,
+                current_path: delete_record.original_path,
                 op: PlannedOp::Delete,
                 local_hash: asset.content_hash,
                 base_server_revision: state

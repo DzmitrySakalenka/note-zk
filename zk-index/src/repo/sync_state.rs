@@ -70,6 +70,35 @@ const LIST_NOTE_IDS_BY_SYNC_STATUS: &str =
     "SELECT note_id FROM note_sync_state WHERE sync_status = ?1 ORDER BY note_id ASC";
 const LIST_ASSET_IDS_BY_SYNC_STATUS: &str =
     "SELECT asset_id FROM asset_sync_state WHERE sync_status = ?1 ORDER BY asset_id ASC";
+const SYNC_STATUS_SYNCED: &str = "synced";
+
+/// Borrowed fields for inserting a synced note sync-state row.
+pub struct SyncedNoteStateInput<'a> {
+    /// Stable note identifier.
+    pub item_id: &'a NoteId,
+    /// Device that owns the local sync-state row.
+    pub device_id: &'a DeviceId,
+    /// Hash that is now both local and remote baseline.
+    pub content_hash: &'a ContentHash,
+    /// Last path acknowledged by the server.
+    pub path: &'a RelativePath,
+    /// Last server revision acknowledged by the client.
+    pub server_revision: &'a ServerRevision,
+}
+
+/// Borrowed fields for inserting a synced asset sync-state row.
+pub struct SyncedAssetStateInput<'a> {
+    /// Stable asset identifier.
+    pub item_id: &'a AssetId,
+    /// Device that owns the local sync-state row.
+    pub device_id: &'a DeviceId,
+    /// Hash that is now both local and remote baseline.
+    pub content_hash: &'a ContentHash,
+    /// Last path acknowledged by the server.
+    pub path: &'a RelativePath,
+    /// Last server revision acknowledged by the client.
+    pub server_revision: &'a ServerRevision,
+}
 
 /// Repository for per-item local sync state rows.
 pub struct SyncStateRepo;
@@ -112,6 +141,37 @@ impl SyncStateRepo {
         .map_err(|source| IndexError::Sqlite {
             source,
             context: "upsert note sync state".to_string(),
+        })
+    }
+
+    /// Inserts or replaces one synced note state row from borrowed fields.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if `SQLite` persistence fails.
+    pub fn upsert_synced_note_state(
+        conn: &Connection,
+        input: &SyncedNoteStateInput<'_>,
+    ) -> Result<(), IndexError> {
+        conn.execute(
+            INSERT_OR_REPLACE_NOTE_SYNC_STATE,
+            rusqlite::params![
+                input.item_id.as_str(),
+                input.device_id.as_str(),
+                input.content_hash.as_str(),
+                input.content_hash.as_str(),
+                input.path.as_str(),
+                input.server_revision.value(),
+                SYNC_STATUS_SYNCED,
+                Option::<&str>::None,
+                Option::<&str>::None,
+                Option::<&str>::None,
+            ],
+        )
+        .map(|_| ())
+        .map_err(|source| IndexError::Sqlite {
+            source,
+            context: "upsert synced note state".to_string(),
         })
     }
 
@@ -176,6 +236,37 @@ impl SyncStateRepo {
         })
     }
 
+    /// Inserts or replaces one synced asset state row from borrowed fields.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if `SQLite` persistence fails.
+    pub fn upsert_synced_asset_state(
+        conn: &Connection,
+        input: &SyncedAssetStateInput<'_>,
+    ) -> Result<(), IndexError> {
+        conn.execute(
+            INSERT_OR_REPLACE_ASSET_SYNC_STATE,
+            rusqlite::params![
+                input.item_id.as_str(),
+                input.device_id.as_str(),
+                input.content_hash.as_str(),
+                input.content_hash.as_str(),
+                input.path.as_str(),
+                input.server_revision.value(),
+                SYNC_STATUS_SYNCED,
+                Option::<&str>::None,
+                Option::<&str>::None,
+                Option::<&str>::None,
+            ],
+        )
+        .map(|_| ())
+        .map_err(|source| IndexError::Sqlite {
+            source,
+            context: "upsert synced asset state".to_string(),
+        })
+    }
+
     /// Fetches one asset sync-state row by `asset_id`.
     ///
     /// # Errors
@@ -220,7 +311,7 @@ impl SyncStateRepo {
                 context: "list notes by sync status".to_string(),
             })?;
 
-        rows.map(|row| row.map(|note_id| NoteId::new(&note_id)))
+        rows.map(|row| row.map(NoteId::from))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|source| IndexError::Sqlite {
                 source,
@@ -251,7 +342,7 @@ impl SyncStateRepo {
                 context: "list assets by sync status".to_string(),
             })?;
 
-        rows.map(|row| row.map(|asset_id| AssetId::new(&asset_id)))
+        rows.map(|row| row.map(AssetId::from))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|source| IndexError::Sqlite {
                 source,
@@ -263,7 +354,7 @@ impl SyncStateRepo {
 fn decode_note_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSyncState> {
     let note_id = row.get::<_, String>(0)?;
     Ok(NoteSyncState {
-        item_id: NoteId::new(&note_id),
+        item_id: NoteId::from(note_id),
         device_id: decode_device_id(row, 1)?,
         last_local_hash: decode_optional_content_hash(row, 2)?,
         last_synced_hash: decode_optional_content_hash(row, 3)?,
@@ -279,7 +370,7 @@ fn decode_note_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSyncS
 fn decode_asset_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssetSyncState> {
     let asset_id = row.get::<_, String>(0)?;
     Ok(AssetSyncState {
-        item_id: AssetId::new(&asset_id),
+        item_id: AssetId::from(asset_id),
         device_id: decode_device_id(row, 1)?,
         last_local_hash: decode_optional_content_hash(row, 2)?,
         last_synced_hash: decode_optional_content_hash(row, 3)?,
@@ -293,8 +384,7 @@ fn decode_asset_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssetSyn
 }
 
 fn decode_device_id(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<DeviceId> {
-    row.get::<_, String>(column)
-        .map(|device_id| DeviceId::new(&device_id))
+    row.get::<_, String>(column).map(DeviceId::from)
 }
 
 fn decode_optional_content_hash(
@@ -302,7 +392,7 @@ fn decode_optional_content_hash(
     column: usize,
 ) -> rusqlite::Result<Option<ContentHash>> {
     row.get::<_, Option<String>>(column)
-        .map(|value| value.as_deref().map(ContentHash::new))
+        .map(|value| value.map(ContentHash::from))
 }
 
 fn decode_optional_relative_path(

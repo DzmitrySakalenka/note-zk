@@ -4,10 +4,10 @@ use zk_domain::{
     SyncChange, WireEventType,
     asset::AssetRecord,
     id::AssetId,
-    sync::{ItemType, SyncStatus},
+    sync::ItemType,
     sync_state::{AssetSyncState, DeleteRecord, DeleteRecordTarget},
 };
-use zk_index::{AssetRepo, DeleteRecordRepo, SyncStateRepo};
+use zk_index::{AssetRepo, DeleteRecordRepo, SyncStateRepo, SyncedAssetStateInput};
 
 use crate::{
     SyncError, SyncResult,
@@ -27,9 +27,7 @@ use super::{
         required_content_hash, required_deleted_at, required_path, required_retention_until,
         required_server_revision, required_trashed_at,
     },
-    snapshot::{
-        AssetConflictStateInput, asset_snapshot, synced_asset_state, upsert_asset_conflict_state,
-    },
+    snapshot::{AssetConflictStateInput, asset_snapshot, upsert_asset_conflict_state},
 };
 
 struct LoadedAssetState {
@@ -141,19 +139,14 @@ fn apply_asset_content_change(
         server_revision: server_revision.clone(),
     };
     AssetRepo::upsert_asset(workspace.transaction, &record)?;
-    SyncStateRepo::upsert_asset_sync_state(
+    SyncStateRepo::upsert_synced_asset_state(
         workspace.transaction,
-        &AssetSyncState {
-            item_id: loaded.asset_id.clone(),
-            device_id: workspace.device_id.clone(),
-            last_local_hash: Some(content_hash.clone()),
-            last_synced_hash: Some(content_hash),
-            last_synced_path: Some(path),
-            last_known_server_revision: Some(server_revision),
-            sync_status: SyncStatus::Synced,
-            last_sync_attempt_at: None,
-            last_sync_error: None,
-            pending_operation: None,
+        &SyncedAssetStateInput {
+            item_id: &loaded.asset_id,
+            device_id: workspace.device_id,
+            content_hash: &content_hash,
+            path: &path,
+            server_revision: &server_revision,
         },
     )?;
     workspace.outcome.applied += 1;
@@ -210,15 +203,15 @@ fn apply_asset_move(
             server_revision: server_revision.clone(),
         },
     )?;
-    SyncStateRepo::upsert_asset_sync_state(
+    SyncStateRepo::upsert_synced_asset_state(
         workspace.transaction,
-        &synced_asset_state(
-            workspace.device_id,
-            &loaded.asset_id,
-            &asset.content_hash,
-            path,
-            server_revision,
-        ),
+        &SyncedAssetStateInput {
+            item_id: &loaded.asset_id,
+            device_id: workspace.device_id,
+            content_hash: &asset.content_hash,
+            path: &path,
+            server_revision: &server_revision,
+        },
     )?;
     workspace.outcome.applied += 1;
 
@@ -293,15 +286,15 @@ fn apply_asset_trash(
             delete_revision: None,
         },
     )?;
-    SyncStateRepo::upsert_asset_sync_state(
+    SyncStateRepo::upsert_synced_asset_state(
         workspace.transaction,
-        &synced_asset_state(
-            workspace.device_id,
-            &loaded.asset_id,
-            &asset.content_hash,
-            local_trash_path,
-            server_revision,
-        ),
+        &SyncedAssetStateInput {
+            item_id: &loaded.asset_id,
+            device_id: workspace.device_id,
+            content_hash: &asset.content_hash,
+            path: &local_trash_path,
+            server_revision: &server_revision,
+        },
     )?;
     workspace.outcome.applied += 1;
 
@@ -359,15 +352,15 @@ fn apply_asset_restore(
     )?;
     let target = DeleteRecordTarget::Asset(loaded.asset_id.clone());
     remove_delete_record_if_not_deleted(workspace.transaction, &target)?;
-    SyncStateRepo::upsert_asset_sync_state(
+    SyncStateRepo::upsert_synced_asset_state(
         workspace.transaction,
-        &synced_asset_state(
-            workspace.device_id,
-            &loaded.asset_id,
-            &asset.content_hash,
-            path,
-            server_revision,
-        ),
+        &SyncedAssetStateInput {
+            item_id: &loaded.asset_id,
+            device_id: workspace.device_id,
+            content_hash: &asset.content_hash,
+            path: &path,
+            server_revision: &server_revision,
+        },
     )?;
     workspace.outcome.applied += 1;
 
@@ -419,15 +412,15 @@ fn apply_asset_purge(
         &deleted_at,
         Some(&server_revision),
     )?;
-    SyncStateRepo::upsert_asset_sync_state(
+    SyncStateRepo::upsert_synced_asset_state(
         workspace.transaction,
-        &synced_asset_state(
-            workspace.device_id,
-            &loaded.asset_id,
-            &asset.content_hash,
-            asset.current_path.clone(),
-            server_revision,
-        ),
+        &SyncedAssetStateInput {
+            item_id: &loaded.asset_id,
+            device_id: workspace.device_id,
+            content_hash: &asset.content_hash,
+            path: &asset.current_path,
+            server_revision: &server_revision,
+        },
     )?;
     workspace.outcome.applied += 1;
 

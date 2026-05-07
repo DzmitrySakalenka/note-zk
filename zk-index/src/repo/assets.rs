@@ -413,9 +413,9 @@ fn decode_asset_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssetRecord>
         .unwrap_or(DEFAULT_SERVER_REVISION);
 
     Ok(AssetRecord {
-        asset_id: AssetId::new(&asset_id),
+        asset_id: AssetId::from(asset_id),
         current_path: RelativePath::new(&current_path),
-        content_hash: ContentHash::new(&content_hash),
+        content_hash: ContentHash::from(content_hash),
         mime_type: row.get(3)?,
         size_bytes: decode_size_bytes(raw_size_bytes)?,
         created_at: row.get(5)?,
@@ -433,9 +433,9 @@ fn decode_asset_reference(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssetRefe
     let target_asset_id = row.get::<_, Option<String>>(2)?;
 
     Ok(AssetReference {
-        source_note_id: NoteId::new(&source_note_id),
+        source_note_id: NoteId::from(source_note_id),
         raw_path: row.get(1)?,
-        target_asset_id: target_asset_id.as_deref().map(AssetId::new),
+        target_asset_id: target_asset_id.map(AssetId::from),
     })
 }
 

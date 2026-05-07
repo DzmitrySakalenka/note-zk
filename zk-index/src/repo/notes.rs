@@ -512,7 +512,7 @@ impl NoteRepo {
                 context: "get notes by tag".to_string(),
             })?;
 
-        rows.map(|row| row.map(|note_id| NoteId::new(&note_id)))
+        rows.map(|row| row.map(NoteId::from))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|source| IndexError::Sqlite {
                 source,
@@ -530,19 +530,16 @@ fn decode_note_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteRecord> {
         .unwrap_or(DEFAULT_SERVER_REVISION);
 
     Ok(NoteRecord {
-        note_id: NoteId::new(&note_id),
+        note_id: NoteId::from(note_id),
         current_path: RelativePath::new(&current_path),
-        content_hash: ContentHash::new(&content_hash),
+        content_hash: ContentHash::from(content_hash),
         created_at: row.get(3)?,
         updated_at: row.get(4)?,
         trashed_at: row.get(5)?,
         deleted_at: row.get(6)?,
         is_trashed: row.get::<_, i64>(7)? != 0,
         is_deleted: row.get::<_, i64>(8)? != 0,
-        last_editor_device_id: row
-            .get::<_, Option<String>>(9)?
-            .as_deref()
-            .map(DeviceId::new),
+        last_editor_device_id: row.get::<_, Option<String>>(9)?.map(DeviceId::from),
         server_revision: ServerRevision::new(server_revision),
     })
 }

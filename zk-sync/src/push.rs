@@ -1,6 +1,9 @@
 //! Push request building and response application scaffolding.
 
-use std::collections::{HashMap, hash_map::Entry};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, hash_map::Entry},
+};
 
 use chrono::SecondsFormat;
 use rusqlite::Connection;
@@ -98,8 +101,12 @@ pub fn build_push_request(
     ctx: &PushBuildContext<'_>,
     planned: &[PlannedOperation],
 ) -> SyncResult<SyncPushRequest> {
-    let mut notes = Vec::new();
-    let mut assets = Vec::new();
+    let note_count = planned
+        .iter()
+        .filter(|operation| matches!(operation, PlannedOperation::Note(_)))
+        .count();
+    let mut notes = Vec::with_capacity(note_count);
+    let mut assets = Vec::with_capacity(planned.len() - note_count);
 
     for operation in planned {
         match operation {
@@ -188,10 +195,10 @@ fn build_note_item(
                 planned.note_id.as_str(),
             );
             let content = decode_note_content(ctx.vault, &planned.current_path, note_bytes)?;
-            (Some(content), fresh_hash)
+            (Some(content), Cow::Owned(fresh_hash))
         }
         PlannedOp::Trash | PlannedOp::Restore | PlannedOp::Delete => {
-            (None, planned.local_hash.clone())
+            (None, Cow::Borrowed(&planned.local_hash))
         }
     };
 
@@ -199,7 +206,7 @@ fn build_note_item(
         note_id: planned.note_id.to_string(),
         path: planned.current_path.to_string(),
         content,
-        content_hash: content_hash.to_string(),
+        content_hash: content_hash.as_ref().to_string(),
         base_server_revision: planned
             .base_server_revision
             .as_ref()
@@ -216,20 +223,22 @@ fn build_asset_item(
         PlannedOp::Create | PlannedOp::Update | PlannedOp::Move { .. } => {
             let asset_bytes = read_asset_bytes(ctx.vault, &planned.current_path)
                 .map_err(|error| map_vault_read_error(error, planned.asset_id.as_str()))?;
-            hash_from_live_bytes(
+            Cow::Owned(hash_from_live_bytes(
                 &asset_bytes,
                 &planned.local_hash,
                 "asset",
                 planned.asset_id.as_str(),
-            )
+            ))
         }
-        PlannedOp::Trash | PlannedOp::Restore | PlannedOp::Delete => planned.local_hash.clone(),
+        PlannedOp::Trash | PlannedOp::Restore | PlannedOp::Delete => {
+            Cow::Borrowed(&planned.local_hash)
+        }
     };
 
     Ok(PushAssetItem {
         asset_id: planned.asset_id.to_string(),
         path: planned.current_path.to_string(),
-        content_hash: content_hash.to_string(),
+        content_hash: content_hash.as_ref().to_string(),
         base_server_revision: planned
             .base_server_revision
             .as_ref()

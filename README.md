@@ -66,6 +66,20 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+Run sync hot-path benchmarks one at a time so the measurements do not
+compete for CPU or allocator resources:
+
+```bash
+cargo bench -p zk-sync --bench sync_apply -- apply_pull_response_10k_notes
+cargo bench -p zk-sync --bench sync_apply -- build_push_request_10k_local_changes
+```
+
+To compile all workspace benches without running them:
+
+```bash
+cargo bench --workspace --no-run
+```
+
 Release archives contain both tools: `zk-cli` for local vault operations and
 `zk-server` for the HTTP sync server.
 
