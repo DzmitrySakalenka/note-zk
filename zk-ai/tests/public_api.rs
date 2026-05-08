@@ -7,8 +7,8 @@ use zk_ai::{
     ChunkOutcome, Chunker, ChunkerOptions, ChunkingService, ChunksWriter, EmbeddingsCapability,
     EmbeddingsProvider, EmbeddingsReader, EmbeddingsRequest, EmbeddingsResponse, EmbeddingsService,
     EmbeddingsServiceOptions, EmbeddingsWriter, ParagraphChunker, ProviderRegistry,
-    ProviderSelector, RecomputeOutcome, SearchHit, SemanticSearchService, StubEmbeddingsProvider,
-    embed_one,
+    ProviderSelector, RecomputeOutcome, RetrievalParams, RetrievalService, SearchHit,
+    SemanticSearchService, StubEmbeddingsProvider, embed_one,
 };
 use zk_domain::{
     ChunkEmbeddingRecord, ChunkId, ChunkRecord, EmbeddingModelId, EmbeddingVector, id::NoteId,
@@ -35,6 +35,8 @@ fn ai_operator_public_api_is_available_from_crate_root() {
     assert!(!type_name::<dyn EmbeddingsWriter>().is_empty());
     assert!(!type_name::<EmbeddingsServiceOptions>().is_empty());
     assert!(!type_name::<RecomputeOutcome>().is_empty());
+    assert!(!type_name::<RetrievalParams>().is_empty());
+    assert!(!type_name::<RetrievalService>().is_empty());
     assert!(
         !type_name::<SemanticSearchService<StubEmbeddingsProvider, NoopEmbeddingsRepo>>()
             .is_empty()
