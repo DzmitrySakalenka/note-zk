@@ -17,7 +17,9 @@ pub use provider::local_candle::{LocalEmbeddingsConfig, LocalEmbeddingsProvider}
 pub use provider::remote_http::{RemoteEmbeddingsConfig, RemoteEmbeddingsProvider};
 pub use provider::stub::StubEmbeddingsProvider;
 pub use provider::{
-    EmbeddingsCapability, EmbeddingsProvider, EmbeddingsRequest, EmbeddingsResponse, embed_one,
+    ChatCapability, ChatChunk, ChatMessage, ChatProvider, ChatRequest, ChatUsage,
+    EmbeddingsCapability, EmbeddingsProvider, EmbeddingsRequest, EmbeddingsResponse, FinishReason,
+    embed_one,
 };
 pub use selector::{ProviderRegistry, ProviderSelector};
 pub use service::{

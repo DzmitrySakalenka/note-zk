@@ -5516,6 +5516,7 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "chrono",
+ "futures",
  "reqwest",
  "serde",
  "serde_json",

@@ -1,10 +1,12 @@
-//! Embeddings provider traits and concrete provider backends.
+//! AI provider traits and concrete provider backends.
 
 use async_trait::async_trait;
 use zk_domain::{EmbeddingModelId, EmbeddingVector, ProviderId};
 
 use crate::{AiError, AiResult};
 
+/// Chat completion provider trait and streaming DTOs.
+pub mod chat;
 /// Local Candle-backed embeddings provider.
 #[cfg(feature = "provider-local")]
 pub mod local_candle;
@@ -14,6 +16,9 @@ pub mod remote_http;
 /// Deterministic test embeddings provider.
 pub mod stub;
 
+pub use chat::{
+    ChatCapability, ChatChunk, ChatMessage, ChatProvider, ChatRequest, ChatUsage, FinishReason,
+};
 #[cfg(feature = "provider-local")]
 pub use local_candle::{LocalDevice, LocalEmbeddingsConfig, LocalEmbeddingsProvider};
 #[cfg(feature = "provider-http")]
