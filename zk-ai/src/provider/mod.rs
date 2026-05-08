@@ -15,6 +15,8 @@ pub mod local_candle;
 pub mod remote_http;
 /// Deterministic test embeddings provider.
 pub mod stub;
+/// Deterministic test chat provider.
+pub mod stub_chat;
 
 pub use chat::{
     ChatCapability, ChatChunk, ChatMessage, ChatProvider, ChatRequest, ChatUsage, FinishReason,
@@ -24,6 +26,7 @@ pub use local_candle::{LocalDevice, LocalEmbeddingsConfig, LocalEmbeddingsProvid
 #[cfg(feature = "provider-http")]
 pub use remote_http::{RemoteEmbeddingsConfig, RemoteEmbeddingsProvider};
 pub use stub::StubEmbeddingsProvider;
+pub use stub_chat::StubChatProvider;
 
 /// Async provider interface for batched embedding generation.
 #[async_trait]

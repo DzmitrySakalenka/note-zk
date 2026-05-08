@@ -16,6 +16,7 @@ pub use provider::local_candle::{LocalEmbeddingsConfig, LocalEmbeddingsProvider}
 #[cfg(feature = "provider-http")]
 pub use provider::remote_http::{RemoteEmbeddingsConfig, RemoteEmbeddingsProvider};
 pub use provider::stub::StubEmbeddingsProvider;
+pub use provider::stub_chat::StubChatProvider;
 pub use provider::{
     ChatCapability, ChatChunk, ChatMessage, ChatProvider, ChatRequest, ChatUsage,
     EmbeddingsCapability, EmbeddingsProvider, EmbeddingsRequest, EmbeddingsResponse, FinishReason,
