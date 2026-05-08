@@ -15,6 +15,8 @@ pub use error::{AiError, AiResult};
 pub use provider::local_candle::{LocalEmbeddingsConfig, LocalEmbeddingsProvider};
 #[cfg(feature = "provider-http")]
 pub use provider::remote_http::{RemoteEmbeddingsConfig, RemoteEmbeddingsProvider};
+#[cfg(feature = "provider-http")]
+pub use provider::remote_http_chat::{RemoteHttpChatConfig, RemoteHttpChatProvider};
 pub use provider::stub::StubEmbeddingsProvider;
 pub use provider::stub_chat::StubChatProvider;
 pub use provider::{

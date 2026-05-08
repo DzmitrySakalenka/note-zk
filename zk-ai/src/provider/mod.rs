@@ -13,6 +13,9 @@ pub mod local_candle;
 /// OpenAI-compatible HTTP embeddings provider.
 #[cfg(feature = "provider-http")]
 pub mod remote_http;
+/// OpenAI-compatible HTTP chat provider.
+#[cfg(feature = "provider-http")]
+pub mod remote_http_chat;
 /// Deterministic test embeddings provider.
 pub mod stub;
 /// Deterministic test chat provider.
@@ -25,6 +28,8 @@ pub use chat::{
 pub use local_candle::{LocalDevice, LocalEmbeddingsConfig, LocalEmbeddingsProvider};
 #[cfg(feature = "provider-http")]
 pub use remote_http::{RemoteEmbeddingsConfig, RemoteEmbeddingsProvider};
+#[cfg(feature = "provider-http")]
+pub use remote_http_chat::{RemoteHttpChatConfig, RemoteHttpChatProvider};
 pub use stub::StubEmbeddingsProvider;
 pub use stub_chat::StubChatProvider;
 
