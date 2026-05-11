@@ -142,6 +142,36 @@ const CREATE_TABLE_AI_JOBS: &str = r"CREATE TABLE ai_jobs (
   claim_token TEXT
 )";
 
+const CREATE_TABLE_CONVERSATIONS: &str = r"CREATE TABLE conversations (
+  conversation_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+  title TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_message_at TEXT,
+  archived_at TEXT
+)";
+
+const CREATE_TABLE_MESSAGES: &str = r"CREATE TABLE messages (
+  message_id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  token_count INTEGER,
+  created_at TEXT NOT NULL,
+  server_revision INTEGER
+)";
+
+const CREATE_TABLE_MESSAGE_CITATIONS: &str = r"CREATE TABLE message_citations (
+  message_id TEXT NOT NULL REFERENCES messages(message_id) ON DELETE CASCADE,
+  ordinal INTEGER NOT NULL,
+  note_id TEXT NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE,
+  chunk_id TEXT REFERENCES note_chunks(chunk_id) ON DELETE SET NULL,
+  similarity REAL NOT NULL,
+  snippet TEXT NOT NULL,
+  PRIMARY KEY (message_id, ordinal)
+)";
+
 const CREATE_INDEX_SYNC_EVENTS_SEQ: &str =
     "CREATE INDEX idx_sync_events_seq ON sync_events(event_seq)";
 const CREATE_INDEX_SYNC_EVENTS_ITEM: &str =
@@ -170,6 +200,13 @@ const CREATE_INDEX_CHUNK_EMBEDDINGS_MODEL: &str =
     "CREATE INDEX idx_chunk_embeddings_model ON chunk_embeddings(embedding_model)";
 const CREATE_INDEX_AI_JOBS_STATUS_ENQUEUED: &str =
     "CREATE INDEX idx_ai_jobs_status_enqueued ON ai_jobs(status, enqueued_at)";
+const CREATE_INDEX_CONVERSATIONS_USER_RECENT: &str = r"CREATE INDEX idx_conversations_user_recent
+  ON conversations(user_id, last_message_at DESC)
+  WHERE archived_at IS NULL";
+const CREATE_INDEX_MESSAGES_CONVERSATION_CREATED: &str =
+    "CREATE INDEX idx_messages_conversation_created ON messages(conversation_id, created_at)";
+const CREATE_INDEX_MESSAGE_CITATIONS_NOTE: &str =
+    "CREATE INDEX idx_message_citations_note ON message_citations(note_id)";
 
 pub(crate) const V1_TABLE_DDL: &[&str] = &[
     CREATE_TABLE_DEVICES,
@@ -211,4 +248,16 @@ pub(crate) const V3_INDEX_DDL: &[&str] = &[
     CREATE_INDEX_NOTE_CHUNKS_HASH,
     CREATE_INDEX_CHUNK_EMBEDDINGS_MODEL,
     CREATE_INDEX_AI_JOBS_STATUS_ENQUEUED,
+];
+
+pub(crate) const V4_TABLE_DDL: &[&str] = &[
+    CREATE_TABLE_CONVERSATIONS,
+    CREATE_TABLE_MESSAGES,
+    CREATE_TABLE_MESSAGE_CITATIONS,
+];
+
+pub(crate) const V4_INDEX_DDL: &[&str] = &[
+    CREATE_INDEX_CONVERSATIONS_USER_RECENT,
+    CREATE_INDEX_MESSAGES_CONVERSATION_CREATED,
+    CREATE_INDEX_MESSAGE_CITATIONS_NOTE,
 ];
