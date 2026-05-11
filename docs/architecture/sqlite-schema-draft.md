@@ -257,6 +257,56 @@ Index:
 
 - `idx_ai_jobs_status_enqueued ON ai_jobs(status, enqueued_at)`
 
+## Chat Tables (server schema v4)
+
+Chat tables are server-only in V1. The server owns conversations, messages,
+and citations; local offline replay is deferred.
+
+### `conversations` (server schema v4 only)
+
+- `conversation_id TEXT PRIMARY KEY`
+- `user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE`
+- `title TEXT`
+- `created_at TEXT NOT NULL`
+- `updated_at TEXT NOT NULL`
+- `last_message_at TEXT`
+- `archived_at TEXT`
+
+Index:
+
+- `idx_conversations_user_recent ON conversations(user_id, last_message_at DESC) WHERE archived_at IS NULL`
+
+### `messages` (server schema v4 only)
+
+- `message_id TEXT PRIMARY KEY`
+- `conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id) ON DELETE CASCADE`
+- `role TEXT NOT NULL`
+- `content TEXT NOT NULL`
+- `token_count INTEGER`
+- `created_at TEXT NOT NULL`
+- `server_revision INTEGER`
+
+Index:
+
+- `idx_messages_conversation_created ON messages(conversation_id, created_at)`
+
+### `message_citations` (server schema v4 only)
+
+- `message_id TEXT NOT NULL REFERENCES messages(message_id) ON DELETE CASCADE`
+- `ordinal INTEGER NOT NULL`
+- `note_id TEXT NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE`
+- `chunk_id TEXT REFERENCES note_chunks(chunk_id) ON DELETE SET NULL`
+- `similarity REAL NOT NULL`
+- `snippet TEXT NOT NULL`
+
+Primary key:
+
+- `(message_id, ordinal)`
+
+Index:
+
+- `idx_message_citations_note ON message_citations(note_id)`
+
 ## Server SQLite Schema
 
 The server schema mirrors some local concepts but remains authoritative for shared sync state.

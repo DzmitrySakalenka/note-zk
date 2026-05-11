@@ -3,6 +3,7 @@
 mod ai_jobs;
 mod assets;
 mod chunks;
+mod conversations;
 mod cursors;
 mod deletes;
 mod devices;
@@ -17,6 +18,7 @@ mod users;
 pub use ai_jobs::{AiJob, AiJobFilter, AiJobKind, AiJobKindFilter, AiJobStatus, AiJobsRepo};
 pub use assets::{AssetRow, AssetsRepo};
 pub use chunks::ChunksRepo;
+pub use conversations::{ConversationsRepo, ListConversationsParams};
 pub use cursors::DeviceCursorRepo;
 pub use deletes::{DeleteRecordRow, DeleteRecordsRepo};
 pub use devices::{DeviceRepo, DeviceRow};
