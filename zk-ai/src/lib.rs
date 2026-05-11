@@ -28,6 +28,7 @@ pub use selector::{ProviderRegistry, ProviderSelector};
 pub use service::{
     chunking::{ChunkOutcome, ChunkingService, ChunksWriter},
     embeddings::{EmbeddingsService, EmbeddingsServiceOptions, EmbeddingsWriter, RecomputeOutcome},
+    prompt::{AssembleParams, CitationFormat, PromptAssembler, PromptConfig},
     retrieval::{RetrievalParams, RetrievalService},
     semantic_search::{EmbeddingsReader, SearchHit, SemanticSearchService},
 };

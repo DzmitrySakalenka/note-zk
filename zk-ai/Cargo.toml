@@ -48,4 +48,5 @@ tracing = "0.1.44"
 zk-domain = { version = "0.1.0", path = "../zk-domain" }
 
 [dev-dependencies]
+insta = "1.47.2"
 wiremock = "0.6.5"
