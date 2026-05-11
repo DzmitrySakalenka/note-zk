@@ -26,6 +26,10 @@ pub use provider::{
 };
 pub use selector::{ProviderRegistry, ProviderSelector};
 pub use service::{
+    chat::{
+        AppendChatMessageParams, ChatConversationsRepo, ChatMessageCitationsRepo, ChatMessagesRepo,
+        ChatProviderResolver, ChatService, ChatServiceRepos, ChatTurnRequest,
+    },
     chunking::{ChunkOutcome, ChunkingService, ChunksWriter},
     embeddings::{EmbeddingsService, EmbeddingsServiceOptions, EmbeddingsWriter, RecomputeOutcome},
     prompt::{AssembleParams, CitationFormat, PromptAssembler, PromptConfig},
