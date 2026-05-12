@@ -5673,6 +5673,7 @@ dependencies = [
  "clap",
  "cookie",
  "dirs",
+ "futures",
  "hex",
  "reqwest",
  "rpassword",

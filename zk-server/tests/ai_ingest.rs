@@ -60,7 +60,9 @@ async fn distinct_note_changes_enqueue_distinct_jobs() {
         .into_iter()
         .map(|job| match job.kind {
             AiJobKind::RecomputeNote { note_id } => note_id,
-            AiJobKind::RecomputeVault => panic!("expected recompute-note jobs only"),
+            AiJobKind::RecomputeVault | AiJobKind::ChatTurn { .. } => {
+                panic!("expected recompute-note jobs only")
+            }
         })
         .collect::<Vec<_>>();
     enqueued_note_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));

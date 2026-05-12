@@ -3,7 +3,7 @@
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
-use zk_domain::{JobId, id::NoteId};
+use zk_domain::{ConversationId, JobId, id::NoteId};
 use zk_server::{
     migration::ensure_schema,
     repo::{AiJobFilter, AiJobKind, AiJobKindFilter, AiJobStatus, AiJobsRepo},
@@ -30,6 +30,18 @@ fn note_id() -> NoteId {
 
 fn recompute_note_kind() -> AiJobKind {
     AiJobKind::RecomputeNote { note_id: note_id() }
+}
+
+fn chat_turn_kind() -> AiJobKind {
+    AiJobKind::ChatTurn {
+        conversation_id: conversation_id(),
+        request_id: "req-chat-job".to_string(),
+        user_query: "Summarize my filesystem notes".to_string(),
+    }
+}
+
+fn conversation_id() -> ConversationId {
+    ConversationId::new("01JAR5A3PJEZ3SKG67PN8N6S70")
 }
 
 fn other_note_id() -> NoteId {
@@ -98,6 +110,25 @@ fn enqueue_then_claim_next_returns_same_job_once() {
     assert_eq!(claimed.started_at, Some(started_at));
     assert_eq!(claimed.finished_at, None);
     assert!(second_claim.is_none());
+}
+
+#[test]
+fn chat_turn_payload_round_trips_through_queue() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let kind = chat_turn_kind();
+    let enqueued = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:00:00Z"))
+        .expect("chat job enqueue should succeed");
+
+    let claimed = repo
+        .claim_next(3, parse_timestamp("2026-05-05T10:01:00Z"))
+        .expect("chat job claim should succeed")
+        .expect("chat job should be claimed");
+
+    assert_eq!(enqueued.kind, kind);
+    assert_eq!(claimed.kind, kind);
+    assert_eq!(claimed.status, AiJobStatus::InFlight);
 }
 
 #[test]
@@ -249,6 +280,9 @@ fn list_filters_by_status_and_kind() {
             parse_timestamp("2026-05-05T10:01:00Z"),
         )
         .expect("vault job enqueue should succeed");
+    let chat_job = repo
+        .enqueue(chat_turn_kind(), parse_timestamp("2026-05-05T10:02:00Z"))
+        .expect("chat job enqueue should succeed");
 
     let pending = repo
         .list(AiJobFilter {
@@ -271,15 +305,24 @@ fn list_filters_by_status_and_kind() {
             limit: None,
         })
         .expect("pending note list should succeed");
+    let chat_jobs = repo
+        .list(AiJobFilter {
+            status: None,
+            kind: Some(AiJobKindFilter::ChatTurn),
+            limit: None,
+        })
+        .expect("chat list should succeed");
 
     assert_eq!(
         pending.iter().map(|job| &job.job_id).collect::<Vec<_>>(),
-        vec![&vault_job.job_id, &note_job.job_id]
+        vec![&chat_job.job_id, &vault_job.job_id, &note_job.job_id]
     );
     assert_eq!(vault_jobs.len(), 1);
     assert_eq!(vault_jobs[0].job_id, vault_job.job_id);
     assert_eq!(pending_note_jobs.len(), 1);
     assert_eq!(pending_note_jobs[0].job_id, note_job.job_id);
+    assert_eq!(chat_jobs.len(), 1);
+    assert_eq!(chat_jobs[0].job_id, chat_job.job_id);
 }
 
 #[test]

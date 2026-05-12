@@ -50,14 +50,17 @@ impl RetrievalParams {
 #[derive(Clone)]
 #[allow(clippy::arc_with_non_send_sync)]
 pub struct RetrievalService {
-    reader: Arc<dyn EmbeddingsReader>,
+    reader: Arc<dyn EmbeddingsReader + Send + Sync>,
     embed: Arc<dyn EmbeddingsProvider>,
 }
 
 impl RetrievalService {
     /// Creates a retrieval service from an embeddings reader and provider.
     #[must_use]
-    pub fn new(reader: Arc<dyn EmbeddingsReader>, embed: Arc<dyn EmbeddingsProvider>) -> Self {
+    pub fn new(
+        reader: Arc<dyn EmbeddingsReader + Send + Sync>,
+        embed: Arc<dyn EmbeddingsProvider>,
+    ) -> Self {
         Self { reader, embed }
     }
 

@@ -3,7 +3,7 @@ use std::io::{self, ErrorKind};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, Row, types::Type};
 use serde::{Deserialize, Serialize};
-use zk_domain::{JobId, id::NoteId};
+use zk_domain::{ConversationId, JobId, id::NoteId};
 
 use super::timestamps::{decode_optional_timestamp, decode_timestamp, encode_timestamp};
 use crate::{ServerError, ServerResult};
@@ -179,6 +179,15 @@ pub enum AiJobKind {
     },
     /// Recompute chunks and embeddings for every note.
     RecomputeVault,
+    /// Run one fire-and-forget chat turn.
+    ChatTurn {
+        /// Conversation receiving the user and assistant messages.
+        conversation_id: ConversationId,
+        /// Stable request id for trace correlation.
+        request_id: String,
+        /// User-authored query for the chat turn.
+        user_query: String,
+    },
 }
 
 /// AI background job status.
@@ -201,6 +210,8 @@ pub enum AiJobKindFilter {
     RecomputeNote,
     /// Match `RecomputeVault` jobs.
     RecomputeVault,
+    /// Match `ChatTurn` jobs.
+    ChatTurn,
 }
 
 /// Filters used when listing AI background jobs.
@@ -441,6 +452,7 @@ impl AiJobKind {
         match self {
             Self::RecomputeNote { .. } => "recompute_note",
             Self::RecomputeVault => "recompute_vault",
+            Self::ChatTurn { .. } => "chat_turn",
         }
     }
 }
@@ -461,6 +473,7 @@ impl AiJobKindFilter {
         match self {
             Self::RecomputeNote => "recompute_note",
             Self::RecomputeVault => "recompute_vault",
+            Self::ChatTurn => "chat_turn",
         }
     }
 }
@@ -473,12 +486,28 @@ struct RecomputeNotePayload {
 #[derive(Debug, Deserialize, Serialize)]
 struct RecomputeVaultPayload {}
 
+#[derive(Debug, Deserialize, Serialize)]
+struct ChatTurnPayload {
+    conversation_id: String,
+    request_id: String,
+    user_query: String,
+}
+
 fn encode_payload_json(kind: &AiJobKind) -> ServerResult<String> {
     match kind {
         AiJobKind::RecomputeNote { note_id } => serde_json::to_string(&RecomputeNotePayload {
             note_id: note_id.to_string(),
         }),
         AiJobKind::RecomputeVault => serde_json::to_string(&RecomputeVaultPayload {}),
+        AiJobKind::ChatTurn {
+            conversation_id,
+            request_id,
+            user_query,
+        } => serde_json::to_string(&ChatTurnPayload {
+            conversation_id: conversation_id.to_string(),
+            request_id: request_id.clone(),
+            user_query: user_query.clone(),
+        }),
     }
     .map_err(|source| ServerError::Internal(Box::new(source)))
 }
@@ -520,6 +549,15 @@ fn decode_job_kind(kind_name: &str, payload_json: &str) -> rusqlite::Result<AiJo
             serde_json::from_str::<RecomputeVaultPayload>(payload_json)
                 .map_err(|source| from_sql_conversion_failure(2, Type::Text, source))?;
             Ok(AiJobKind::RecomputeVault)
+        }
+        "chat_turn" => {
+            let payload = serde_json::from_str::<ChatTurnPayload>(payload_json)
+                .map_err(|source| from_sql_conversion_failure(2, Type::Text, source))?;
+            Ok(AiJobKind::ChatTurn {
+                conversation_id: ConversationId::new(&payload.conversation_id),
+                request_id: payload.request_id,
+                user_query: payload.user_query,
+            })
         }
         value => Err(invalid_text_failure(
             1,
