@@ -1,6 +1,7 @@
 //! HTTP router, handlers, and response mapping.
 
 mod admin;
+mod ai_chat;
 mod auth;
 mod blocking;
 mod error;
@@ -12,6 +13,8 @@ mod sync;
 
 #[doc(hidden)]
 pub(crate) use admin::admin_routes;
+#[doc(hidden)]
+pub(crate) use ai_chat::ai_chat_routes;
 #[doc(hidden)]
 pub(crate) use auth::auth_routes;
 pub(crate) use blocking::run_blocking;

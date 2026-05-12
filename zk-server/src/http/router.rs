@@ -12,7 +12,10 @@ use crate::{
     ServerError, ServerResult,
     ai::worker::{AiWorkerDeps, spawn_ai_job_worker},
     auth::{require_auth_layer, require_scope_layer},
-    http::{ApiError, admin_routes, auth_routes, health::health, search_routes, sync_routes},
+    http::{
+        ApiError, admin_routes, ai_chat_routes, auth_routes, health::health, search_routes,
+        sync_routes,
+    },
     scheduler::{backup::spawn_backup_scheduler, purge::spawn_purge_scheduler},
     state::ServerState,
 };
@@ -34,10 +37,12 @@ pub fn build_router(state: ServerState) -> Router {
         // the admin scope for either a device token or a browser session.
         .merge(admin_routes());
     let router = if state.config().ai.is_some() {
-        router.merge(search_routes().route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            require_auth_layer,
-        )))
+        router
+            .merge(search_routes().route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                require_auth_layer,
+            )))
+            .merge(ai_chat_routes())
     } else {
         router
     };

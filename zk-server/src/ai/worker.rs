@@ -1,6 +1,6 @@
 //! Tokio task that drains server-side AI background jobs.
 
-use std::{fs, path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use chrono::Utc;
 use futures::StreamExt;
@@ -17,30 +17,24 @@ use zk_ai::{
     },
     selector::{ProviderRegistry, ProviderSelector},
     service::{
-        chat::{
-            AppendChatMessageParams, ChatConversationsRepo, ChatMessageCitationsRepo,
-            ChatMessagesRepo, ChatProviderResolver, ChatService, ChatServiceRepos, ChatTurnRequest,
-        },
+        chat::ChatTurnRequest,
         chunking::{ChunkingService, ChunksWriter},
         embeddings::{EmbeddingsService, EmbeddingsServiceOptions, EmbeddingsWriter},
-        prompt::{CitationFormat, PromptAssembler, PromptConfig},
-        retrieval::RetrievalService,
-        semantic_search::{EmbeddingsReader, TopHit as AiTopHit},
     },
 };
 use zk_domain::{
-    Capability, ChunkEmbeddingRecord, ChunkRecord, Citation, ConversationId, ConversationRecord,
-    EmbeddingModelId, MessageId, MessageRecord, ProviderId, ProviderSelectorPolicy,
+    Capability, ChunkEmbeddingRecord, ChunkRecord, ConversationId, EmbeddingModelId, ProviderId,
+    ProviderSelectorPolicy,
     id::{NoteId, RelativePath},
 };
 use zk_vault::parse_note_file;
 
 use crate::{
     ServerDb, ServerError,
-    config::{AiChatConfig, AiChatProviderKind, AiConfig, AiProviderKind},
+    ai::chat_runtime::{ChatRuntimeError, build_chat_service},
+    config::{AiChatProviderKind, AiConfig, AiProviderKind},
     repo::{
-        AiJob, AiJobKind, AiJobsRepo, AppendMessageParams, ChunksRepo, ConversationsRepo,
-        EmbeddingsRepo, ListMessagesParams, MessageCitationsRepo, MessagesRepo, NotesRepo,
+        AiJob, AiJobKind, AiJobsRepo, ChunksRepo, ConversationsRepo, EmbeddingsRepo, NotesRepo,
     },
 };
 
@@ -323,27 +317,7 @@ async fn process_chat_turn(
         .db
         .with_conn(|connection| ConversationsRepo::get(connection, conversation_id))?
         .ok_or_else(|| AiWorkerError::ConversationNotFound(conversation_id.clone()))?;
-    let embeddings_provider = deps.selector.select_embeddings(Capability::Embeddings)?;
-    let retrieval = Arc::new(RetrievalService::new(
-        Arc::new(ServerEmbeddingsReader {
-            db: Arc::clone(&deps.db),
-        }),
-        embeddings_provider,
-    ));
-    let prompt = Arc::new(PromptAssembler::new(prompt_config(&chat_config)?));
-    let provider_resolver: Arc<dyn ChatProviderResolver> = deps.selector.clone();
-    let repos = ChatServiceRepos::new(
-        Arc::new(ServerChatConversationsRepo {
-            db: Arc::clone(&deps.db),
-        }),
-        Arc::new(ServerChatMessagesRepo {
-            db: Arc::clone(&deps.db),
-        }),
-        Arc::new(ServerChatMessageCitationsRepo {
-            db: Arc::clone(&deps.db),
-        }),
-    );
-    let service = ChatService::new(retrieval, prompt, provider_resolver, repos);
+    let service = build_chat_service(Arc::clone(&deps.db), deps.selector.clone(), &chat_config)?;
     let mut stream = service
         .turn(ChatTurnRequest {
             conversation_id: conversation_id.clone(),
@@ -359,25 +333,6 @@ async fn process_chat_turn(
     }
 
     Ok(())
-}
-
-fn prompt_config(config: &AiChatConfig) -> Result<PromptConfig, AiWorkerError> {
-    Ok(PromptConfig {
-        system_prompt: system_prompt(config)?,
-        citation_format: CitationFormat::EndOfMessage,
-        max_input_tokens: config.max_input_tokens,
-    })
-}
-
-fn system_prompt(config: &AiChatConfig) -> Result<String, AiWorkerError> {
-    let Some(path) = &config.system_prompt_path else {
-        return Ok(PromptAssembler::default_system_prompt().to_string());
-    };
-
-    fs::read_to_string(path).map_err(|source| AiWorkerError::ReadSystemPrompt {
-        path: path.clone(),
-        source,
-    })
 }
 
 fn read_note_body(deps: &AiWorkerDeps, note_id: &NoteId) -> Result<String, AiWorkerError> {
@@ -514,112 +469,6 @@ impl ServerEmbeddingsWriter {
     }
 }
 
-#[derive(Clone)]
-struct ServerEmbeddingsReader {
-    db: Arc<ServerDb>,
-}
-
-impl EmbeddingsReader for ServerEmbeddingsReader {
-    fn top_k_cosine(
-        &self,
-        query: &zk_domain::EmbeddingVector,
-        k: usize,
-        model: &EmbeddingModelId,
-    ) -> AiResult<Vec<AiTopHit>> {
-        with_conn_ai(&self.db, |connection| {
-            EmbeddingsReader::top_k_cosine(&EmbeddingsRepo::new(connection), query, k, model)
-        })
-    }
-
-    fn list_chunk_text(
-        &self,
-        chunk_ids: &[zk_domain::ChunkId],
-    ) -> AiResult<Vec<(zk_domain::ChunkId, String)>> {
-        with_conn_ai(&self.db, |connection| {
-            EmbeddingsReader::list_chunk_text(&EmbeddingsRepo::new(connection), chunk_ids)
-        })
-    }
-}
-
-#[derive(Clone)]
-struct ServerChatConversationsRepo {
-    db: Arc<ServerDb>,
-}
-
-impl ChatConversationsRepo for ServerChatConversationsRepo {
-    fn get(&self, conversation_id: &ConversationId) -> AiResult<Option<ConversationRecord>> {
-        self.db
-            .with_conn(|connection| ConversationsRepo::get(connection, conversation_id))
-            .map_err(|error| server_to_ai_error("get server chat conversation", &error))
-    }
-
-    fn touch_last_message_at(
-        &self,
-        conversation_id: &ConversationId,
-        now: chrono::DateTime<Utc>,
-    ) -> AiResult<()> {
-        self.db
-            .with_conn(|connection| {
-                ConversationsRepo::touch_last_message_at(connection, conversation_id, now)
-            })
-            .map_err(|error| server_to_ai_error("touch server chat conversation", &error))
-    }
-}
-
-#[derive(Clone)]
-struct ServerChatMessagesRepo {
-    db: Arc<ServerDb>,
-}
-
-impl ChatMessagesRepo for ServerChatMessagesRepo {
-    fn list_for_conversation(
-        &self,
-        conversation_id: &ConversationId,
-    ) -> AiResult<Vec<MessageRecord>> {
-        self.db
-            .with_conn(|connection| {
-                MessagesRepo::list_for_conversation(
-                    connection,
-                    conversation_id,
-                    ListMessagesParams::default(),
-                )
-            })
-            .map_err(|error| server_to_ai_error("list server chat messages", &error))
-    }
-
-    fn append(&self, params: AppendChatMessageParams) -> AiResult<MessageRecord> {
-        self.db
-            .with_conn(|connection| {
-                MessagesRepo::append(
-                    connection,
-                    AppendMessageParams {
-                        conversation_id: params.conversation_id,
-                        role: params.role,
-                        content: params.content,
-                        token_count: params.token_count,
-                        now: params.now,
-                    },
-                )
-            })
-            .map_err(|error| server_to_ai_error("append server chat message", &error))
-    }
-}
-
-#[derive(Clone)]
-struct ServerChatMessageCitationsRepo {
-    db: Arc<ServerDb>,
-}
-
-impl ChatMessageCitationsRepo for ServerChatMessageCitationsRepo {
-    fn replace_for_message(&self, message_id: &MessageId, citations: &[Citation]) -> AiResult<()> {
-        self.db
-            .with_conn(|connection| {
-                MessageCitationsRepo::replace_for_message(connection, message_id, citations)
-            })
-            .map_err(|error| server_to_ai_error("replace server chat citations", &error))
-    }
-}
-
 fn with_conn_ai<R>(db: &ServerDb, f: impl FnOnce(&Connection) -> AiResult<R>) -> AiResult<R> {
     db.with_conn(|connection| f(connection).map_err(|error| ai_to_server_error(&error)))
         .map_err(|error| server_to_ai_error("borrow server database", &error))
@@ -657,4 +506,15 @@ enum AiWorkerError {
         #[source]
         source: std::io::Error,
     },
+}
+
+impl From<ChatRuntimeError> for AiWorkerError {
+    fn from(error: ChatRuntimeError) -> Self {
+        match error {
+            ChatRuntimeError::Ai(error) => Self::Ai(error),
+            ChatRuntimeError::ReadSystemPrompt { path, source } => {
+                Self::ReadSystemPrompt { path, source }
+            }
+        }
+    }
 }
