@@ -1,5 +1,7 @@
 //! Implements the feature-gated `chat` CLI subcommand.
 
+mod conversations;
+
 use std::{
     io::{self, Read, Write},
     str::FromStr,
@@ -20,9 +22,15 @@ use zk_sync::HttpTransport;
 
 use crate::{
     bootstrap::{load_effective_config, open_index_connection, resolve_vault_root},
-    cli::{ChatArgs, OutputMode, SharedFlags},
+    cli::{ChatArgs, ChatSubcommand, OutputMode, SharedFlags},
     error::{CliError, EXIT_OK},
 };
+
+struct ChatRuntime {
+    facade: AiFacade,
+    connection: rusqlite::Connection,
+    runtime: tokio::runtime::Runtime,
+}
 
 /// Runs the `chat` subcommand.
 ///
@@ -31,29 +39,16 @@ use crate::{
 /// Returns [`CliError`] when bootstrap fails, server transport is unavailable,
 /// the chat facade rejects the request, or output rendering fails.
 pub fn run(args: &ChatArgs, shared: &SharedFlags) -> Result<i32, CliError> {
-    let vault_root = resolve_vault_root(shared)?;
-    let config = load_effective_config(&vault_root, shared)?;
-    let connection = open_index_connection(&config)?;
-    let http = resolve_transport(
-        args.mode,
-        config.sync.server_url.as_ref(),
-        &config.sync.bearer_token_env,
-    )?;
-    let facade = AiFacade::new(AiFacadeDeps {
-        http,
-        mode: args.mode,
-        ..AiFacadeDeps::default()
-    })
-    .map_err(map_ai_error)?;
-    let message = read_message(&args.message)?;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("while attempting to build chat runtime")
-        .map_err(CliError::Internal)?;
-    let conversation_id = resolve_conversation_id(args, &runtime, &facade)?;
-    let stream = runtime
-        .block_on(facade.chat(ChatRequest {
+    if let Some(ChatSubcommand::Conversations(command)) = &args.command {
+        return conversations::run(command, shared);
+    }
+
+    let message = read_message(args.message.as_deref())?;
+    let context = build_chat_runtime(shared, args.mode)?;
+    let conversation_id = resolve_conversation_id(args, &context.runtime, &context.facade)?;
+    let stream = context
+        .runtime
+        .block_on(context.facade.chat(ChatRequest {
             conversation_id,
             user_query: message,
             top_k: args.top_k,
@@ -61,14 +56,42 @@ pub fn run(args: &ChatArgs, shared: &SharedFlags) -> Result<i32, CliError> {
         }))
         .map_err(map_app_error)?;
 
-    runtime.block_on(render_chat_stream(
+    context.runtime.block_on(render_chat_stream(
         stream,
         OutputMode::from(args.json),
         args.stream_enabled(),
-        &connection,
+        &context.connection,
     ))?;
 
     Ok(EXIT_OK)
+}
+
+fn build_chat_runtime(shared: &SharedFlags, mode: ExecutionMode) -> Result<ChatRuntime, CliError> {
+    let vault_root = resolve_vault_root(shared)?;
+    let config = load_effective_config(&vault_root, shared)?;
+    let connection = open_index_connection(&config)?;
+    let http = resolve_transport(
+        mode,
+        config.sync.server_url.as_ref(),
+        &config.sync.bearer_token_env,
+    )?;
+    let facade = AiFacade::new(AiFacadeDeps {
+        http,
+        mode,
+        ..AiFacadeDeps::default()
+    })
+    .map_err(map_ai_error)?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("while attempting to build chat runtime")
+        .map_err(CliError::Internal)?;
+
+    Ok(ChatRuntime {
+        facade,
+        connection,
+        runtime,
+    })
 }
 
 fn resolve_conversation_id(
@@ -85,10 +108,13 @@ fn resolve_conversation_id(
         return Ok(conversation.conversation_id);
     }
 
-    let conversation_id = args
-        .conversation_id
-        .as_deref()
-        .expect("clap should require a chat conversation selector");
+    let conversation_id = args.conversation_id.as_deref().ok_or_else(|| {
+        CliError::Argument("chat requires --new or --conversation-id".to_string())
+    })?;
+    parse_conversation_id(conversation_id)
+}
+
+fn parse_conversation_id(conversation_id: &str) -> Result<ConversationId, CliError> {
     ConversationId::from_str(conversation_id)
         .map_err(|_| CliError::Argument("conversation-id must be a canonical ULID".to_string()))
 }
@@ -256,7 +282,8 @@ fn write_ndjson<T: Serialize>(out: &mut dyn Write, payload: &T) -> Result<(), Cl
         .map_err(CliError::Internal)
 }
 
-fn read_message(value: &str) -> Result<String, CliError> {
+fn read_message(value: Option<&str>) -> Result<String, CliError> {
+    let value = value.ok_or_else(|| CliError::Argument("chat requires --message".to_string()))?;
     if value != "-" {
         return Ok(value.to_string());
     }

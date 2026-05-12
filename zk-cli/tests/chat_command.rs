@@ -191,6 +191,23 @@ async fn offline_mode_returns_typed_error_without_http_request() {
     server.verify().await;
 }
 
+#[test]
+fn message_without_conversation_selector_returns_usage_error() {
+    let (_tempdir, vault_root, home_root, db_path) = test_roots();
+
+    chat_command(&vault_root, &home_root, &db_path)
+        .arg("--message")
+        .arg("hi")
+        .arg("--mode")
+        .arg("offline")
+        .assert()
+        .code(2)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains(
+            "chat requires --new or --conversation-id",
+        ));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn not_found_chat_exits_four() {
     let (_tempdir, vault_root, home_root, db_path) = test_roots();

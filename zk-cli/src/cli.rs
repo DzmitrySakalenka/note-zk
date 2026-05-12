@@ -46,7 +46,7 @@ pub enum Command {
     Sync(SyncArgs),
     /// Search the vault. Keyword search is reserved; semantic search is available with `--semantic`.
     Search(SearchArgs),
-    /// Send one AI chat message.
+    /// Send AI chat messages and manage conversations.
     Chat(ChatArgs),
     /// Resolve one server-side sync conflict explicitly.
     ResolveConflict(ResolveConflictArgs),
@@ -481,8 +481,11 @@ pub struct SearchArgs {
 
 /// Arguments for the `chat` subcommand.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
-#[command(group(ArgGroup::new("chat_conversation").args(["new", "conversation_id"]).required(true).multiple(false)))]
+#[command(group(ArgGroup::new("chat_conversation").args(["new", "conversation_id"]).multiple(false)))]
 pub struct ChatArgs {
+    /// Conversation-management commands.
+    #[command(subcommand)]
+    pub command: Option<ChatSubcommand>,
     /// Create a new conversation before sending the message.
     #[arg(long = "new")]
     pub new: bool,
@@ -491,7 +494,7 @@ pub struct ChatArgs {
     pub conversation_id: Option<String>,
     /// Prompt text to send. Use `-` to read the prompt from stdin.
     #[arg(short = 'm', long = "message")]
-    pub message: String,
+    pub message: Option<String>,
     /// Maximum number of retrieval hits to include.
     #[arg(long = "top-k", default_value_t = 8)]
     pub top_k: u32,
@@ -511,6 +514,91 @@ impl ChatArgs {
     pub fn stream_enabled(&self) -> bool {
         self.streaming.stream || !self.streaming.no_stream
     }
+}
+
+/// Nested command set under `chat`.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum ChatSubcommand {
+    /// Manage server-side chat conversations.
+    Conversations(ChatConversationsArgs),
+}
+
+/// Arguments for `chat conversations`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct ChatConversationsArgs {
+    /// Conversation-management action to run.
+    #[command(subcommand)]
+    pub command: ChatConversationCommand,
+}
+
+/// Conversation-management commands under `chat conversations`.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum ChatConversationCommand {
+    /// List chat conversations for the authenticated user.
+    List(ChatConversationsListArgs),
+    /// Show one conversation and its recent messages.
+    Show(ChatConversationsShowArgs),
+    /// Delete one conversation permanently.
+    Delete(ChatConversationsDeleteArgs),
+    /// Rename one conversation.
+    Rename(ChatConversationsRenameArgs),
+    /// Archive one conversation.
+    Archive(ChatConversationsTargetArgs),
+    /// Unarchive one conversation.
+    Unarchive(ChatConversationsTargetArgs),
+}
+
+/// Arguments for `chat conversations list`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct ChatConversationsListArgs {
+    /// Include archived conversations.
+    #[arg(long = "include-archived")]
+    pub include_archived: bool,
+    /// Maximum number of conversations to return.
+    #[arg(long)]
+    pub limit: Option<u32>,
+    /// Number of conversations to skip.
+    #[arg(long)]
+    pub offset: Option<u32>,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `chat conversations show`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct ChatConversationsShowArgs {
+    /// Conversation id to show.
+    pub conversation_id: String,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `chat conversations delete`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct ChatConversationsDeleteArgs {
+    /// Conversation id to delete.
+    pub conversation_id: String,
+    /// Confirm destructive deletion.
+    #[arg(long)]
+    pub yes: bool,
+}
+
+/// Arguments for `chat conversations rename`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct ChatConversationsRenameArgs {
+    /// Conversation id to rename.
+    pub conversation_id: String,
+    /// New user-visible title.
+    pub new_title: String,
+}
+
+/// Arguments for conversation commands that target one conversation.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct ChatConversationsTargetArgs {
+    /// Conversation id to modify.
+    pub conversation_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]

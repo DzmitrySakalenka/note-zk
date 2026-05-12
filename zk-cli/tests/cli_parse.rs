@@ -5,8 +5,8 @@ use clap::Parser;
 
 use zk_cli::{
     cli::{
-        AdminAiCommand, AdminAiRecomputeScope, AiCommand, AuthCommand, Cli, Command, OutputMode,
-        PurgeScope, ResolveStrategy, SyncMode,
+        AdminAiCommand, AdminAiRecomputeScope, AiCommand, AuthCommand, ChatConversationCommand,
+        ChatSubcommand, Cli, Command, OutputMode, PurgeScope, ResolveStrategy, SyncMode,
     },
     error::{
         CliError, EXIT_AI_DISABLED, EXIT_ISSUES, EXIT_OK, EXIT_PROVIDER_UNAVAILABLE, EXIT_REQUEST,
@@ -222,7 +222,7 @@ fn chat_parses_new_message_top_k_mode_and_json_flags() {
         Command::Chat(args) => {
             assert!(args.new);
             assert!(args.conversation_id.is_none());
-            assert_eq!(args.message, "hi");
+            assert_eq!(args.message.as_deref(), Some("hi"));
             assert_eq!(args.top_k, 5);
             assert_eq!(args.mode, ExecutionMode::Offline);
             assert!(!args.stream_enabled());
@@ -271,14 +271,154 @@ fn chat_rejects_new_and_conversation_id_together() {
 }
 
 #[test]
-fn chat_requires_conversation_selector() {
-    let error = Cli::try_parse_from(["zk-cli", "chat", "--message", "hi"])
-        .expect_err("chat should require a conversation selector");
+fn chat_conversations_list_parses_filters_and_json() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "conversations",
+        "list",
+        "--include-archived",
+        "--limit",
+        "25",
+        "--offset",
+        "5",
+        "--json",
+    ])
+    .expect("chat conversations list arguments should parse");
 
-    assert_eq!(
-        error.kind(),
-        clap::error::ErrorKind::MissingRequiredArgument
-    );
+    match cli.command {
+        Command::Chat(args) => match args.command {
+            Some(ChatSubcommand::Conversations(conversations)) => match conversations.command {
+                ChatConversationCommand::List(list) => {
+                    assert!(list.include_archived);
+                    assert_eq!(list.limit, Some(25));
+                    assert_eq!(list.offset, Some(5));
+                    assert!(list.json);
+                }
+                other => panic!("expected conversations list command, got {other:?}"),
+            },
+            other => panic!("expected conversations subcommand, got {other:?}"),
+        },
+        other => panic!("expected chat command, got {other:?}"),
+    }
+}
+
+#[test]
+fn chat_conversations_show_parses_json() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "conversations",
+        "show",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+        "--json",
+    ])
+    .expect("chat conversations show arguments should parse");
+
+    match cli.command {
+        Command::Chat(args) => match args.command {
+            Some(ChatSubcommand::Conversations(conversations)) => match conversations.command {
+                ChatConversationCommand::Show(show) => {
+                    assert_eq!(show.conversation_id, "01JAR5A3PJEZ3SKG67PN8N6S6S");
+                    assert!(show.json);
+                }
+                other => panic!("expected conversations show command, got {other:?}"),
+            },
+            other => panic!("expected conversations subcommand, got {other:?}"),
+        },
+        other => panic!("expected chat command, got {other:?}"),
+    }
+}
+
+#[test]
+fn chat_conversations_mutations_parse_targets() {
+    let rename = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "conversations",
+        "rename",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+        "Renamed",
+    ])
+    .expect("chat conversations rename arguments should parse");
+    match rename.command {
+        Command::Chat(args) => match args.command {
+            Some(ChatSubcommand::Conversations(conversations)) => match conversations.command {
+                ChatConversationCommand::Rename(rename) => {
+                    assert_eq!(rename.conversation_id, "01JAR5A3PJEZ3SKG67PN8N6S6S");
+                    assert_eq!(rename.new_title, "Renamed");
+                }
+                other => panic!("expected conversations rename command, got {other:?}"),
+            },
+            other => panic!("expected conversations subcommand, got {other:?}"),
+        },
+        other => panic!("expected chat command, got {other:?}"),
+    }
+
+    let archive = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "conversations",
+        "archive",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+    ])
+    .expect("chat conversations archive arguments should parse");
+    match archive.command {
+        Command::Chat(args) => match args.command {
+            Some(ChatSubcommand::Conversations(conversations)) => match conversations.command {
+                ChatConversationCommand::Archive(archive) => {
+                    assert_eq!(archive.conversation_id, "01JAR5A3PJEZ3SKG67PN8N6S6S");
+                }
+                other => panic!("expected conversations archive command, got {other:?}"),
+            },
+            other => panic!("expected conversations subcommand, got {other:?}"),
+        },
+        other => panic!("expected chat command, got {other:?}"),
+    }
+
+    let unarchive = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "conversations",
+        "unarchive",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+    ])
+    .expect("chat conversations unarchive arguments should parse");
+    match unarchive.command {
+        Command::Chat(args) => match args.command {
+            Some(ChatSubcommand::Conversations(conversations)) => match conversations.command {
+                ChatConversationCommand::Unarchive(unarchive) => {
+                    assert_eq!(unarchive.conversation_id, "01JAR5A3PJEZ3SKG67PN8N6S6S");
+                }
+                other => panic!("expected conversations unarchive command, got {other:?}"),
+            },
+            other => panic!("expected conversations subcommand, got {other:?}"),
+        },
+        other => panic!("expected chat command, got {other:?}"),
+    }
+
+    let delete = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "conversations",
+        "delete",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+        "--yes",
+    ])
+    .expect("chat conversations delete arguments should parse");
+    match delete.command {
+        Command::Chat(args) => match args.command {
+            Some(ChatSubcommand::Conversations(conversations)) => match conversations.command {
+                ChatConversationCommand::Delete(delete) => {
+                    assert_eq!(delete.conversation_id, "01JAR5A3PJEZ3SKG67PN8N6S6S");
+                    assert!(delete.yes);
+                }
+                other => panic!("expected conversations delete command, got {other:?}"),
+            },
+            other => panic!("expected conversations subcommand, got {other:?}"),
+        },
+        other => panic!("expected chat command, got {other:?}"),
+    }
 }
 
 #[test]
