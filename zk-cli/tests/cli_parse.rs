@@ -202,6 +202,86 @@ fn search_rejects_top_k_above_one_hundred() {
 }
 
 #[test]
+fn chat_parses_new_message_top_k_mode_and_json_flags() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "--new",
+        "-m",
+        "hi",
+        "--top-k",
+        "5",
+        "--mode",
+        "offline",
+        "--no-stream",
+        "--json",
+    ])
+    .expect("chat arguments should parse");
+
+    match cli.command {
+        Command::Chat(args) => {
+            assert!(args.new);
+            assert!(args.conversation_id.is_none());
+            assert_eq!(args.message, "hi");
+            assert_eq!(args.top_k, 5);
+            assert_eq!(args.mode, ExecutionMode::Offline);
+            assert!(!args.stream_enabled());
+            assert_eq!(OutputMode::from(args.json), OutputMode::Json);
+        }
+        other => panic!("expected chat command, got {other:?}"),
+    }
+}
+
+#[test]
+fn chat_defaults_to_top_eight_auto_mode_and_streaming() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "--conversation-id",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+        "--message",
+        "hi",
+    ])
+    .expect("chat arguments should parse");
+
+    match cli.command {
+        Command::Chat(args) => {
+            assert_eq!(args.top_k, 8);
+            assert_eq!(args.mode, ExecutionMode::Hybrid);
+            assert!(args.stream_enabled());
+        }
+        other => panic!("expected chat command, got {other:?}"),
+    }
+}
+
+#[test]
+fn chat_rejects_new_and_conversation_id_together() {
+    let error = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "--new",
+        "--conversation-id",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+        "--message",
+        "hi",
+    ])
+    .expect_err("chat should reject conflicting conversation selectors");
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
+fn chat_requires_conversation_selector() {
+    let error = Cli::try_parse_from(["zk-cli", "chat", "--message", "hi"])
+        .expect_err("chat should require a conversation selector");
+
+    assert_eq!(
+        error.kind(),
+        clap::error::ErrorKind::MissingRequiredArgument
+    );
+}
+
+#[test]
 fn ai_recompute_local_parses_vault_model_dir_and_json() {
     let cli = Cli::try_parse_from([
         "zk-cli",

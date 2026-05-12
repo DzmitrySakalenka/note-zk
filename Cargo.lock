@@ -5604,6 +5604,7 @@ dependencies = [
  "assert_cmd",
  "axum",
  "clap",
+ "futures",
  "hex",
  "insta",
  "predicates",

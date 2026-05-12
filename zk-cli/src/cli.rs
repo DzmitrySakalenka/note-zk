@@ -46,6 +46,8 @@ pub enum Command {
     Sync(SyncArgs),
     /// Search the vault. Keyword search is reserved; semantic search is available with `--semantic`.
     Search(SearchArgs),
+    /// Send one AI chat message.
+    Chat(ChatArgs),
     /// Resolve one server-side sync conflict explicitly.
     ResolveConflict(ResolveConflictArgs),
 }
@@ -475,6 +477,51 @@ pub struct SearchArgs {
     /// Render pretty JSON to stdout.
     #[arg(long)]
     pub json: bool,
+}
+
+/// Arguments for the `chat` subcommand.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("chat_conversation").args(["new", "conversation_id"]).required(true).multiple(false)))]
+pub struct ChatArgs {
+    /// Create a new conversation before sending the message.
+    #[arg(long = "new")]
+    pub new: bool,
+    /// Existing conversation id to append the message to.
+    #[arg(long = "conversation-id")]
+    pub conversation_id: Option<String>,
+    /// Prompt text to send. Use `-` to read the prompt from stdin.
+    #[arg(short = 'm', long = "message")]
+    pub message: String,
+    /// Maximum number of retrieval hits to include.
+    #[arg(long = "top-k", default_value_t = 8)]
+    pub top_k: u32,
+    #[command(flatten)]
+    streaming: ChatStreamFlags,
+    /// AI execution mode: connected, offline, or auto.
+    #[arg(long, default_value = "auto")]
+    pub mode: ExecutionMode,
+    /// Render newline-delimited JSON events to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+impl ChatArgs {
+    /// Returns whether the command should request and render streaming output.
+    #[must_use]
+    pub fn stream_enabled(&self) -> bool {
+        self.streaming.stream || !self.streaming.no_stream
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("chat_streaming").args(["stream", "no_stream"]).multiple(false)))]
+struct ChatStreamFlags {
+    /// Request streaming response output.
+    #[arg(long)]
+    stream: bool,
+    /// Request buffered response output.
+    #[arg(long = "no-stream")]
+    no_stream: bool,
 }
 
 /// Arguments for the `resolve-conflict` subcommand.
