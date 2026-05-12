@@ -528,6 +528,27 @@ async fn create_rejects_empty_title() {
     .await;
 }
 
+#[tokio::test]
+async fn create_allows_null_title() {
+    let fixture = ChatFixture::enabled();
+    let session = fixture.issue_session(USER_ID, vec![AuthScope::Sync]);
+
+    let response = build_router(fixture.state.clone())
+        .oneshot(json_request(
+            Method::POST,
+            CONVERSATIONS_PATH,
+            &json!({"title": null}),
+            auth_for(&session),
+        ))
+        .await
+        .expect("create conversation request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let conversation: ConversationDto = response_body(response).await;
+    assert_eq!(conversation.title, None);
+    assert_eq!(conversation.message_count, 0);
+}
+
 async fn create_conversation(
     fixture: &ChatFixture,
     session: &ChatSession,

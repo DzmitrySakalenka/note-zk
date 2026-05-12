@@ -38,6 +38,35 @@ pub enum AppError {
     /// Sync transport or local sync-state workflow failure.
     #[error("while attempting to perform sync workflow: {0}")]
     Sync(#[from] SyncError),
+    /// Remote network or transport failure.
+    #[error("while attempting to reach remote API: {message}")]
+    Network {
+        /// Redacted network or transport error message.
+        message: String,
+    },
+    /// Remote API rejected authentication or authorization.
+    #[error("while attempting to authenticate remote API request: {message}")]
+    Auth {
+        /// Redacted API error message.
+        message: String,
+    },
+    /// Remote API did not find the requested resource.
+    #[error("while attempting to access remote API resource: {message}")]
+    NotFound {
+        /// Redacted API error message.
+        message: String,
+    },
+    /// Remote API returned a structured error response.
+    #[error("while attempting to call remote API: HTTP {status} {code}: {message}")]
+    ApiError {
+        /// Numeric HTTP status. Zero means the error came from a streamed
+        /// application-level frame rather than a final HTTP status.
+        status: u16,
+        /// Stable API error code.
+        code: String,
+        /// Redacted API error message.
+        message: String,
+    },
     /// Retention arithmetic overflowed the representable chrono range.
     #[error(
         "while attempting to compute retention timestamp from {base}: adding {days} days overflowed representable datetime range"

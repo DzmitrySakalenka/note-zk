@@ -1,5 +1,7 @@
 //! Feature-gated AI facade for semantic search and local cache recompute.
 
+mod sse;
+
 use std::{
     collections::HashSet,
     error::Error,
@@ -8,9 +10,11 @@ use std::{
     time::Duration,
 };
 
+use futures::{StreamExt, stream::BoxStream};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tokio::time::{Instant, timeout};
+pub use zk_ai::provider::ChatChunk;
 use zk_ai::{
     AiError, AiResult,
     chunker::ParagraphChunker,
@@ -22,15 +26,17 @@ use zk_ai::{
     },
 };
 use zk_domain::{
-    Capability, ChunkEmbeddingRecord, ChunkId, ChunkRecord, EmbeddingModelId, ExecutionMode,
-    config::EffectiveConfig, id::NoteId,
+    Capability, ChunkEmbeddingRecord, ChunkId, ChunkRecord, ConversationId, EmbeddingModelId,
+    ExecutionMode, MessageId, MessageRole, auth::UserId, config::EffectiveConfig, id::NoteId,
 };
 use zk_index::{ChunksRepo, EmbeddingsRepo, IndexError, NoteInput, NoteRepo, UpsertNoteParams};
-use zk_sync::HttpTransport;
+use zk_sync::{HttpTextResponse, HttpTransport, SyncError};
 use zk_vault::{TrashState, VaultScanResult};
 
-use crate::{build_note_inputs, scan_vault};
+use crate::{AppError, Result as AppResult, build_note_inputs, scan_vault};
 
+const CHAT_PATH: &str = "/ai/chat";
+const CONVERSATIONS_PATH: &str = "/ai/chat/conversations";
 const SEMANTIC_SEARCH_PATH: &str = "/search/semantic";
 const DEFAULT_HEALTH_PROBE_PATH: &str = "/health";
 const DEFAULT_HEALTH_PROBE_TIMEOUT: Duration = Duration::from_millis(800);
@@ -75,6 +81,81 @@ pub struct SemanticSearchRequest {
     pub top_k: usize,
     /// Per-call execution-mode override.
     pub mode_override: Option<ExecutionMode>,
+}
+
+/// Request for one server-backed chat turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatRequest {
+    /// Existing conversation to append the turn to.
+    pub conversation_id: ConversationId,
+    /// User-authored prompt text.
+    pub user_query: String,
+    /// Maximum number of retrieval hits to use.
+    pub top_k: u32,
+    /// Whether the server should stream response chunks.
+    pub stream: bool,
+}
+
+/// Query parameters for listing chat conversations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ListConversationsParams {
+    /// Include archived conversations when true.
+    pub include_archived: bool,
+    /// Optional maximum number of conversations.
+    pub limit: Option<u32>,
+    /// Optional number of conversations to skip.
+    pub offset: Option<u32>,
+}
+
+/// Chat conversation returned by the server facade.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ConversationDto {
+    /// Stable conversation identifier.
+    pub conversation_id: ConversationId,
+    /// Owning authenticated user.
+    pub user_id: UserId,
+    /// Optional user-visible title.
+    pub title: Option<String>,
+    /// Creation timestamp.
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Last metadata update timestamp.
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Last message timestamp, if any.
+    pub last_message_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Archive timestamp, if archived.
+    pub archived_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Number of messages in the conversation.
+    pub message_count: u32,
+}
+
+/// Conversation detail with recent messages and inline citations.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct ConversationDetail {
+    /// Conversation metadata.
+    pub conversation: ConversationDto,
+    /// Recent messages in chronological order.
+    pub messages: Vec<MessageDto>,
+}
+
+/// Chat message returned by the server facade.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct MessageDto {
+    /// Stable message identifier.
+    pub message_id: MessageId,
+    /// Parent conversation identifier.
+    pub conversation_id: ConversationId,
+    /// Message role.
+    pub role: MessageRole,
+    /// Full message content.
+    pub content: String,
+    /// Optional provider token count.
+    pub token_count: Option<u32>,
+    /// Creation timestamp.
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Optional future sync revision.
+    pub server_revision: Option<i64>,
+    /// Inline retrieval citations for assistant messages.
+    pub citations: Vec<zk_domain::Citation>,
 }
 
 /// Summary returned by local cache recomputation.
@@ -194,6 +275,119 @@ impl AiFacade {
         Ok(summary)
     }
 
+    /// Runs one server-backed chat turn and returns streamed chunks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when HTTP transport is missing, the remote request
+    /// fails, or the server rejects the request.
+    pub async fn chat(
+        &self,
+        request: ChatRequest,
+    ) -> AppResult<BoxStream<'static, AppResult<ChatChunk>>> {
+        let http = self.http_transport()?;
+        let body = serde_json::to_value(RemoteChatRequest {
+            conversation_id: request.conversation_id.to_string(),
+            user_query: request.user_query,
+            top_k: request.top_k,
+            stream: request.stream,
+        })
+        .expect("chat request should serialize");
+        let response = http
+            .post_json_stream(CHAT_PATH, &body)
+            .await
+            .map_err(sync_to_network_error)?;
+
+        if response.status >= 400 {
+            let body = collect_stream_body(response.body).await?;
+            return Err(map_http_error(response.status, &body));
+        }
+
+        Ok(sse::chat_sse_stream(response.body))
+    }
+
+    /// Lists conversations for the authenticated server user.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when HTTP transport is missing, the remote request
+    /// fails, or the server rejects the request.
+    pub async fn list_conversations(
+        &self,
+        params: ListConversationsParams,
+    ) -> AppResult<Vec<ConversationDto>> {
+        let path = list_conversations_path(params);
+        self.get_json(&path).await
+    }
+
+    /// Fetches one conversation and its recent messages.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when HTTP transport is missing, the remote request
+    /// fails, or the server rejects the request.
+    pub async fn get_conversation(&self, id: ConversationId) -> AppResult<ConversationDetail> {
+        self.get_json(&conversation_path(&id)).await
+    }
+
+    /// Creates an empty conversation with an optional title.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when HTTP transport is missing, the remote request
+    /// fails, or the server rejects the request.
+    pub async fn create_conversation(&self, title: Option<String>) -> AppResult<ConversationDto> {
+        let body = serde_json::to_value(CreateConversationRequest { title })
+            .expect("create conversation request should serialize");
+
+        self.post_json(CONVERSATIONS_PATH, &body).await
+    }
+
+    /// Renames one conversation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when HTTP transport is missing, the remote request
+    /// fails, or the server rejects the request.
+    pub async fn rename_conversation(&self, id: ConversationId, title: String) -> AppResult<()> {
+        let body = serde_json::to_value(PatchConversationRequest {
+            title: Some(title),
+            archived: None,
+        })
+        .expect("rename conversation request should serialize");
+        self.patch_json(&conversation_path(&id), &body).await
+    }
+
+    /// Archives or unarchives one conversation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when HTTP transport is missing, the remote request
+    /// fails, or the server rejects the request.
+    pub async fn archive_conversation(&self, id: ConversationId, archived: bool) -> AppResult<()> {
+        let body = serde_json::to_value(PatchConversationRequest {
+            title: None,
+            archived: Some(archived),
+        })
+        .expect("archive conversation request should serialize");
+        self.patch_json(&conversation_path(&id), &body).await
+    }
+
+    /// Permanently deletes one conversation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when HTTP transport is missing, the remote request
+    /// fails, or the server rejects the request.
+    pub async fn delete_conversation(&self, id: ConversationId) -> AppResult<()> {
+        let response = self
+            .http_transport()?
+            .delete_text(&conversation_path(&id))
+            .await
+            .map_err(sync_to_network_error)?;
+        ensure_success(response).map(|_| ())
+    }
+
     async fn semantic_search_hybrid(
         &self,
         request: &SemanticSearchRequest,
@@ -292,6 +486,48 @@ impl AiFacade {
                 "local embeddings repository is not configured".to_string(),
             )
         })
+    }
+
+    fn http_transport(&self) -> AppResult<&HttpTransport> {
+        self.http.as_deref().ok_or_else(|| AppError::Network {
+            message: "HTTP transport is not configured".to_string(),
+        })
+    }
+
+    async fn get_json<T>(&self, path: &str) -> AppResult<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let response = self
+            .http_transport()?
+            .get_text(path)
+            .await
+            .map_err(sync_to_network_error)?;
+
+        decode_success_json(response)
+    }
+
+    async fn post_json<T>(&self, path: &str, body: &serde_json::Value) -> AppResult<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let response = self
+            .http_transport()?
+            .post_json_text(path, body)
+            .await
+            .map_err(sync_to_network_error)?;
+
+        decode_success_json(response)
+    }
+
+    async fn patch_json(&self, path: &str, body: &serde_json::Value) -> AppResult<()> {
+        let response = self
+            .http_transport()?
+            .patch_json_text(path, body)
+            .await
+            .map_err(sync_to_network_error)?;
+
+        ensure_success(response).map(|_| ())
     }
 
     fn cached_probe_result(&self) -> Option<bool> {
@@ -446,6 +682,38 @@ impl EmbeddingsWriter for LocalEmbeddingsRepoHandle {
 }
 
 #[derive(Debug, Serialize)]
+struct RemoteChatRequest {
+    conversation_id: String,
+    user_query: String,
+    top_k: u32,
+    stream: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct CreateConversationRequest {
+    title: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PatchConversationRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    archived: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiErrorEnvelope {
+    error: ApiErrorBody,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiErrorBody {
+    code: String,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
 struct RemoteSemanticSearchRequest {
     query: String,
     top_k: Option<usize>,
@@ -476,6 +744,102 @@ impl RemoteSearchHit {
             similarity: self.similarity,
             snippet: self.snippet,
         }
+    }
+}
+
+fn list_conversations_path(params: ListConversationsParams) -> String {
+    let mut query = Vec::with_capacity(3);
+
+    if params.include_archived {
+        query.push("include_archived=true".to_string());
+    }
+    if let Some(limit) = params.limit {
+        query.push(format!("limit={limit}"));
+    }
+    if let Some(offset) = params.offset {
+        query.push(format!("offset={offset}"));
+    }
+
+    if query.is_empty() {
+        CONVERSATIONS_PATH.to_string()
+    } else {
+        format!("{CONVERSATIONS_PATH}?{}", query.join("&"))
+    }
+}
+
+fn conversation_path(conversation_id: &ConversationId) -> String {
+    format!("{CONVERSATIONS_PATH}/{conversation_id}")
+}
+
+async fn collect_stream_body(
+    mut body: BoxStream<'static, zk_sync::SyncResult<Vec<u8>>>,
+) -> AppResult<String> {
+    let mut bytes = Vec::new();
+
+    while let Some(chunk) = body.next().await {
+        bytes.extend(chunk.map_err(sync_to_network_error)?);
+    }
+
+    String::from_utf8(bytes).map_err(|error| AppError::ApiError {
+        status: 0,
+        code: "invalid_response".to_string(),
+        message: error.to_string(),
+    })
+}
+
+fn decode_success_json<T>(response: HttpTextResponse) -> AppResult<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let response = ensure_success(response)?;
+    serde_json::from_str(&response.body).map_err(|error| AppError::ApiError {
+        status: response.status,
+        code: "decode_error".to_string(),
+        message: error.to_string(),
+    })
+}
+
+fn ensure_success(response: HttpTextResponse) -> AppResult<HttpTextResponse> {
+    if response.status < 400 {
+        Ok(response)
+    } else {
+        Err(map_http_error(response.status, &response.body))
+    }
+}
+
+fn map_http_error(status: u16, body: &str) -> AppError {
+    let (code, message) = serde_json::from_str::<ApiErrorEnvelope>(body)
+        .map(|envelope| (envelope.error.code, envelope.error.message))
+        .unwrap_or_else(|_| {
+            (
+                "http_error".to_string(),
+                fallback_http_message(status, body),
+            )
+        });
+
+    match status {
+        401 | 403 => AppError::Auth { message },
+        404 => AppError::NotFound { message },
+        _ => AppError::ApiError {
+            status,
+            code,
+            message,
+        },
+    }
+}
+
+fn fallback_http_message(status: u16, body: &str) -> String {
+    let body = body.trim();
+    if body.is_empty() {
+        format!("HTTP {status}")
+    } else {
+        body.to_string()
+    }
+}
+
+fn sync_to_network_error(error: SyncError) -> AppError {
+    AppError::Network {
+        message: error_chain_message(&error),
     }
 }
 

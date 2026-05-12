@@ -12,7 +12,8 @@ workspace = true
 async-trait = "0.1.89"
 base64 = "0.22.1"
 chrono = { version = "0.4.44", default-features = false, features = ["alloc", "serde"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+futures = "0.3.32"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 serde_json = "1.0.149"
 thiserror = "2.0.18"

@@ -28,4 +28,4 @@ pub use push::{PushApplyOutcome, apply_push_response, build_push_request};
 pub use pull::{PullApplyContext, PullApplyOutcome, apply_pull_response};
 #[rustfmt::skip]
 pub use transport::{NoopTransport, SyncTransport};
-pub use http_transport::HttpTransport;
+pub use http_transport::{HttpStreamResponse, HttpTextResponse, HttpTransport};

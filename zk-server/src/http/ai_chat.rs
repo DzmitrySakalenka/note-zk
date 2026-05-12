@@ -53,7 +53,7 @@ struct AiChatRequest {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreateConversationRequest {
-    title: String,
+    title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -175,12 +175,12 @@ async fn create_conversation(
     authenticated_user: AuthenticatedChatUser,
     Json(request): Json<CreateConversationRequest>,
 ) -> Result<Json<ConversationDto>, ApiError> {
-    let title = normalize_title(&request.title)?;
+    let title = request.title.as_deref().map(normalize_title).transpose()?;
     let db = state.db_handle();
     let user_id = authenticated_user.user_id;
     let conversation = run_blocking("create chat conversation", move || {
         db.with_conn(|connection| {
-            let conversation = ConversationsRepo::create(connection, &user_id, Some(&title))?;
+            let conversation = ConversationsRepo::create(connection, &user_id, title.as_deref())?;
             conversation_dto_with_count(connection, conversation)
         })
     })
