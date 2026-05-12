@@ -37,6 +37,7 @@ use crate::{AppError, Result as AppResult, build_note_inputs, scan_vault};
 
 const CHAT_PATH: &str = "/ai/chat";
 const CONVERSATIONS_PATH: &str = "/ai/chat/conversations";
+const CHAT_REQUIRES_SERVER_CONNECTIVITY: &str = "chat requires server connectivity in V1";
 const SEMANTIC_SEARCH_PATH: &str = "/search/semantic";
 const DEFAULT_HEALTH_PROBE_PATH: &str = "/health";
 const DEFAULT_HEALTH_PROBE_TIMEOUT: Duration = Duration::from_millis(800);
@@ -277,6 +278,15 @@ impl AiFacade {
 
     /// Runs one server-backed chat turn and returns streamed chunks.
     ///
+    /// V1 chat is connected-only. Offline mode returns
+    /// [`AppError::ProviderUnavailable`] before any HTTP call. Hybrid mode
+    /// reuses the cached server health probe and proceeds only when the server
+    /// is reachable.
+    ///
+    /// Future Hook: post-V1 local chat should plug in through
+    /// `ProviderSelector::select_chat`, `Capability::Chat`, and the chat
+    /// provider registry slot rather than adding a second facade path here.
+    ///
     /// # Errors
     ///
     /// Returns [`AppError`] when HTTP transport is missing, the remote request
@@ -285,6 +295,7 @@ impl AiFacade {
         &self,
         request: ChatRequest,
     ) -> AppResult<BoxStream<'static, AppResult<ChatChunk>>> {
+        self.require_chat_connected().await?;
         let http = self.http_transport()?;
         let body = serde_json::to_value(RemoteChatRequest {
             conversation_id: request.conversation_id.to_string(),
@@ -308,6 +319,9 @@ impl AiFacade {
 
     /// Lists conversations for the authenticated server user.
     ///
+    /// V1 conversation management is connected-only because no local
+    /// conversation cache exists yet.
+    ///
     /// # Errors
     ///
     /// Returns [`AppError`] when HTTP transport is missing, the remote request
@@ -316,27 +330,36 @@ impl AiFacade {
         &self,
         params: ListConversationsParams,
     ) -> AppResult<Vec<ConversationDto>> {
+        self.require_chat_connected().await?;
         let path = list_conversations_path(params);
         self.get_json(&path).await
     }
 
     /// Fetches one conversation and its recent messages.
     ///
+    /// V1 conversation management is connected-only because no local
+    /// conversation cache exists yet.
+    ///
     /// # Errors
     ///
     /// Returns [`AppError`] when HTTP transport is missing, the remote request
     /// fails, or the server rejects the request.
     pub async fn get_conversation(&self, id: ConversationId) -> AppResult<ConversationDetail> {
+        self.require_chat_connected().await?;
         self.get_json(&conversation_path(&id)).await
     }
 
     /// Creates an empty conversation with an optional title.
+    ///
+    /// V1 conversation management is connected-only because no local
+    /// conversation cache exists yet.
     ///
     /// # Errors
     ///
     /// Returns [`AppError`] when HTTP transport is missing, the remote request
     /// fails, or the server rejects the request.
     pub async fn create_conversation(&self, title: Option<String>) -> AppResult<ConversationDto> {
+        self.require_chat_connected().await?;
         let body = serde_json::to_value(CreateConversationRequest { title })
             .expect("create conversation request should serialize");
 
@@ -345,11 +368,15 @@ impl AiFacade {
 
     /// Renames one conversation.
     ///
+    /// V1 conversation management is connected-only because no local
+    /// conversation cache exists yet.
+    ///
     /// # Errors
     ///
     /// Returns [`AppError`] when HTTP transport is missing, the remote request
     /// fails, or the server rejects the request.
     pub async fn rename_conversation(&self, id: ConversationId, title: String) -> AppResult<()> {
+        self.require_chat_connected().await?;
         let body = serde_json::to_value(PatchConversationRequest {
             title: Some(title),
             archived: None,
@@ -360,11 +387,15 @@ impl AiFacade {
 
     /// Archives or unarchives one conversation.
     ///
+    /// V1 conversation management is connected-only because no local
+    /// conversation cache exists yet.
+    ///
     /// # Errors
     ///
     /// Returns [`AppError`] when HTTP transport is missing, the remote request
     /// fails, or the server rejects the request.
     pub async fn archive_conversation(&self, id: ConversationId, archived: bool) -> AppResult<()> {
+        self.require_chat_connected().await?;
         let body = serde_json::to_value(PatchConversationRequest {
             title: None,
             archived: Some(archived),
@@ -375,11 +406,15 @@ impl AiFacade {
 
     /// Permanently deletes one conversation.
     ///
+    /// V1 conversation management is connected-only because no local
+    /// conversation cache exists yet.
+    ///
     /// # Errors
     ///
     /// Returns [`AppError`] when HTTP transport is missing, the remote request
     /// fails, or the server rejects the request.
     pub async fn delete_conversation(&self, id: ConversationId) -> AppResult<()> {
+        self.require_chat_connected().await?;
         let response = self
             .http_transport()?
             .delete_text(&conversation_path(&id))
@@ -430,6 +465,21 @@ impl AiFacade {
         self.store_probe_result(result);
 
         result
+    }
+
+    async fn require_chat_connected(&self) -> AppResult<()> {
+        match self.mode {
+            ExecutionMode::Connected => Ok(()),
+            ExecutionMode::Offline => Err(chat_provider_unavailable_error()),
+            ExecutionMode::Hybrid => {
+                if self.probe_server().await {
+                    Ok(())
+                } else {
+                    tracing::info!("ai: server unreachable; chat requires connected server");
+                    Err(chat_provider_unavailable_error())
+                }
+            }
+        }
     }
 
     async fn semantic_search_connected(
@@ -840,6 +890,12 @@ fn fallback_http_message(status: u16, body: &str) -> String {
 fn sync_to_network_error(error: SyncError) -> AppError {
     AppError::Network {
         message: error_chain_message(&error),
+    }
+}
+
+fn chat_provider_unavailable_error() -> AppError {
+    AppError::ProviderUnavailable {
+        message: CHAT_REQUIRES_SERVER_CONNECTIVITY.to_string(),
     }
 }
 

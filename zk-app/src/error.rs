@@ -38,6 +38,12 @@ pub enum AppError {
     /// Sync transport or local sync-state workflow failure.
     #[error("while attempting to perform sync workflow: {0}")]
     Sync(#[from] SyncError),
+    /// Selected app-layer AI provider or mode cannot satisfy the request.
+    #[error("while attempting to select AI provider: {message}")]
+    ProviderUnavailable {
+        /// User-facing provider availability message.
+        message: String,
+    },
     /// Remote network or transport failure.
     #[error("while attempting to reach remote API: {message}")]
     Network {
