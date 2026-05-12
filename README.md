@@ -261,6 +261,46 @@ features and require platform support. See
 `docs/decisions/0004-server-first-ai-with-local-fallback.md` for the
 server-first local fallback decision.
 
+## Chat and Retrieval
+
+V1 chat is server-only and requires Connected mode. The server owns
+conversation history and citations; local chat fallback is post-V1.
+
+```toml
+[ai.chat]
+provider = "remote-http" # "stub" or "remote-http"
+model_id = "gpt-4o-mini"
+base_url = "https://api.openai.com"
+api_key_env_var = "OPENAI_API_KEY"
+max_input_tokens = 8192
+max_output_tokens = 1024
+timeout_secs = 60
+max_attempts = 3
+retrieval_top_k = 8
+retrieval_max_chunks_per_note = 2
+retrieval_token_budget = 2048
+# system_prompt_path = "/etc/zk/chat-system-prompt.md"
+```
+
+Chat HTTP endpoints are mounted when `[ai]` is configured:
+
+- `POST /ai/chat` streams Server-Sent Events for one chat turn.
+- `POST /ai/chat/conversations` creates a conversation.
+- `GET /ai/chat/conversations` lists conversations.
+- `GET`, `PATCH`, and `DELETE /ai/chat/conversations/{id}` read,
+  rename/archive, or permanently delete one conversation.
+
+The CLI command surface:
+
+```bash
+zk-cli chat --new --message "What does the project use for sync?"
+zk-cli chat --conversation-id <id> -m "..."
+zk-cli chat conversations list
+```
+
+The server chat API is user-owned and currently accepts browser-session
+chat auth. Device-token-only chat and local/offline chat are post-V1.
+
 ## Backup and Restore
 
 Enable built-in server backups in `server.toml`:
@@ -310,6 +350,7 @@ pairs off-host with `rsync`, `scp`, or a mounted NAS.
 - `doctor`: print grouped diagnostics.
 - `trash`, `restore`, `purge`: manage the trash lifecycle.
 - `sync`: run register/bootstrap, push, and pull against the server.
+- `chat`: send a server-backed AI chat message or manage conversations.
 - `resolve-conflict`: explicitly keep the local or remote side for one conflict.
 
 ```bash
@@ -333,7 +374,7 @@ Add `--json` to any subcommand for machine-readable output on stdout.
 Detailed design documents live under `docs/`:
 
 - `docs/architecture/` -- stable system design documents
-- `docs/decisions/` -- ADR-style decision records (0001-0014)
+- `docs/decisions/` -- ADR-style decision records (0001-0015)
 - `docs/plans/` -- phased implementation plans and roadmaps
 
 ## High-Level Shape

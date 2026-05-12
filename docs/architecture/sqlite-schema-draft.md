@@ -307,6 +307,8 @@ Index:
 
 - `idx_message_citations_note ON message_citations(note_id)`
 
+Last verified against `zk-server/src/schema.rs:145-209,253-263` on 2026-05-07.
+
 ## Server SQLite Schema
 
 The server schema mirrors some local concepts but remains authoritative for shared sync state.
