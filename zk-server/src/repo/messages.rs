@@ -49,6 +49,32 @@ WHERE conversation_id = ?1
 ORDER BY created_at ASC, message_id ASC
 LIMIT ?4
 ";
+const LIST_RECENT_MESSAGES_SQL: &str = r"
+SELECT
+    message_id,
+    conversation_id,
+    role,
+    content,
+    token_count,
+    created_at,
+    server_revision
+FROM (
+    SELECT
+        message_id,
+        conversation_id,
+        role,
+        content,
+        token_count,
+        created_at,
+        server_revision
+    FROM messages
+    WHERE conversation_id = ?1
+    ORDER BY created_at DESC, message_id DESC
+    LIMIT ?2
+)
+ORDER BY created_at ASC, message_id ASC
+";
+const COUNT_MESSAGES_SQL: &str = "SELECT COUNT(*) FROM messages WHERE conversation_id = ?1";
 
 const DEFAULT_LIST_LIMIT: u32 = 200;
 const MAX_LIST_LIMIT: u32 = 1_000;
@@ -172,6 +198,51 @@ impl MessagesRepo {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(ServerError::Database)
+    }
+
+    /// Lists the latest messages in chronological response order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ServerError::InvalidRequest`] for an invalid limit, or
+    /// [`ServerError`] when the query fails or row decoding is invalid.
+    pub fn list_recent_for_conversation(
+        conn: &Connection,
+        conversation_id: &ConversationId,
+        limit: u32,
+    ) -> ServerResult<Vec<MessageRecord>> {
+        let limit = decode_limit(limit)?;
+        let mut statement = conn
+            .prepare_cached(LIST_RECENT_MESSAGES_SQL)
+            .map_err(ServerError::Database)?;
+        let rows = statement
+            .query_map(
+                rusqlite::params![conversation_id.as_str(), limit],
+                decode_message_row,
+            )
+            .map_err(ServerError::Database)?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(ServerError::Database)
+    }
+
+    /// Counts persisted messages for one conversation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ServerError`] when the query fails or the count cannot fit in
+    /// `u32`.
+    pub fn count_for_conversation(
+        conn: &Connection,
+        conversation_id: &ConversationId,
+    ) -> ServerResult<u32> {
+        let count = conn
+            .query_row(COUNT_MESSAGES_SQL, [conversation_id.as_str()], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map_err(ServerError::Database)?;
+
+        u32::try_from(count).map_err(|error| ServerError::Internal(Box::new(error)))
     }
 }
 

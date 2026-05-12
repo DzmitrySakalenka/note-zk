@@ -124,6 +124,13 @@ fn citation(chunk: &ChunkRecord, ordinal: u32, similarity: f32) -> Citation {
     }
 }
 
+fn citations_for_message(rows: &[(MessageId, Citation)], message_id: &MessageId) -> Vec<Citation> {
+    rows.iter()
+        .filter(|(row_message_id, _)| row_message_id == message_id)
+        .map(|(_, citation)| citation.clone())
+        .collect()
+}
+
 #[test]
 fn replace_empty_list_deletes_existing_rows() {
     let connection = setup_connection();
@@ -160,6 +167,55 @@ fn replace_with_three_ordinals_lists_in_ordinal_order() {
         .expect("citation list should work");
 
     assert_eq!(loaded, vec![first, second, third]);
+}
+
+#[test]
+fn list_for_messages_batches_rows_by_message_and_ordinal() {
+    let connection = setup_connection();
+    let first_message_id = create_message(&connection);
+    let second_message = MessagesRepo::append(
+        &connection,
+        AppendMessageParams {
+            conversation_id: MessagesRepo::get(&connection, &first_message_id)
+                .expect("first message get should work")
+                .expect("first message should exist")
+                .conversation_id,
+            role: MessageRole::Assistant,
+            content: "Follow-up".to_string(),
+            token_count: Some(7),
+            now: parse_timestamp("2026-05-11T10:06:00Z"),
+        },
+    )
+    .expect("second message append should work");
+    let chunks = seed_chunks(&connection);
+    let first_citation = citation(&chunks[0], 1, 0.91);
+    let second_citation = citation(&chunks[1], 2, 0.82);
+    let third_citation = citation(&chunks[2], 1, 0.73);
+
+    MessageCitationsRepo::replace_for_message(
+        &connection,
+        &first_message_id,
+        &[second_citation.clone(), first_citation.clone()],
+    )
+    .expect("first citation replace should work");
+    MessageCitationsRepo::replace_for_message(
+        &connection,
+        &second_message.message_id,
+        std::slice::from_ref(&third_citation),
+    )
+    .expect("second citation replace should work");
+
+    let loaded = MessageCitationsRepo::list_for_messages(
+        &connection,
+        &[second_message.message_id.clone(), first_message_id.clone()],
+    )
+    .expect("batched citation list should work");
+
+    let first_loaded = citations_for_message(&loaded, &first_message_id);
+    let second_loaded = citations_for_message(&loaded, &second_message.message_id);
+
+    assert_eq!(first_loaded, vec![first_citation, second_citation]);
+    assert_eq!(second_loaded, vec![third_citation]);
 }
 
 #[test]

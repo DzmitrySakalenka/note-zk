@@ -273,6 +273,98 @@ fn include_system_false_filters_system_messages() {
 }
 
 #[test]
+fn list_recent_for_conversation_returns_latest_messages_in_chronological_order() {
+    let connection = setup_connection();
+    let user_id = test_user_id(1);
+    create_user(&connection, &user_id);
+    let conversation_id = create_conversation(&connection, &user_id);
+    let first = append_message(
+        &connection,
+        message_params(
+            &conversation_id,
+            MessageRole::User,
+            "first",
+            None,
+            "2026-05-11T10:01:00Z",
+        ),
+    );
+    let second = append_message(
+        &connection,
+        message_params(
+            &conversation_id,
+            MessageRole::Assistant,
+            "second",
+            Some(5),
+            "2026-05-11T10:02:00Z",
+        ),
+    );
+    let third = append_message(
+        &connection,
+        message_params(
+            &conversation_id,
+            MessageRole::User,
+            "third",
+            None,
+            "2026-05-11T10:03:00Z",
+        ),
+    );
+
+    let listed = MessagesRepo::list_recent_for_conversation(&connection, &conversation_id, 2)
+        .expect("recent message list should work");
+
+    assert_eq!(
+        message_ids(&listed),
+        vec![second.message_id, third.message_id]
+    );
+    assert!(!message_ids(&listed).contains(&first.message_id));
+}
+
+#[test]
+fn count_for_conversation_filters_parent() {
+    let connection = setup_connection();
+    let user_id = test_user_id(1);
+    create_user(&connection, &user_id);
+    let conversation_id = create_conversation(&connection, &user_id);
+    let other_conversation_id = create_conversation(&connection, &user_id);
+
+    append_message(
+        &connection,
+        message_params(
+            &conversation_id,
+            MessageRole::User,
+            "first",
+            None,
+            "2026-05-11T10:01:00Z",
+        ),
+    );
+    append_message(
+        &connection,
+        message_params(
+            &conversation_id,
+            MessageRole::Assistant,
+            "second",
+            Some(5),
+            "2026-05-11T10:02:00Z",
+        ),
+    );
+    append_message(
+        &connection,
+        message_params(
+            &other_conversation_id,
+            MessageRole::User,
+            "other",
+            None,
+            "2026-05-11T10:03:00Z",
+        ),
+    );
+
+    let count = MessagesRepo::count_for_conversation(&connection, &conversation_id)
+        .expect("message count should work");
+
+    assert_eq!(count, 2);
+}
+
+#[test]
 fn invalid_list_limit_returns_invalid_request() {
     let connection = setup_connection();
     let conversation_id = ConversationId::generate();
@@ -295,6 +387,19 @@ fn invalid_list_limit_returns_invalid_request() {
     );
     assert!(
         matches!(too_large, ServerError::InvalidRequest(message) if message == "limit must be between 1 and 1000")
+    );
+
+    let recent_zero = MessagesRepo::list_recent_for_conversation(&connection, &conversation_id, 0)
+        .expect_err("zero recent limit should fail");
+    let recent_too_large =
+        MessagesRepo::list_recent_for_conversation(&connection, &conversation_id, 1001)
+            .expect_err("large recent limit should fail");
+
+    assert!(
+        matches!(recent_zero, ServerError::InvalidRequest(message) if message == "limit must be between 1 and 1000")
+    );
+    assert!(
+        matches!(recent_too_large, ServerError::InvalidRequest(message) if message == "limit must be between 1 and 1000")
     );
 }
 

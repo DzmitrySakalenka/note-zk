@@ -28,6 +28,22 @@ FROM message_citations
 WHERE message_id = ?1 AND chunk_id IS NOT NULL
 ORDER BY ordinal ASC
 ";
+const LIST_CITATIONS_FOR_MESSAGES_PREFIX: &str = r"
+SELECT
+    message_id,
+    note_id,
+    chunk_id,
+    similarity,
+    snippet,
+    ordinal
+FROM message_citations
+WHERE chunk_id IS NOT NULL
+  AND message_id IN (
+";
+const LIST_CITATIONS_FOR_MESSAGES_SUFFIX: &str = r"
+)
+ORDER BY message_id ASC, ordinal ASC
+";
 
 /// Repository over the server `message_citations` table.
 pub struct MessageCitationsRepo;
@@ -92,6 +108,36 @@ impl MessageCitationsRepo {
             .map_err(ServerError::Database)
     }
 
+    /// Lists citations for multiple messages ordered by message id and ordinal.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ServerError`] when the query fails or row decoding is invalid.
+    pub fn list_for_messages(
+        conn: &Connection,
+        message_ids: &[MessageId],
+    ) -> ServerResult<Vec<(MessageId, Citation)>> {
+        if message_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let placeholders = vec!["?"; message_ids.len()].join(", ");
+        let sql = format!(
+            "{LIST_CITATIONS_FOR_MESSAGES_PREFIX}{placeholders}{LIST_CITATIONS_FOR_MESSAGES_SUFFIX}"
+        );
+        let params = message_ids.iter().map(MessageId::as_str);
+        let mut statement = conn.prepare(&sql).map_err(ServerError::Database)?;
+        let rows = statement
+            .query_map(
+                rusqlite::params_from_iter(params),
+                decode_message_citation_row,
+            )
+            .map_err(ServerError::Database)?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(ServerError::Database)
+    }
+
     /// Deletes all citations for one message.
     ///
     /// # Errors
@@ -112,6 +158,19 @@ fn decode_citation_row(row: &Row<'_>) -> rusqlite::Result<Citation> {
         snippet: row.get(3)?,
         ordinal: decode_u32(row, 4)?,
     })
+}
+
+fn decode_message_citation_row(row: &Row<'_>) -> rusqlite::Result<(MessageId, Citation)> {
+    Ok((
+        MessageId::from(row.get::<_, String>(0)?),
+        Citation {
+            note_id: NoteId::new(&row.get::<_, String>(1)?),
+            chunk_id: ChunkId::new(&row.get::<_, String>(2)?),
+            similarity: decode_f32(row, 3)?,
+            snippet: row.get(4)?,
+            ordinal: decode_u32(row, 5)?,
+        },
+    ))
 }
 
 fn decode_f32(row: &Row<'_>, index: usize) -> rusqlite::Result<f32> {
