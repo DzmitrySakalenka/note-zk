@@ -1,9 +1,17 @@
 // Integration tests are separate crates; each uses only a subset of package dependencies.
 #![allow(unused_crate_dependencies)]
 
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
+
 use futures::StreamExt;
 use zk_ai::{
-    AiResult,
+    AiError, AiResult,
     provider::{
         ChatCapability, ChatChunk, ChatMessage, ChatProvider, ChatRequest, ChatUsage, FinishReason,
         StubChatProvider,
@@ -77,6 +85,92 @@ async fn scripted_response_overrides_echo_text_exactly() {
     assert_eq!(delta_texts(&chunks), vec!["scripted", " answer"]);
     assert_eq!(assembled_text(&chunks), "scripted answer");
     assert!(done_usage(&chunks).is_some_and(|usage| usage.output_tokens > 0));
+}
+
+#[tokio::test]
+async fn custom_chunk_size_splits_scripted_response() {
+    let provider = StubChatProvider::new(model_id(), 128)
+        .with_scripted_response("abc".to_string())
+        .with_chunk_size(1);
+
+    let chunks = collect_chunks(
+        &provider,
+        chat_request(vec![ChatMessage {
+            role: MessageRole::User,
+            content: "ignored".to_string(),
+        }]),
+    )
+    .await;
+
+    assert_eq!(delta_texts(&chunks), vec!["a", "b", "c"]);
+    assert_eq!(assembled_text(&chunks), "abc");
+    assert!(done_usage(&chunks).is_some());
+}
+
+#[tokio::test]
+async fn error_after_deltas_stops_stream_without_done() {
+    let provider = StubChatProvider::new(model_id(), 128)
+        .with_scripted_response("abcd".to_string())
+        .with_chunk_size(1)
+        .with_error_after(2);
+    let mut stream = provider
+        .complete(chat_request(vec![ChatMessage {
+            role: MessageRole::User,
+            content: "ignored".to_string(),
+        }]))
+        .await
+        .expect("stub chat provider should accept request");
+
+    assert_eq!(
+        stream
+            .next()
+            .await
+            .expect("first chunk should exist")
+            .expect("first delta should succeed"),
+        ChatChunk::Delta {
+            text: "a".to_string(),
+        }
+    );
+    assert_eq!(
+        stream
+            .next()
+            .await
+            .expect("second chunk should exist")
+            .expect("second delta should succeed"),
+        ChatChunk::Delta {
+            text: "b".to_string(),
+        }
+    );
+    let error = stream
+        .next()
+        .await
+        .expect("error chunk should exist")
+        .expect_err("third chunk should be provider error");
+    assert!(
+        matches!(error, AiError::ProviderRequest(message) if message == "stub chat provider failed mid-stream")
+    );
+    assert!(stream.next().await.is_none());
+}
+
+#[tokio::test]
+async fn dropping_stream_sets_drop_flag() {
+    let drop_flag = Arc::new(AtomicBool::new(false));
+    let provider = StubChatProvider::new(model_id(), 128)
+        .with_scripted_response("abc".to_string())
+        .with_chunk_delay(Duration::from_secs(1))
+        .with_drop_flag(Arc::clone(&drop_flag));
+
+    let stream = provider
+        .complete(chat_request(vec![ChatMessage {
+            role: MessageRole::User,
+            content: "ignored".to_string(),
+        }]))
+        .await
+        .expect("stub chat provider should accept request");
+
+    assert!(!drop_flag.load(Ordering::SeqCst));
+    drop(stream);
+    assert!(drop_flag.load(Ordering::SeqCst));
 }
 
 async fn collect_chunks(provider: &StubChatProvider, request: ChatRequest) -> Vec<ChatChunk> {
