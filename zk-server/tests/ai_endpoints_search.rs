@@ -502,6 +502,7 @@ fn ai_config(mode: ExecutionMode) -> AiConfig {
         remote: None,
         local: None,
         stub: Some(StubEmbeddingsConfig { dim: 2 }),
+        chat: None,
         default_mode: mode,
         recompute_concurrency: 1,
         max_attempts: 3,

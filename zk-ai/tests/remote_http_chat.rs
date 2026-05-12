@@ -203,6 +203,8 @@ mod remote_http_chat {
             api_key_env_var: API_KEY_ENV_VAR.to_string(),
             timeout: Duration::from_secs(1),
             max_attempts,
+            max_input_tokens: 8192,
+            max_output_tokens: 1024,
         }
     }
 

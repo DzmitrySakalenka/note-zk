@@ -10,7 +10,10 @@ use tracing::{Instrument, Level};
 use zk_ai::{
     AiError, AiResult,
     chunker::ParagraphChunker,
-    provider::{LocalEmbeddingsProvider, RemoteEmbeddingsProvider, StubEmbeddingsProvider},
+    provider::{
+        LocalEmbeddingsProvider, RemoteEmbeddingsProvider, RemoteHttpChatProvider,
+        StubChatProvider, StubEmbeddingsProvider,
+    },
     selector::{ProviderRegistry, ProviderSelector},
     service::{
         chunking::{ChunkingService, ChunksWriter},
@@ -26,7 +29,7 @@ use zk_vault::parse_note_file;
 
 use crate::{
     ServerDb, ServerError,
-    config::{AiConfig, AiProviderKind},
+    config::{AiChatProviderKind, AiConfig, AiProviderKind},
     repo::{AiJob, AiJobKind, AiJobsRepo, ChunksRepo, EmbeddingsRepo, NotesRepo},
 };
 
@@ -88,6 +91,26 @@ pub(crate) fn provider_selector_from_config(config: &AiConfig) -> Arc<ProviderSe
         .as_ref()
         .map_or(DEFAULT_STUB_DIM, |stub| stub.dim);
     registry.register_embeddings(Arc::new(StubEmbeddingsProvider::new(stub_dim)));
+    if let Some(chat) = &config.chat {
+        match chat.provider {
+            AiChatProviderKind::Stub => {
+                registry.register_chat(Arc::new(StubChatProvider::new(
+                    chat.model_id.clone(),
+                    chat.max_output_tokens,
+                )));
+            }
+            AiChatProviderKind::RemoteHttp => {
+                match RemoteHttpChatProvider::new(chat.to_remote_http_config()) {
+                    Ok(provider) => registry.register_chat(Arc::new(provider)),
+                    Err(error) => tracing::warn!(
+                        target: LOG_TARGET,
+                        error = %error,
+                        "remote chat provider is unavailable"
+                    ),
+                }
+            }
+        }
+    }
 
     Arc::new(ProviderSelector::new(
         Arc::new(registry),

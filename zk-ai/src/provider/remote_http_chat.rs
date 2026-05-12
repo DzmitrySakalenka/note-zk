@@ -23,8 +23,6 @@ const BACKOFF_MAX: Duration = Duration::from_secs(2);
 const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
 const JITTER: Duration = Duration::from_millis(50);
 const MAX_ERROR_BODY_CHARS: usize = 200;
-const MAX_INPUT_TOKENS: u32 = 8192;
-const MAX_OUTPUT_TOKENS: u32 = 4096;
 
 /// Configuration for the OpenAI-compatible HTTP chat provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +37,10 @@ pub struct RemoteHttpChatConfig {
     pub timeout: Duration,
     /// Maximum HTTP attempts for retryable failures.
     pub max_attempts: u8,
+    /// Provider-documented maximum input token budget.
+    pub max_input_tokens: u32,
+    /// Provider-documented maximum output token budget.
+    pub max_output_tokens: u32,
 }
 
 /// OpenAI-compatible HTTP chat completions provider.
@@ -81,8 +83,8 @@ impl RemoteHttpChatProvider {
             base_url,
             capability: ChatCapability {
                 model: config.model_id,
-                max_input_tokens: MAX_INPUT_TOKENS,
-                max_output_tokens: MAX_OUTPUT_TOKENS,
+                max_input_tokens: config.max_input_tokens,
+                max_output_tokens: config.max_output_tokens,
                 supports_streaming: true,
             },
             api_key,
