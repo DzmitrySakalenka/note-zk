@@ -9,7 +9,7 @@ use serde::de::DeserializeOwned;
 use thiserror::Error;
 use zk_domain::config::{
     CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, NormalizationConfig, SyncConfig,
-    VaultConfig,
+    VaultConfig, resolve_folder_policy as domain_resolve_folder_policy,
 };
 use zk_domain::id::RelativePath;
 
@@ -323,22 +323,7 @@ pub fn resolve_folder_policy(
     vault_relative_path: &str,
     folders: &BTreeMap<String, FolderPolicy>,
 ) -> Option<FolderPolicy> {
-    let normalized_path = RelativePath::new(vault_relative_path).to_string();
-    let mut best_match: Option<(usize, &FolderPolicy)> = None;
-
-    for (raw_prefix, policy) in folders {
-        let normalized_prefix = RelativePath::new(raw_prefix).to_string();
-        if !path_has_prefix(&normalized_path, &normalized_prefix) {
-            continue;
-        }
-
-        match best_match {
-            Some((best_prefix_len, _)) if normalized_prefix.len() <= best_prefix_len => {}
-            _ => best_match = Some((normalized_prefix.len(), policy)),
-        }
-    }
-
-    best_match.map(|(_, policy)| policy.clone())
+    domain_resolve_folder_policy(&RelativePath::new(vault_relative_path), folders)
 }
 
 fn apply_normalization_overrides(
@@ -363,13 +348,6 @@ fn apply_sync_config(sync: &SyncConfig, merged: &mut EffectiveConfig) {
     if let Some(device_id) = &sync.device_id {
         merged.sync.device_id = Some(device_id.clone());
     }
-}
-
-fn path_has_prefix(path: &str, prefix: &str) -> bool {
-    path == prefix
-        || path
-            .strip_prefix(prefix)
-            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 fn validate_note_extensions(extensions: &[String]) -> Result<(), ConfigValidationError> {

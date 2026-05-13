@@ -5,9 +5,9 @@ use insta::assert_snapshot;
 use zk_app::{DoctorIssue, DoctorReport, StatusSummary};
 use zk_cli::output::{
     ResolveConflictCommandPayload, ScanCommandPayload, ScanJsonOutput, ScanSummary,
-    SyncCommandPayload, SyncPullSummary, SyncPushSummary, SyncRegistrationSummary,
-    saturating_output_count, write_doctor_human, write_resolve_conflict_human, write_scan_human,
-    write_status_human, write_sync_human,
+    SyncCommandPayload, SyncDiagnosticSummary, SyncPullSummary, SyncPushSummary,
+    SyncRegistrationSummary, saturating_output_count, write_doctor_human,
+    write_resolve_conflict_human, write_scan_human, write_status_human, write_sync_human,
 };
 use zk_domain::{id::RelativePath, note::DiagnosticLevel, sync::ItemType};
 use zk_vault::NormalizationSummary;
@@ -175,6 +175,7 @@ fn sync_fixture() -> SyncCommandPayload {
         pulled: Some(SyncPullSummary {
             applied: 3,
             conflicts: 1,
+            diagnostics: Vec::new(),
         }),
     }
 }
@@ -280,6 +281,30 @@ fn sync_human_lists_registration_push_and_pull() {
 }
 
 #[test]
+fn sync_human_lists_derived_overwrite_diagnostics() {
+    let payload = SyncCommandPayload {
+        registered: SyncRegistrationSummary { first_time: false },
+        bootstrap: false,
+        pushed: None,
+        pulled: Some(SyncPullSummary {
+            applied: 1,
+            conflicts: 0,
+            diagnostics: vec![SyncDiagnosticSummary {
+                kind: "SyncDerivedOverwrite".to_string(),
+                note_id: "01SNAPSHOTWIKINOTE000000001".to_string(),
+                path: "wiki/index.md".to_string(),
+                winning_revision: 7,
+            }],
+        }),
+    };
+
+    assert_eq!(
+        render_sync(&payload),
+        "registered (refreshed)\npulled 1 changes (0 conflicts)\ndiagnostic SyncDerivedOverwrite note_id=01SNAPSHOTWIKINOTE000000001 path=wiki/index.md winning_revision=7\n"
+    );
+}
+
+#[test]
 fn sync_json_envelope_contains_command_and_payload() {
     let json = serde_json::json!({
         "command": "sync",
@@ -290,6 +315,10 @@ fn sync_json_envelope_contains_command_and_payload() {
     assert_eq!(json["payload"]["registered"]["first_time"], true);
     assert_eq!(json["payload"]["pushed"]["accepted"], 4);
     assert_eq!(json["payload"]["pulled"]["applied"], 3);
+    assert_eq!(
+        json["payload"]["pulled"]["diagnostics"],
+        serde_json::json!([])
+    );
 }
 
 #[test]

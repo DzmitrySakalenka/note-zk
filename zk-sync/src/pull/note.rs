@@ -1,6 +1,7 @@
 use rusqlite::Transaction;
 use zk_domain::{
     SyncChange, WireEventType,
+    config::is_path_derived,
     id::{NoteId, RelativePath, ServerRevision},
     note::{NoteRecord, RawNoteFrontmatter},
     sync::ItemType,
@@ -15,14 +16,14 @@ use zk_vault::{error::VaultError, parse_note_file};
 use crate::{
     SyncError, SyncResult,
     conflict::{
-        ConflictCopyInput, SyncStateSnapshot, detect_pull_conflict, local_unchanged_since_sync,
-        write_conflict_copy,
+        ConflictCopyInput, DerivedFolderPolicy, SyncStateSnapshot, detect_pull_conflict,
+        local_unchanged_since_sync, write_conflict_copy,
     },
     push::ConflictedItem,
 };
 
 use super::{
-    PullWorkspace,
+    PullWorkspace, SyncDiagnostic, SyncDiagnosticKind,
     helpers::{
         ensure_file_content, move_path_if_needed, next_trash_path, protocol_error,
         remove_delete_record_if_not_deleted, remove_file_if_present, required_content_hash,
@@ -104,30 +105,45 @@ fn apply_note_content_change(
                     .and_then(|record| record.last_synced_path.clone())
             })
             .unwrap_or_else(|| path.clone());
-        write_conflict_copy(
-            workspace.vault,
-            ConflictCopyInput {
-                local_path: &local_path,
-                remote_bytes: content.as_bytes(),
-                clock: workspace.clock,
-            },
-        )?;
-        upsert_note_conflict_state(
-            workspace.transaction,
-            &NoteConflictStateInput {
-                device_id: workspace.device_id,
-                note_id: &loaded.note_id,
-                note: loaded.note.as_ref(),
-                sync_state: loaded.sync_state.as_ref(),
-                message: Some("remote content conflicts with local changes"),
-            },
-        )?;
-        workspace.outcome.conflicts.push(ConflictedItem {
-            item_type: ItemType::Note,
-            item_id: loaded.note_id.to_string(),
-            message: Some("remote content conflicts with local changes".to_string()),
-        });
-        return Ok(());
+        let derived_policy = if is_path_derived(&local_path, workspace.folders) {
+            DerivedFolderPolicy::RemoteWins
+        } else {
+            DerivedFolderPolicy::ConflictCopy
+        };
+
+        if derived_policy == DerivedFolderPolicy::RemoteWins {
+            workspace.outcome.diagnostics.push(SyncDiagnostic {
+                kind: SyncDiagnosticKind::SyncDerivedOverwrite,
+                note_id: loaded.note_id.clone(),
+                path: local_path,
+                winning_revision: server_revision.clone(),
+            });
+        } else {
+            write_conflict_copy(
+                workspace.vault,
+                ConflictCopyInput {
+                    local_path: &local_path,
+                    remote_bytes: content.as_bytes(),
+                    clock: workspace.clock,
+                },
+            )?;
+            upsert_note_conflict_state(
+                workspace.transaction,
+                &NoteConflictStateInput {
+                    device_id: workspace.device_id,
+                    note_id: &loaded.note_id,
+                    note: loaded.note.as_ref(),
+                    sync_state: loaded.sync_state.as_ref(),
+                    message: Some("remote content conflicts with local changes"),
+                },
+            )?;
+            workspace.outcome.conflicts.push(ConflictedItem {
+                item_type: ItemType::Note,
+                item_id: loaded.note_id.to_string(),
+                message: Some("remote content conflicts with local changes".to_string()),
+            });
+            return Ok(());
+        }
     }
 
     ensure_file_content(workspace.vault, &path, content.as_bytes())?;

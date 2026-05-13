@@ -1,7 +1,7 @@
 // Integration tests are separate crates; each uses only a subset of package dependencies.
 #![allow(unused_crate_dependencies)]
 
-use std::{fs, io::ErrorKind, path::Path};
+use std::{collections::BTreeMap, fs, io::ErrorKind, path::Path};
 
 use chrono::{DateTime, TimeZone, Utc};
 use rusqlite::types::ValueRef;
@@ -347,11 +347,13 @@ fn apply(
     let local_device_id = device_id();
     let local_clock = fixed_clock();
     let local_trash_dir = trash_dir();
+    let folders = BTreeMap::new();
     let ctx = PullApplyContext {
         vault: vault.path(),
         device_id: &local_device_id,
         clock: &local_clock,
         trash_dir: &local_trash_dir,
+        folders: &folders,
     };
 
     apply_pull_response(connection, &ctx, response)

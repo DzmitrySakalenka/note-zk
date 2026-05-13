@@ -1,7 +1,7 @@
 // Integration tests are separate crates; each uses only a subset of package dependencies.
 #![allow(unused_crate_dependencies)]
 
-use std::fs;
+use std::{collections::BTreeMap, fs};
 
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
@@ -13,6 +13,7 @@ use zk_app::{
 };
 use zk_domain::{
     RegisterDeviceRequest, RegisterDeviceResponse,
+    config::FolderPolicy,
     id::{ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     note::NoteRecord,
     sync::SyncStatus,
@@ -179,6 +180,7 @@ fn get_device_sync_status_reports_absent_registered_and_cursor_states() {
 fn plan_and_push_with_no_items_returns_empty_outcome_and_preserves_cursor() {
     let mut connection = open_sync_connection();
     let vault = TempDir::new().expect("temp vault should create");
+    let folders = BTreeMap::<String, FolderPolicy>::new();
     DeviceRepo::upsert_device(&connection, &device_record(Some(7))).expect("device should insert");
 
     let outcome = block_on(plan_and_push(
@@ -189,6 +191,7 @@ fn plan_and_push_with_no_items_returns_empty_outcome_and_preserves_cursor() {
             device_id: &device_id(),
             clock: &fixed_clock(),
             trash_dir: &trash_dir(),
+            folders: &folders,
         },
     ))
     .expect("plan and push should succeed");
@@ -209,6 +212,7 @@ fn plan_and_push_with_no_items_returns_empty_outcome_and_preserves_cursor() {
 fn pull_and_apply_with_empty_transport_returns_zero_outcome_and_preserves_cursor() {
     let mut connection = open_sync_connection();
     let vault = TempDir::new().expect("temp vault should create");
+    let folders = BTreeMap::<String, FolderPolicy>::new();
     DeviceRepo::upsert_device(&connection, &device_record(Some(11))).expect("device should insert");
 
     let outcome = block_on(pull_and_apply(
@@ -219,6 +223,7 @@ fn pull_and_apply_with_empty_transport_returns_zero_outcome_and_preserves_cursor
             device_id: &device_id(),
             clock: &fixed_clock(),
             trash_dir: &trash_dir(),
+            folders: &folders,
         },
     ))
     .expect("pull and apply should succeed");
@@ -239,6 +244,7 @@ fn pull_and_apply_with_empty_transport_returns_zero_outcome_and_preserves_cursor
 fn bootstrap_mode_a_uses_pull_path() {
     let mut connection = open_sync_connection();
     let vault = TempDir::new().expect("temp vault should create");
+    let folders = BTreeMap::<String, FolderPolicy>::new();
     DeviceRepo::upsert_device(&connection, &device_record(None)).expect("device should insert");
     let transport = ProbeTransport::new(1, 0);
 
@@ -250,6 +256,7 @@ fn bootstrap_mode_a_uses_pull_path() {
             device_id: &device_id(),
             clock: &fixed_clock(),
             trash_dir: &trash_dir(),
+            folders: &folders,
         },
     ))
     .expect("bootstrap mode a should succeed");
@@ -259,8 +266,9 @@ fn bootstrap_mode_a_uses_pull_path() {
         BootstrapOutcome::Pulled(zk_app::PullApplyOutcome {
             applied: 0,
             ref conflicts,
+            ref diagnostics,
             next_cursor: None,
-        }) if conflicts.is_empty()
+        }) if conflicts.is_empty() && diagnostics.is_empty()
     ));
 }
 
@@ -268,6 +276,7 @@ fn bootstrap_mode_a_uses_pull_path() {
 fn bootstrap_mode_b_uses_push_path_and_creates_sync_state() {
     let mut connection = open_sync_connection();
     let vault = TempDir::new().expect("temp vault should create");
+    let folders = BTreeMap::<String, FolderPolicy>::new();
     let note_id = NoteId::new("01TG11011MODEB000000000001");
     insert_note(
         &connection,
@@ -283,6 +292,7 @@ fn bootstrap_mode_b_uses_push_path_and_creates_sync_state() {
             device_id: &device_id(),
             clock: &fixed_clock(),
             trash_dir: &trash_dir(),
+            folders: &folders,
         },
     ))
     .expect("bootstrap mode b should succeed");
@@ -312,6 +322,7 @@ fn bootstrap_mode_b_uses_push_path_and_creates_sync_state() {
 fn bootstrap_mode_c_surfaces_ambiguous_bootstrap() {
     let mut connection = open_sync_connection();
     let vault = TempDir::new().expect("temp vault should create");
+    let folders = BTreeMap::<String, FolderPolicy>::new();
     let note_id = NoteId::new("01TG11011MODEC000000000001");
     insert_note(
         &connection,
@@ -328,6 +339,7 @@ fn bootstrap_mode_c_surfaces_ambiguous_bootstrap() {
             device_id: &device_id(),
             clock: &fixed_clock(),
             trash_dir: &trash_dir(),
+            folders: &folders,
         },
     ))
     .expect_err("bootstrap mode c should fail");

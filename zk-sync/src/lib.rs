@@ -16,8 +16,8 @@ pub mod transport;
 pub use bootstrap::{InitialSyncMode, ValidatedInitialSyncMode, detect_initial_mode};
 #[rustfmt::skip]
 pub use conflict::{
-    detect_pull_conflict, detect_push_conflict, local_unchanged_since_sync, revision_matches,
-    write_conflict_copy,
+    DerivedFolderPolicy, detect_pull_conflict, detect_push_conflict, local_unchanged_since_sync,
+    revision_matches, write_conflict_copy,
 };
 pub use error::{SyncError, SyncResult};
 #[rustfmt::skip]
@@ -25,7 +25,9 @@ pub use plan::{PlannerContext, PlannedOp, PlannedOperation, plan_local_changes};
 #[rustfmt::skip]
 pub use push::{PushApplyOutcome, apply_push_response, build_push_request};
 #[rustfmt::skip]
-pub use pull::{PullApplyContext, PullApplyOutcome, apply_pull_response};
+pub use pull::{
+    PullApplyContext, PullApplyOutcome, SyncDiagnostic, SyncDiagnosticKind, apply_pull_response,
+};
 #[rustfmt::skip]
 pub use transport::{NoopTransport, SyncTransport};
 pub use http_transport::{HttpStreamResponse, HttpTextResponse, HttpTransport};

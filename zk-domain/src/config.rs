@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf};
 use url::Url;
 
+use crate::id::RelativePath;
+
 /// Default environment variable name used to read the sync bearer token.
 pub const DEFAULT_BEARER_TOKEN_ENV: &str = "ZK_DEVICE_TOKEN";
 
@@ -170,4 +172,44 @@ impl Default for EffectiveConfig {
             sync: EffectiveSyncConfig::default(),
         }
     }
+}
+
+/// Resolves a folder policy for a vault-relative path by longest matching prefix.
+#[must_use]
+pub fn resolve_folder_policy(
+    relative_path: &RelativePath,
+    folders: &BTreeMap<String, FolderPolicy>,
+) -> Option<FolderPolicy> {
+    let normalized_path = relative_path.to_string();
+    let mut best_match: Option<(usize, &FolderPolicy)> = None;
+
+    for (raw_prefix, policy) in folders {
+        let normalized_prefix = RelativePath::new(raw_prefix).to_string();
+        if !path_has_prefix(&normalized_path, &normalized_prefix) {
+            continue;
+        }
+
+        match best_match {
+            Some((best_prefix_len, _)) if normalized_prefix.len() <= best_prefix_len => {}
+            _ => best_match = Some((normalized_prefix.len(), policy)),
+        }
+    }
+
+    best_match.map(|(_, policy)| policy.clone())
+}
+
+/// Returns whether a vault-relative path is marked as system-derived content.
+#[must_use]
+pub fn is_path_derived(
+    relative_path: &RelativePath,
+    folders: &BTreeMap<String, FolderPolicy>,
+) -> bool {
+    resolve_folder_policy(relative_path, folders).is_some_and(|policy| policy.derived == Some(true))
+}
+
+fn path_has_prefix(path: &str, prefix: &str) -> bool {
+    path == prefix
+        || path
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with('/'))
 }

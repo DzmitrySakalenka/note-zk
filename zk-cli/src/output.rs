@@ -90,6 +90,21 @@ pub struct SyncPullSummary {
     pub applied: u32,
     /// Count of conflicts detected while applying remote changes.
     pub conflicts: u32,
+    /// Non-fatal diagnostics emitted while applying remote changes.
+    pub diagnostics: Vec<SyncDiagnosticSummary>,
+}
+
+/// Sync diagnostic emitted in command output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SyncDiagnosticSummary {
+    /// Stable diagnostic kind.
+    pub kind: String,
+    /// Stable note identifier affected by the diagnostic.
+    pub note_id: String,
+    /// Vault-relative path affected by the diagnostic.
+    pub path: String,
+    /// Server revision whose content won the conflict.
+    pub winning_revision: i64,
 }
 
 /// Top-level payload emitted by the `sync` command.
@@ -453,6 +468,13 @@ pub fn write_sync_human(out: &mut dyn io::Write, payload: &SyncCommandPayload) -
             "{prefix} {} changes ({} conflicts)",
             pulled.applied, pulled.conflicts
         )?;
+        for diagnostic in &pulled.diagnostics {
+            writeln!(
+                out,
+                "diagnostic {} note_id={} path={} winning_revision={}",
+                diagnostic.kind, diagnostic.note_id, diagnostic.path, diagnostic.winning_revision
+            )?;
+        }
     }
 
     Ok(())

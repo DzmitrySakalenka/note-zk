@@ -1,6 +1,6 @@
 //! Implements the `sync` CLI subcommand.
 
-use std::{io, path::Path};
+use std::{collections::BTreeMap, io, path::Path};
 
 use anyhow::Context;
 use rusqlite::Connection;
@@ -10,6 +10,7 @@ use zk_app::{
     pull_and_apply, register_device,
 };
 use zk_app::{RelativePath, SystemClock};
+use zk_domain::config::FolderPolicy;
 use zk_sync::{HttpTransport, SyncError};
 
 use crate::{
@@ -19,8 +20,8 @@ use crate::{
     cli::{OutputMode, SharedFlags, SyncArgs, SyncMode},
     error::{CliError, EXIT_ISSUES, EXIT_OK},
     output::{
-        SyncCommandPayload, SyncJsonOutput, SyncPullSummary, SyncPushSummary,
-        SyncRegistrationSummary, write_json_line, write_sync_human,
+        SyncCommandPayload, SyncDiagnosticSummary, SyncJsonOutput, SyncPullSummary,
+        SyncPushSummary, SyncRegistrationSummary, write_json_line, write_sync_human,
     },
 };
 
@@ -58,6 +59,7 @@ pub fn run(args: &SyncArgs, shared: &SharedFlags) -> Result<i32, CliError> {
         device_id: &device_id,
         clock: &clock,
         trash_dir: &trash_dir,
+        folders: &config.folders,
         transport: &transport,
     };
 
@@ -103,6 +105,7 @@ struct SyncRunContext<'a> {
     device_id: &'a DeviceId,
     clock: &'a dyn Clock,
     trash_dir: &'a RelativePath,
+    folders: &'a BTreeMap<String, FolderPolicy>,
     transport: &'a HttpTransport,
 }
 
@@ -184,6 +187,7 @@ fn sync_context<'a>(context: &'a mut SyncRunContext<'_>) -> SyncContext<'a> {
         device_id: context.device_id,
         clock: context.clock,
         trash_dir: context.trash_dir,
+        folders: context.folders,
     }
 }
 
@@ -199,6 +203,24 @@ fn pull_summary(outcome: &PullApplyOutcome) -> SyncPullSummary {
     SyncPullSummary {
         applied: outcome.applied,
         conflicts: outcome.conflicts.len() as u32,
+        diagnostics: outcome
+            .diagnostics
+            .iter()
+            .map(sync_diagnostic_summary)
+            .collect(),
+    }
+}
+
+fn sync_diagnostic_summary(diagnostic: &zk_sync::SyncDiagnostic) -> SyncDiagnosticSummary {
+    let kind = match diagnostic.kind {
+        zk_sync::SyncDiagnosticKind::SyncDerivedOverwrite => "SyncDerivedOverwrite",
+    };
+
+    SyncDiagnosticSummary {
+        kind: kind.to_string(),
+        note_id: diagnostic.note_id.to_string(),
+        path: diagnostic.path.to_string(),
+        winning_revision: diagnostic.winning_revision.value(),
     }
 }
 

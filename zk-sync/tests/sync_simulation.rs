@@ -10,7 +10,7 @@ use zk_domain::{
     id::{RelativePath, ServerRevision},
     sync::SyncStatus,
 };
-use zk_sync::{SyncError, transport::SyncTransport};
+use zk_sync::{SyncError, pull::SyncDiagnosticKind, transport::SyncTransport};
 
 mod support;
 
@@ -325,6 +325,7 @@ fn concurrent_edit_push_conflict_then_pull_writes_conflict_copy() {
         .expect("client B pull should succeed");
     assert_eq!(pull_b.applied, 0);
     assert_eq!(pull_b.conflicts.len(), 1);
+    assert!(pull_b.diagnostics.is_empty());
 
     let expected_conflict_copy = "notes/shared.conflict-remote-20260423T120000Z.md".to_string();
     assert!(client_b.file_exists(&expected_conflict_copy));
@@ -340,6 +341,79 @@ fn concurrent_edit_push_conflict_then_pull_writes_conflict_copy() {
         Some(client_b.note_row(&note_id).content_hash)
     );
     assert_ne!(state.last_local_hash, state.last_synced_hash);
+    assert_eq!(client_b.device_cursor(), Some(server.last_event_seq()));
+}
+
+#[test]
+fn concurrent_edit_on_derived_folder_uses_remote_lww_without_conflict_copy() {
+    let clock = fixed_clock();
+    let server = FakeServer::new(clock.clone());
+    let mut client_a = ClientFixture::new("client-a", clock.clone());
+    let mut client_b = ClientFixture::new("client-b", clock.clone());
+    client_a.mark_folder_derived("wiki/");
+    client_b.mark_folder_derived("wiki/");
+
+    client_a
+        .register(&server)
+        .expect("client A should register");
+    client_b
+        .register(&server)
+        .expect("client B should register");
+
+    let note_id = client_a.make_note("wiki/index.md", "# Wiki v1\n");
+    let bootstrap_a = client_a
+        .bootstrap(&server)
+        .expect("client A bootstrap should succeed");
+    assert!(matches!(bootstrap_a, zk_app::BootstrapOutcome::Pushed(_)));
+    client_a
+        .pull(&server)
+        .expect("client A pull should succeed");
+    let bootstrap_b = client_b
+        .bootstrap(&server)
+        .expect("client B bootstrap should succeed");
+    assert!(matches!(bootstrap_b, zk_app::BootstrapOutcome::Pulled(_)));
+
+    client_a.edit_note(&note_id, "# Wiki from A\n");
+    client_b.edit_note(&note_id, "# Wiki from B\n");
+
+    let push_a = client_a
+        .push(&server)
+        .expect("client A push should succeed");
+    assert_eq!(push_a.accepted, 1);
+    client_a
+        .pull(&server)
+        .expect("client A pull should succeed");
+
+    let push_b = client_b
+        .push(&server)
+        .expect("client B push should succeed");
+    assert_eq!(push_b.accepted, 0);
+    assert_eq!(push_b.conflicts.len(), 1);
+
+    let pull_b = client_b
+        .pull(&server)
+        .expect("client B pull should succeed");
+    assert_eq!(pull_b.applied, 1);
+    assert!(pull_b.conflicts.is_empty());
+    assert_eq!(pull_b.diagnostics.len(), 1);
+
+    let diagnostic = &pull_b.diagnostics[0];
+    assert_eq!(diagnostic.kind, SyncDiagnosticKind::SyncDerivedOverwrite);
+    assert_eq!(diagnostic.note_id, note_id);
+    assert_eq!(diagnostic.path, RelativePath::new("wiki/index.md"));
+    assert_eq!(
+        diagnostic.winning_revision,
+        client_a.note_row(&note_id).server_revision
+    );
+    assert!(!client_b.file_exists("wiki/index.conflict-remote-20260423T120000Z.md"));
+    assert_eq!(
+        client_b.note_bytes("wiki/index.md"),
+        client_a.note_bytes("wiki/index.md")
+    );
+    assert_eq!(
+        client_b.note_state(&note_id).sync_status,
+        SyncStatus::Synced
+    );
     assert_eq!(client_b.device_cursor(), Some(server.last_event_seq()));
 }
 

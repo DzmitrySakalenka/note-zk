@@ -1,14 +1,15 @@
 // Integration tests are separate crates; each uses only a subset of package dependencies.
 #![allow(unused_crate_dependencies)]
 
-use std::fmt::Debug;
+use std::{collections::BTreeMap, fmt::Debug};
 
 use serde::{Serialize, de::DeserializeOwned};
 use url::Url;
 use zk_domain::config::{
     CliOverrides, EffectiveConfig, EffectiveSyncConfig, FolderPolicy, GlobalConfig,
-    NormalizationConfig, SyncConfig, ValidationConfig, VaultConfig,
+    NormalizationConfig, SyncConfig, ValidationConfig, VaultConfig, is_path_derived,
 };
+use zk_domain::id::RelativePath;
 
 // ==========================================================================
 // Shared trait contract
@@ -154,6 +155,38 @@ derived = true
     let reparsed: VaultConfig =
         toml::from_str(&serialized).expect("serialized vault config should parse");
     assert_eq!(reparsed, parsed);
+}
+
+#[test]
+fn is_path_derived_uses_longest_matching_folder_policy() {
+    let mut folders = BTreeMap::new();
+    folders.insert(
+        "wiki/".to_string(),
+        FolderPolicy {
+            immutable: None,
+            derived: Some(true),
+        },
+    );
+    folders.insert(
+        "wiki/manual/".to_string(),
+        FolderPolicy {
+            immutable: None,
+            derived: Some(false),
+        },
+    );
+
+    assert!(is_path_derived(
+        &RelativePath::new("wiki/index.md"),
+        &folders
+    ));
+    assert!(!is_path_derived(
+        &RelativePath::new("wiki/manual/page.md"),
+        &folders
+    ));
+    assert!(!is_path_derived(
+        &RelativePath::new("wiki-notes/index.md"),
+        &folders
+    ));
 }
 
 #[test]

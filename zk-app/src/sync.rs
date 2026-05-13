@@ -1,6 +1,9 @@
+use std::collections::BTreeMap;
+
 use rusqlite::Connection;
 use zk_domain::{
     RegisterDeviceRequest, RegisterDeviceResponse, SyncPushRequest, WireOperation,
+    config::FolderPolicy,
     id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath},
     sync_state::DeviceRecord,
 };
@@ -54,6 +57,8 @@ pub struct SyncContext<'a> {
     pub clock: &'a dyn Clock,
     /// Vault-relative trash directory used to distinguish move from restore.
     pub trash_dir: &'a RelativePath,
+    /// Effective folder policies used by pull conflict resolution.
+    pub folders: &'a BTreeMap<String, FolderPolicy>,
 }
 
 /// Registers one device through the configured sync transport and stores it locally.
@@ -117,6 +122,7 @@ pub async fn plan_and_push(
         device_id,
         clock,
         trash_dir,
+        folders: _folders,
     } = ctx;
     let planned = {
         let planner = PlannerContext {
@@ -151,6 +157,7 @@ pub async fn pull_and_apply(
         device_id,
         clock,
         trash_dir,
+        folders,
     } = ctx;
     let mut aggregate = PullApplyOutcome::default();
 
@@ -165,11 +172,13 @@ pub async fn pull_and_apply(
             device_id,
             clock,
             trash_dir,
+            folders,
         };
         let batch = apply_pull_response(conn, &pull_ctx, &response)?;
 
         aggregate.applied = aggregate.applied.saturating_add(batch.applied);
         aggregate.conflicts.extend(batch.conflicts);
+        aggregate.diagnostics.extend(batch.diagnostics);
         aggregate.next_cursor = batch.next_cursor;
 
         if remote_exhausted || response.next_cursor == request.cursor {
@@ -196,6 +205,7 @@ pub async fn bootstrap(
         device_id,
         clock,
         trash_dir,
+        folders,
     } = ctx;
     let local = local_bootstrap_probe(conn, device_id)?;
     let remote = transport.probe_remote_counts(device_id).await?;
@@ -211,6 +221,7 @@ pub async fn bootstrap(
                     device_id,
                     clock,
                     trash_dir,
+                    folders,
                 },
             )
             .await?,
