@@ -33,6 +33,24 @@ SELECT EXISTS (
       AND payload_json = ?1
 )
 ";
+const FIND_ACTIVE_AI_JOB_BY_KIND_AND_PAYLOAD_SQL: &str = r"
+SELECT
+    job_id,
+    kind,
+    payload_json,
+    status,
+    attempts,
+    last_error,
+    enqueued_at,
+    started_at,
+    finished_at
+FROM ai_jobs
+WHERE kind = ?1
+  AND payload_json = ?2
+  AND status IN ('pending', 'in_flight')
+ORDER BY enqueued_at ASC, job_id ASC
+LIMIT 1
+";
 const CLAIM_NEXT_AI_JOB_SQL: &str = r"
 UPDATE ai_jobs
 SET
@@ -188,6 +206,16 @@ pub enum AiJobKind {
         /// User-authored query for the chat turn.
         user_query: String,
     },
+    /// Ingest wiki pages derived from one source note.
+    ///
+    /// `(source_note_id, request_id)` is the dedup key; enqueue returns
+    /// an existing non-terminal job id when one matches.
+    IngestSource {
+        /// Source note used to build derived wiki pages.
+        source_note_id: NoteId,
+        /// Stable request id for enqueue idempotency.
+        request_id: String,
+    },
 }
 
 /// AI background job status.
@@ -212,6 +240,8 @@ pub enum AiJobKindFilter {
     RecomputeVault,
     /// Match `ChatTurn` jobs.
     ChatTurn,
+    /// Match `IngestSource` jobs.
+    IngestSource,
 }
 
 /// Filters used when listing AI background jobs.
@@ -262,11 +292,18 @@ impl<'a> AiJobsRepo<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`ServerError`] if JSON encoding or the insert fails.
+    /// Returns [`ServerError`] if JSON encoding, lookup, or the insert fails.
     pub fn enqueue(&self, kind: AiJobKind, now: DateTime<Utc>) -> ServerResult<AiJob> {
-        let job_id = JobId::generate();
         let kind_name = kind.as_str();
         let payload_json = encode_payload_json(&kind)?;
+
+        if matches!(&kind, AiJobKind::IngestSource { .. })
+            && let Some(job) = self.find_active_by_kind_and_payload(kind_name, &payload_json)?
+        {
+            return Ok(job);
+        }
+
+        let job_id = JobId::generate();
         let enqueued_at = encode_timestamp(now);
 
         self.conn
@@ -445,6 +482,22 @@ impl<'a> AiJobsRepo<'a> {
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(ServerError::Database)
     }
+
+    fn find_active_by_kind_and_payload(
+        &self,
+        kind_name: &str,
+        payload_json: &str,
+    ) -> ServerResult<Option<AiJob>> {
+        let mut statement = self
+            .conn
+            .prepare_cached(FIND_ACTIVE_AI_JOB_BY_KIND_AND_PAYLOAD_SQL)
+            .map_err(ServerError::Database)?;
+
+        statement
+            .query_row(rusqlite::params![kind_name, payload_json], decode_ai_job)
+            .optional()
+            .map_err(ServerError::Database)
+    }
 }
 
 impl AiJobKind {
@@ -453,6 +506,7 @@ impl AiJobKind {
             Self::RecomputeNote { .. } => "recompute_note",
             Self::RecomputeVault => "recompute_vault",
             Self::ChatTurn { .. } => "chat_turn",
+            Self::IngestSource { .. } => "ingest_source",
         }
     }
 }
@@ -474,6 +528,7 @@ impl AiJobKindFilter {
             Self::RecomputeNote => "recompute_note",
             Self::RecomputeVault => "recompute_vault",
             Self::ChatTurn => "chat_turn",
+            Self::IngestSource => "ingest_source",
         }
     }
 }
@@ -493,6 +548,12 @@ struct ChatTurnPayload {
     user_query: String,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct IngestSourcePayload {
+    source_note_id: String,
+    request_id: String,
+}
+
 fn encode_payload_json(kind: &AiJobKind) -> ServerResult<String> {
     match kind {
         AiJobKind::RecomputeNote { note_id } => serde_json::to_string(&RecomputeNotePayload {
@@ -507,6 +568,13 @@ fn encode_payload_json(kind: &AiJobKind) -> ServerResult<String> {
             conversation_id: conversation_id.to_string(),
             request_id: request_id.clone(),
             user_query: user_query.clone(),
+        }),
+        AiJobKind::IngestSource {
+            source_note_id,
+            request_id,
+        } => serde_json::to_string(&IngestSourcePayload {
+            source_note_id: source_note_id.to_string(),
+            request_id: request_id.clone(),
         }),
     }
     .map_err(|source| ServerError::Internal(Box::new(source)))
@@ -557,6 +625,14 @@ fn decode_job_kind(kind_name: &str, payload_json: &str) -> rusqlite::Result<AiJo
                 conversation_id: ConversationId::new(&payload.conversation_id),
                 request_id: payload.request_id,
                 user_query: payload.user_query,
+            })
+        }
+        "ingest_source" => {
+            let payload = serde_json::from_str::<IngestSourcePayload>(payload_json)
+                .map_err(|source| from_sql_conversion_failure(2, Type::Text, source))?;
+            Ok(AiJobKind::IngestSource {
+                source_note_id: NoteId::new(&payload.source_note_id),
+                request_id: payload.request_id,
             })
         }
         value => Err(invalid_text_failure(

@@ -251,6 +251,7 @@ async fn process_job(deps: &AiWorkerDeps, job: &AiJob) -> Result<(), AiWorkerErr
             request_id,
             user_query,
         } => process_chat_turn(deps, conversation_id, request_id, user_query).await,
+        AiJobKind::IngestSource { .. } => Err(AiWorkerError::NotYetImplemented("ingest_source")),
     }
 }
 
@@ -404,7 +405,9 @@ fn claim_max_attempts(deps: &AiWorkerDeps) -> u32 {
 fn max_attempts_for_job(deps: &AiWorkerDeps, kind: &AiJobKind) -> u32 {
     match kind {
         AiJobKind::ChatTurn { .. } => chat_max_attempts(deps),
-        AiJobKind::RecomputeNote { .. } | AiJobKind::RecomputeVault => deps.config.max_attempts,
+        AiJobKind::RecomputeNote { .. }
+        | AiJobKind::RecomputeVault
+        | AiJobKind::IngestSource { .. } => deps.config.max_attempts,
     }
 }
 
@@ -420,6 +423,7 @@ fn job_kind_label(kind: &AiJobKind) -> &'static str {
         AiJobKind::RecomputeNote { .. } => "recompute_note",
         AiJobKind::RecomputeVault => "recompute_vault",
         AiJobKind::ChatTurn { .. } => "chat_turn",
+        AiJobKind::IngestSource { .. } => "ingest_source",
     }
 }
 
@@ -519,6 +523,8 @@ enum AiWorkerError {
     NoteNotFound(NoteId),
     #[error("conversation not found: {0}")]
     ConversationNotFound(ConversationId),
+    #[error("{0} not yet implemented")]
+    NotYetImplemented(&'static str),
     #[error("read AI chat system prompt {path}: {source}")]
     ReadSystemPrompt {
         path: PathBuf,

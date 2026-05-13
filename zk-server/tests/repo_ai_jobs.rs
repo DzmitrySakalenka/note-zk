@@ -40,6 +40,13 @@ fn chat_turn_kind() -> AiJobKind {
     }
 }
 
+fn ingest_source_kind() -> AiJobKind {
+    AiJobKind::IngestSource {
+        source_note_id: note_id(),
+        request_id: "req-ingest-source".to_string(),
+    }
+}
+
 fn conversation_id() -> ConversationId {
     ConversationId::new("01JAR5A3PJEZ3SKG67PN8N6S70")
 }
@@ -125,6 +132,25 @@ fn chat_turn_payload_round_trips_through_queue() {
         .claim_next(3, parse_timestamp("2026-05-05T10:01:00Z"))
         .expect("chat job claim should succeed")
         .expect("chat job should be claimed");
+
+    assert_eq!(enqueued.kind, kind);
+    assert_eq!(claimed.kind, kind);
+    assert_eq!(claimed.status, AiJobStatus::InFlight);
+}
+
+#[test]
+fn ingest_source_payload_round_trips_through_queue() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let kind = ingest_source_kind();
+    let enqueued = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:00:00Z"))
+        .expect("ingest-source job enqueue should succeed");
+
+    let claimed = repo
+        .claim_next(3, parse_timestamp("2026-05-05T10:01:00Z"))
+        .expect("ingest-source job claim should succeed")
+        .expect("ingest-source job should be claimed");
 
     assert_eq!(enqueued.kind, kind);
     assert_eq!(claimed.kind, kind);
@@ -283,6 +309,12 @@ fn list_filters_by_status_and_kind() {
     let chat_job = repo
         .enqueue(chat_turn_kind(), parse_timestamp("2026-05-05T10:02:00Z"))
         .expect("chat job enqueue should succeed");
+    let ingest_job = repo
+        .enqueue(
+            ingest_source_kind(),
+            parse_timestamp("2026-05-05T10:03:00Z"),
+        )
+        .expect("ingest-source job enqueue should succeed");
 
     let pending = repo
         .list(AiJobFilter {
@@ -312,10 +344,22 @@ fn list_filters_by_status_and_kind() {
             limit: None,
         })
         .expect("chat list should succeed");
+    let ingest_jobs = repo
+        .list(AiJobFilter {
+            status: None,
+            kind: Some(AiJobKindFilter::IngestSource),
+            limit: None,
+        })
+        .expect("ingest-source list should succeed");
 
     assert_eq!(
         pending.iter().map(|job| &job.job_id).collect::<Vec<_>>(),
-        vec![&chat_job.job_id, &vault_job.job_id, &note_job.job_id]
+        vec![
+            &ingest_job.job_id,
+            &chat_job.job_id,
+            &vault_job.job_id,
+            &note_job.job_id
+        ]
     );
     assert_eq!(vault_jobs.len(), 1);
     assert_eq!(vault_jobs[0].job_id, vault_job.job_id);
@@ -323,6 +367,80 @@ fn list_filters_by_status_and_kind() {
     assert_eq!(pending_note_jobs[0].job_id, note_job.job_id);
     assert_eq!(chat_jobs.len(), 1);
     assert_eq!(chat_jobs[0].job_id, chat_job.job_id);
+    assert_eq!(ingest_jobs.len(), 1);
+    assert_eq!(ingest_jobs[0].job_id, ingest_job.job_id);
+}
+
+#[test]
+fn enqueue_ingest_source_reuses_active_job() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let kind = ingest_source_kind();
+    let first = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:00:00Z"))
+        .expect("first ingest-source job enqueue should succeed");
+
+    let pending_duplicate = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:01:00Z"))
+        .expect("pending duplicate enqueue should succeed");
+    let claimed = repo
+        .claim_next(3, parse_timestamp("2026-05-05T10:02:00Z"))
+        .expect("ingest-source job claim should succeed")
+        .expect("ingest-source job should be claimed");
+    let in_flight_duplicate = repo
+        .enqueue(kind, parse_timestamp("2026-05-05T10:03:00Z"))
+        .expect("in-flight duplicate enqueue should succeed");
+    let ingest_jobs = repo
+        .list(AiJobFilter {
+            status: None,
+            kind: Some(AiJobKindFilter::IngestSource),
+            limit: None,
+        })
+        .expect("ingest-source list should succeed");
+
+    assert_eq!(pending_duplicate.job_id, first.job_id);
+    assert_eq!(pending_duplicate.status, AiJobStatus::Pending);
+    assert_eq!(claimed.job_id, first.job_id);
+    assert_eq!(in_flight_duplicate.job_id, first.job_id);
+    assert_eq!(in_flight_duplicate.status, AiJobStatus::InFlight);
+    assert_eq!(ingest_jobs.len(), 1);
+}
+
+#[test]
+fn enqueue_ingest_source_allows_new_job_after_terminal_status() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let kind = ingest_source_kind();
+    let done_job = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:00:00Z"))
+        .expect("done job enqueue should succeed");
+    repo.claim_next(3, parse_timestamp("2026-05-05T10:01:00Z"))
+        .expect("done job claim should succeed")
+        .expect("done job should be claimed");
+    repo.mark_done(&done_job.job_id, parse_timestamp("2026-05-05T10:02:00Z"))
+        .expect("done job should mark done");
+
+    let failed_job = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:03:00Z"))
+        .expect("failed job enqueue should succeed");
+    repo.claim_next(1, parse_timestamp("2026-05-05T10:04:00Z"))
+        .expect("failed job claim should succeed")
+        .expect("failed job should be claimed");
+    repo.mark_failed(
+        &failed_job.job_id,
+        "failed",
+        1,
+        parse_timestamp("2026-05-05T10:05:00Z"),
+    )
+    .expect("failed job should mark failed");
+
+    let pending_job = repo
+        .enqueue(kind, parse_timestamp("2026-05-05T10:06:00Z"))
+        .expect("pending job enqueue should succeed");
+
+    assert_ne!(failed_job.job_id, done_job.job_id);
+    assert_ne!(pending_job.job_id, failed_job.job_id);
+    assert_eq!(pending_job.status, AiJobStatus::Pending);
 }
 
 #[test]

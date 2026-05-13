@@ -205,6 +205,38 @@ async fn recompute_vault_enqueues_note_jobs_and_marks_vault_job_done() {
     assert_eq!(note_jobs.len(), 2);
 }
 
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn ingest_source_job_fails_with_stub_error() {
+    let fixture = WorkerFixture::new("ai-worker-ingest-source-stub");
+    let source_note_id = note_id("01JAR5A3PJEZ3SKG67PN8N6S71");
+    let job = fixture.enqueue(AiJobKind::IngestSource {
+        source_note_id,
+        request_id: "req-ingest-source-worker".to_string(),
+    });
+    let shutdown = CancellationToken::new();
+    let handle = spawn_ai_job_worker(
+        fixture.deps(empty_selector(), ai_config(1)),
+        shutdown.clone(),
+    );
+
+    let failed = wait_for_status(&fixture.db, &job.job_id, AiJobStatus::Failed).await;
+    shutdown.cancel();
+    timeout(Duration::from_secs(1), handle)
+        .await
+        .expect("worker should join after shutdown")
+        .expect("worker task should not panic");
+
+    assert_eq!(failed.attempts, 1);
+    assert!(
+        failed
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("not yet implemented")),
+        "last_error was {:?}",
+        failed.last_error
+    );
+}
+
 struct WorkerFixture {
     db: Arc<ServerDb>,
     vault_root: std::path::PathBuf,

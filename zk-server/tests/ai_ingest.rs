@@ -60,7 +60,9 @@ async fn distinct_note_changes_enqueue_distinct_jobs() {
         .into_iter()
         .map(|job| match job.kind {
             AiJobKind::RecomputeNote { note_id } => note_id,
-            AiJobKind::RecomputeVault | AiJobKind::ChatTurn { .. } => {
+            AiJobKind::RecomputeVault
+            | AiJobKind::ChatTurn { .. }
+            | AiJobKind::IngestSource { .. } => {
                 panic!("expected recompute-note jobs only")
             }
         })

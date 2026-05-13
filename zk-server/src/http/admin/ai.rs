@@ -176,6 +176,7 @@ fn listed_job(job: AiJob) -> ListedJob {
         AiJobKind::RecomputeNote { note_id } => ("recompute_note", Some(note_id.to_string())),
         AiJobKind::RecomputeVault => ("recompute_vault", None),
         AiJobKind::ChatTurn { .. } => ("chat_turn", None),
+        AiJobKind::IngestSource { .. } => ("ingest_source", None),
     };
 
     ListedJob {
