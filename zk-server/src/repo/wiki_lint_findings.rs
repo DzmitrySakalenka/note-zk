@@ -39,6 +39,21 @@ FROM wiki_lint_findings
 WHERE job_id = ?1
 ORDER BY created_at ASC, finding_id ASC
 ";
+const LIST_FINDINGS_FOR_JOB_LIMITED_SQL: &str = r"
+SELECT
+    finding_id,
+    job_id,
+    kind,
+    page_id,
+    source_id,
+    message,
+    severity,
+    created_at
+FROM wiki_lint_findings
+WHERE job_id = ?1
+ORDER BY created_at ASC, finding_id ASC
+LIMIT ?2
+";
 const COUNT_FINDINGS_FOR_JOB_SQL: &str =
     "SELECT COUNT(*) FROM wiki_lint_findings WHERE job_id = ?1";
 
@@ -135,6 +150,31 @@ impl<'a> WikiLintFindingsRepo<'a> {
             .map_err(ServerError::Database)?;
         let rows = statement
             .query_map([job_id.as_str()], decode_wiki_lint_finding_row)
+            .map_err(ServerError::Database)?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(ServerError::Database)
+    }
+
+    /// Lists a capped number of findings for one job in deterministic order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ServerError`] when the query fails or row decoding is invalid.
+    pub fn list_for_job_limited(
+        &self,
+        job_id: &JobId,
+        limit: u32,
+    ) -> ServerResult<Vec<WikiLintFindingRow>> {
+        let mut statement = self
+            .conn
+            .prepare_cached(LIST_FINDINGS_FOR_JOB_LIMITED_SQL)
+            .map_err(ServerError::Database)?;
+        let rows = statement
+            .query_map(
+                rusqlite::params![job_id.as_str(), i64::from(limit)],
+                decode_wiki_lint_finding_row,
+            )
             .map_err(ServerError::Database)?;
 
         rows.collect::<Result<Vec<_>, _>>()

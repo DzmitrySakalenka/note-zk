@@ -139,6 +139,30 @@ fn enqueue_then_claim_next_returns_same_job_once() {
 }
 
 #[test]
+fn get_returns_job_by_id_and_none_for_missing_job() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let enqueued = repo
+        .enqueue(
+            recompute_note_kind(),
+            parse_timestamp("2026-05-05T10:00:00Z"),
+        )
+        .expect("job enqueue should succeed");
+    let missing = JobId::generate();
+
+    let loaded = repo
+        .get(&enqueued.job_id)
+        .expect("job lookup should succeed")
+        .expect("job should exist");
+
+    assert_eq!(loaded, enqueued);
+    assert_eq!(
+        repo.get(&missing).expect("missing lookup should succeed"),
+        None
+    );
+}
+
+#[test]
 fn chat_turn_payload_round_trips_through_queue() {
     let connection = setup_connection();
     let repo = AiJobsRepo::new(&connection);

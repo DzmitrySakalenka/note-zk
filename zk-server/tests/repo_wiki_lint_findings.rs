@@ -218,6 +218,53 @@ fn insert_many_replaces_existing_rows_for_same_job() {
 }
 
 #[test]
+fn list_for_job_limited_applies_deterministic_limit() {
+    let connection = setup_connection();
+    let job_id = enqueue_lint_job(&connection, "req-lint-limited");
+    let repo = WikiLintFindingsRepo::new(&connection);
+
+    repo.insert_many(
+        &job_id,
+        &[
+            finding(WikiLintFindingKind::OrphanPage, None, None, "first finding"),
+            finding(
+                WikiLintFindingKind::MissingCrossReference,
+                None,
+                None,
+                "second finding",
+            ),
+            finding(
+                WikiLintFindingKind::ImportantConceptWithoutPage,
+                None,
+                None,
+                "third finding",
+            ),
+        ],
+        parse_timestamp("2026-05-13T10:06:00Z"),
+    )
+    .expect("findings should insert");
+
+    let rows = repo
+        .list_for_job_limited(&job_id, 2)
+        .expect("limited findings should list");
+    let expected = repo
+        .list_for_job(&job_id)
+        .expect("all findings should list")
+        .into_iter()
+        .take(2)
+        .map(|row| row.finding_id)
+        .collect::<Vec<_>>();
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.finding_id.clone())
+            .collect::<Vec<_>>(),
+        expected
+    );
+}
+
+#[test]
 fn encoded_kind_and_severity_are_lowercase_text_enums() {
     let connection = setup_connection();
     let job_id = enqueue_lint_job(&connection, "req-lint-text-enums");

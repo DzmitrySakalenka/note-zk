@@ -9,6 +9,7 @@ use crate::state::ServerState;
 
 mod ai;
 mod backups;
+mod wiki;
 
 pub(crate) fn admin_routes() -> Router<ServerState> {
     Router::new()
@@ -17,4 +18,7 @@ pub(crate) fn admin_routes() -> Router<ServerState> {
         .route("/admin/ai/recompute", post(ai::recompute))
         .route("/admin/ai/jobs", get(ai::jobs))
         .route("/admin/ai/cancel/{job_id}", post(ai::cancel))
+        .route("/admin/ai/wiki/ingest", post(wiki::ingest))
+        .route("/admin/ai/wiki/lint", post(wiki::lint))
+        .route("/admin/ai/wiki/lint/findings", get(wiki::findings))
 }

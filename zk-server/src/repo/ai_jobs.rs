@@ -71,6 +71,20 @@ WHERE kind = ?1
 ORDER BY enqueued_at ASC, job_id ASC
 LIMIT 1
 ";
+const GET_AI_JOB_SQL: &str = r"
+SELECT
+    job_id,
+    kind,
+    payload_json,
+    status,
+    attempts,
+    last_error,
+    enqueued_at,
+    started_at,
+    finished_at
+FROM ai_jobs
+WHERE job_id = ?1
+";
 const CLAIM_NEXT_AI_JOB_SQL: &str = r"
 UPDATE ai_jobs
 SET
@@ -389,6 +403,23 @@ impl<'a> AiJobsRepo<'a> {
             .query_row(PENDING_RECOMPUTE_NOTE_EXISTS_SQL, [payload_json], |row| {
                 row.get::<_, bool>(0)
             })
+            .map_err(ServerError::Database)
+    }
+
+    /// Loads one AI job by id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ServerError`] if the lookup fails or row decoding is invalid.
+    pub fn get(&self, job_id: &JobId) -> ServerResult<Option<AiJob>> {
+        let mut statement = self
+            .conn
+            .prepare_cached(GET_AI_JOB_SQL)
+            .map_err(ServerError::Database)?;
+
+        statement
+            .query_row([job_id.as_str()], decode_ai_job)
+            .optional()
             .map_err(ServerError::Database)
     }
 

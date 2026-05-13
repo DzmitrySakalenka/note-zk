@@ -193,7 +193,7 @@ Local and server schemas intentionally diverge:
 
 - local `note_chunks.note_id` references `notes_index(note_id)`;
 - server `note_chunks.note_id` references `notes(note_id)`;
-- `semantic_edges` and `ai_jobs` are server-only;
+- `semantic_edges`, `ai_jobs`, and `wiki_lint_findings` are server-only;
 - `idx_note_chunks_hash` is server-only.
 
 ### `note_chunks` (server schema v3, local schema v3)
@@ -260,6 +260,24 @@ edge-building job.
 Index:
 
 - `idx_ai_jobs_status_enqueued ON ai_jobs(status, enqueued_at)`
+
+### `wiki_lint_findings` (server schema v5 only)
+
+- `finding_id TEXT PRIMARY KEY`
+- `job_id TEXT NOT NULL REFERENCES ai_jobs(job_id) ON DELETE CASCADE`
+- `kind TEXT NOT NULL`
+- `page_id TEXT REFERENCES notes(note_id) ON DELETE SET NULL`
+- `source_id TEXT REFERENCES notes(note_id) ON DELETE SET NULL`
+- `message TEXT NOT NULL`
+- `severity TEXT NOT NULL`
+- `created_at TEXT NOT NULL`
+
+Indexes:
+
+- `idx_wiki_lint_findings_job ON wiki_lint_findings(job_id)`
+- `idx_wiki_lint_findings_page ON wiki_lint_findings(page_id) WHERE page_id IS NOT NULL`
+
+Last verified against `zk-server/src/schema.rs` on 2026-05-13.
 
 ## Chat Tables (server schema v4)
 
@@ -446,6 +464,8 @@ At minimum:
 - `notes.server_revision`
 - `assets.current_path`
 - `assets.server_revision`
+- `wiki_lint_findings.job_id`
+- `wiki_lint_findings.page_id` where `page_id IS NOT NULL`
 - `note_sync_state.sync_status`
 - `asset_sync_state.sync_status`
 - `delete_records.retention_until`
