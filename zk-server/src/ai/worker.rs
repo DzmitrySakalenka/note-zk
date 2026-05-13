@@ -311,6 +311,7 @@ async fn process_job(deps: &AiWorkerDeps, job: &AiJob) -> Result<(), AiWorkerErr
                 .instrument(span)
                 .await
         }
+        AiJobKind::LintWiki { .. } => Err(AiWorkerError::NotYetImplemented("lint_wiki")),
     }
 }
 
@@ -899,7 +900,8 @@ fn max_attempts_for_job(deps: &AiWorkerDeps, kind: &AiJobKind) -> u32 {
         AiJobKind::ChatTurn { .. } => chat_max_attempts(deps),
         AiJobKind::RecomputeNote { .. }
         | AiJobKind::RecomputeVault
-        | AiJobKind::IngestSource { .. } => deps.config.max_attempts,
+        | AiJobKind::IngestSource { .. }
+        | AiJobKind::LintWiki { .. } => deps.config.max_attempts,
     }
 }
 
@@ -916,6 +918,7 @@ fn job_kind_label(kind: &AiJobKind) -> &'static str {
         AiJobKind::RecomputeVault => "recompute_vault",
         AiJobKind::ChatTurn { .. } => "chat_turn",
         AiJobKind::IngestSource { .. } => "ingest_source",
+        AiJobKind::LintWiki { .. } => "lint_wiki",
     }
 }
 
@@ -1025,6 +1028,8 @@ enum AiWorkerError {
     MissingFrontmatter(RelativePath),
     #[error("conversation not found: {0}")]
     ConversationNotFound(ConversationId),
+    #[error("{0} not yet implemented")]
+    NotYetImplemented(&'static str),
     #[error("batch write failed: {failures:?}")]
     BatchWriteFailed {
         failures: Vec<zk_app::BatchWriteFailure>,

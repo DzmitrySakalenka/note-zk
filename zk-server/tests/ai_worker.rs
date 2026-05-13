@@ -24,7 +24,7 @@ use zk_ai::{
 use zk_domain::{
     EmbeddingModelId, EmbeddingVector, ExecutionMode, JobId, ProviderId, ProviderSelectorPolicy,
     config::EffectiveConfig,
-    id::{ContentHash, DeviceId, NoteId},
+    id::{ContentHash, DeviceId, NoteId, RelativePath},
 };
 use zk_server::{
     ServerDb,
@@ -32,7 +32,7 @@ use zk_server::{
     config::{AiConfig, AiProviderKind},
     repo::{
         AiJob, AiJobFilter, AiJobKind, AiJobKindFilter, AiJobStatus, AiJobsRepo, ChunksRepo,
-        EmbeddingsRepo, NoteRow, NotesRepo,
+        EmbeddingsRepo, NoteRow, NotesRepo, WikiLintScope,
     },
 };
 
@@ -233,6 +233,39 @@ async fn ingest_source_job_fails_without_wiki_config() {
             .last_error
             .as_deref()
             .is_some_and(|error| error.contains("wiki config missing")),
+        "last_error was {:?}",
+        failed.last_error
+    );
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn lint_wiki_job_fails_with_stub_error() {
+    let fixture = WorkerFixture::new("ai-worker-lint-wiki-stub");
+    let job = fixture.enqueue(AiJobKind::LintWiki {
+        scope: WikiLintScope::Folder {
+            path: RelativePath::new("wiki"),
+        },
+        request_id: "req-lint-wiki-worker".to_string(),
+    });
+    let shutdown = CancellationToken::new();
+    let handle = spawn_ai_job_worker(
+        fixture.deps(empty_selector(), ai_config(1)),
+        shutdown.clone(),
+    );
+
+    let failed = wait_for_status(&fixture.db, &job.job_id, AiJobStatus::Failed).await;
+    shutdown.cancel();
+    timeout(Duration::from_secs(1), handle)
+        .await
+        .expect("worker should join after shutdown")
+        .expect("worker task should not panic");
+
+    assert_eq!(failed.attempts, 1);
+    assert!(
+        failed
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("not yet implemented")),
         "last_error was {:?}",
         failed.last_error
     );

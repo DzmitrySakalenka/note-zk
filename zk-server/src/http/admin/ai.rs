@@ -177,6 +177,7 @@ fn listed_job(job: AiJob) -> ListedJob {
         AiJobKind::RecomputeVault => ("recompute_vault", None),
         AiJobKind::ChatTurn { .. } => ("chat_turn", None),
         AiJobKind::IngestSource { .. } => ("ingest_source", None),
+        AiJobKind::LintWiki { .. } => ("lint_wiki", None),
     };
 
     ListedJob {

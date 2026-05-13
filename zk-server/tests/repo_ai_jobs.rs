@@ -3,10 +3,13 @@
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
-use zk_domain::{ConversationId, JobId, id::NoteId};
+use zk_domain::{
+    ConversationId, JobId,
+    id::{NoteId, RelativePath},
+};
 use zk_server::{
     migration::ensure_schema,
-    repo::{AiJobFilter, AiJobKind, AiJobKindFilter, AiJobStatus, AiJobsRepo},
+    repo::{AiJobFilter, AiJobKind, AiJobKindFilter, AiJobStatus, AiJobsRepo, WikiLintScope},
 };
 
 fn setup_connection() -> Connection {
@@ -44,6 +47,22 @@ fn ingest_source_kind() -> AiJobKind {
     AiJobKind::IngestSource {
         source_note_id: note_id(),
         request_id: "req-ingest-source".to_string(),
+    }
+}
+
+fn lint_wiki_vault_kind() -> AiJobKind {
+    AiJobKind::LintWiki {
+        scope: WikiLintScope::Vault,
+        request_id: "req-lint-wiki-vault".to_string(),
+    }
+}
+
+fn lint_wiki_folder_kind() -> AiJobKind {
+    AiJobKind::LintWiki {
+        scope: WikiLintScope::Folder {
+            path: RelativePath::new("wiki/projects"),
+        },
+        request_id: "req-lint-wiki-folder".to_string(),
     }
 }
 
@@ -151,6 +170,44 @@ fn ingest_source_payload_round_trips_through_queue() {
         .claim_next(3, parse_timestamp("2026-05-05T10:01:00Z"))
         .expect("ingest-source job claim should succeed")
         .expect("ingest-source job should be claimed");
+
+    assert_eq!(enqueued.kind, kind);
+    assert_eq!(claimed.kind, kind);
+    assert_eq!(claimed.status, AiJobStatus::InFlight);
+}
+
+#[test]
+fn lint_wiki_vault_payload_round_trips_through_queue() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let kind = lint_wiki_vault_kind();
+    let enqueued = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:00:00Z"))
+        .expect("lint-wiki vault job enqueue should succeed");
+
+    let claimed = repo
+        .claim_next(3, parse_timestamp("2026-05-05T10:01:00Z"))
+        .expect("lint-wiki vault job claim should succeed")
+        .expect("lint-wiki vault job should be claimed");
+
+    assert_eq!(enqueued.kind, kind);
+    assert_eq!(claimed.kind, kind);
+    assert_eq!(claimed.status, AiJobStatus::InFlight);
+}
+
+#[test]
+fn lint_wiki_folder_payload_round_trips_through_queue() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let kind = lint_wiki_folder_kind();
+    let enqueued = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:00:00Z"))
+        .expect("lint-wiki folder job enqueue should succeed");
+
+    let claimed = repo
+        .claim_next(3, parse_timestamp("2026-05-05T10:01:00Z"))
+        .expect("lint-wiki folder job claim should succeed")
+        .expect("lint-wiki folder job should be claimed");
 
     assert_eq!(enqueued.kind, kind);
     assert_eq!(claimed.kind, kind);
@@ -315,6 +372,12 @@ fn list_filters_by_status_and_kind() {
             parse_timestamp("2026-05-05T10:03:00Z"),
         )
         .expect("ingest-source job enqueue should succeed");
+    let lint_job = repo
+        .enqueue(
+            lint_wiki_vault_kind(),
+            parse_timestamp("2026-05-05T10:04:00Z"),
+        )
+        .expect("lint-wiki job enqueue should succeed");
 
     let pending = repo
         .list(AiJobFilter {
@@ -351,10 +414,18 @@ fn list_filters_by_status_and_kind() {
             limit: None,
         })
         .expect("ingest-source list should succeed");
+    let lint_jobs = repo
+        .list(AiJobFilter {
+            status: None,
+            kind: Some(AiJobKindFilter::LintWiki),
+            limit: None,
+        })
+        .expect("lint-wiki list should succeed");
 
     assert_eq!(
         pending.iter().map(|job| &job.job_id).collect::<Vec<_>>(),
         vec![
+            &lint_job.job_id,
             &ingest_job.job_id,
             &chat_job.job_id,
             &vault_job.job_id,
@@ -369,6 +440,8 @@ fn list_filters_by_status_and_kind() {
     assert_eq!(chat_jobs[0].job_id, chat_job.job_id);
     assert_eq!(ingest_jobs.len(), 1);
     assert_eq!(ingest_jobs[0].job_id, ingest_job.job_id);
+    assert_eq!(lint_jobs.len(), 1);
+    assert_eq!(lint_jobs[0].job_id, lint_job.job_id);
 }
 
 #[test]
@@ -452,6 +525,57 @@ fn enqueue_ingest_source_reuses_terminal_job() {
     assert_ne!(failed_job.job_id, done_job.job_id);
     assert_eq!(failed_duplicate.job_id, failed_job.job_id);
     assert_eq!(failed_duplicate.status, AiJobStatus::Failed);
+}
+
+#[test]
+fn enqueue_lint_wiki_reuses_only_active_job() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let kind = lint_wiki_vault_kind();
+    let first = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:00:00Z"))
+        .expect("first lint-wiki job enqueue should succeed");
+
+    let pending_duplicate = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:01:00Z"))
+        .expect("pending duplicate enqueue should succeed");
+    let claimed = repo
+        .claim_next(3, parse_timestamp("2026-05-05T10:02:00Z"))
+        .expect("lint-wiki job claim should succeed")
+        .expect("lint-wiki job should be claimed");
+    let in_flight_duplicate = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:03:00Z"))
+        .expect("in-flight duplicate enqueue should succeed");
+    repo.mark_done(&first.job_id, parse_timestamp("2026-05-05T10:04:00Z"))
+        .expect("lint-wiki job should mark done");
+    let after_done = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:05:00Z"))
+        .expect("done duplicate enqueue should create new job");
+
+    assert_eq!(pending_duplicate.job_id, first.job_id);
+    assert_eq!(pending_duplicate.status, AiJobStatus::Pending);
+    assert_eq!(claimed.job_id, first.job_id);
+    assert_eq!(in_flight_duplicate.job_id, first.job_id);
+    assert_eq!(in_flight_duplicate.status, AiJobStatus::InFlight);
+    assert_ne!(after_done.job_id, first.job_id);
+    assert_eq!(after_done.status, AiJobStatus::Pending);
+
+    repo.claim_next(1, parse_timestamp("2026-05-05T10:06:00Z"))
+        .expect("second lint-wiki job claim should succeed")
+        .expect("second lint-wiki job should be claimed");
+    repo.mark_failed(
+        &after_done.job_id,
+        "failed",
+        1,
+        parse_timestamp("2026-05-05T10:07:00Z"),
+    )
+    .expect("second lint-wiki job should fail");
+    let after_failed = repo
+        .enqueue(kind, parse_timestamp("2026-05-05T10:08:00Z"))
+        .expect("failed duplicate enqueue should create new job");
+
+    assert_ne!(after_failed.job_id, after_done.job_id);
+    assert_eq!(after_failed.status, AiJobStatus::Pending);
 }
 
 #[test]

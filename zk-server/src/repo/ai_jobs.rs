@@ -3,7 +3,10 @@ use std::io::{self, ErrorKind};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, Row, types::Type};
 use serde::{Deserialize, Serialize};
-use zk_domain::{ConversationId, JobId, id::NoteId};
+use zk_domain::{
+    ConversationId, JobId,
+    id::{NoteId, RelativePath},
+};
 
 use super::timestamps::{decode_optional_timestamp, decode_timestamp, encode_timestamp};
 use crate::{ServerError, ServerResult};
@@ -47,6 +50,24 @@ SELECT
 FROM ai_jobs
 WHERE kind = ?1
   AND payload_json = ?2
+ORDER BY enqueued_at ASC, job_id ASC
+LIMIT 1
+";
+const FIND_ACTIVE_AI_JOB_BY_KIND_AND_PAYLOAD_SQL: &str = r"
+SELECT
+    job_id,
+    kind,
+    payload_json,
+    status,
+    attempts,
+    last_error,
+    enqueued_at,
+    started_at,
+    finished_at
+FROM ai_jobs
+WHERE kind = ?1
+  AND payload_json = ?2
+  AND status IN ('pending', 'in_flight')
 ORDER BY enqueued_at ASC, job_id ASC
 LIMIT 1
 ";
@@ -215,6 +236,29 @@ pub enum AiJobKind {
         /// Stable request id for enqueue idempotency.
         request_id: String,
     },
+    /// Lint derived wiki pages for stale or missing wiki structure.
+    ///
+    /// `(scope, request_id)` is the active-job dedup key; enqueue
+    /// returns an existing pending or in-flight job id when one matches.
+    LintWiki {
+        /// Wiki lint scope.
+        scope: WikiLintScope,
+        /// Stable request id for enqueue idempotency.
+        request_id: String,
+    },
+}
+
+/// Scope covered by a wiki lint job.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WikiLintScope {
+    /// Lint the whole configured wiki.
+    Vault,
+    /// Lint one configured wiki subfolder.
+    Folder {
+        /// Vault-relative folder path to lint.
+        path: RelativePath,
+    },
 }
 
 /// AI background job status.
@@ -241,6 +285,8 @@ pub enum AiJobKindFilter {
     ChatTurn,
     /// Match `IngestSource` jobs.
     IngestSource,
+    /// Match `LintWiki` jobs.
+    LintWiki,
 }
 
 /// Filters used when listing AI background jobs.
@@ -298,6 +344,11 @@ impl<'a> AiJobsRepo<'a> {
 
         if matches!(&kind, AiJobKind::IngestSource { .. })
             && let Some(job) = self.find_by_kind_and_payload(kind_name, &payload_json)?
+        {
+            return Ok(job);
+        }
+        if matches!(&kind, AiJobKind::LintWiki { .. })
+            && let Some(job) = self.find_active_by_kind_and_payload(kind_name, &payload_json)?
         {
             return Ok(job);
         }
@@ -497,6 +548,22 @@ impl<'a> AiJobsRepo<'a> {
             .optional()
             .map_err(ServerError::Database)
     }
+
+    fn find_active_by_kind_and_payload(
+        &self,
+        kind_name: &str,
+        payload_json: &str,
+    ) -> ServerResult<Option<AiJob>> {
+        let mut statement = self
+            .conn
+            .prepare_cached(FIND_ACTIVE_AI_JOB_BY_KIND_AND_PAYLOAD_SQL)
+            .map_err(ServerError::Database)?;
+
+        statement
+            .query_row(rusqlite::params![kind_name, payload_json], decode_ai_job)
+            .optional()
+            .map_err(ServerError::Database)
+    }
 }
 
 impl AiJobKind {
@@ -506,6 +573,7 @@ impl AiJobKind {
             Self::RecomputeVault => "recompute_vault",
             Self::ChatTurn { .. } => "chat_turn",
             Self::IngestSource { .. } => "ingest_source",
+            Self::LintWiki { .. } => "lint_wiki",
         }
     }
 }
@@ -528,6 +596,7 @@ impl AiJobKindFilter {
             Self::RecomputeVault => "recompute_vault",
             Self::ChatTurn => "chat_turn",
             Self::IngestSource => "ingest_source",
+            Self::LintWiki => "lint_wiki",
         }
     }
 }
@@ -553,6 +622,12 @@ struct IngestSourcePayload {
     request_id: String,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct LintWikiPayload {
+    scope: WikiLintScope,
+    request_id: String,
+}
+
 fn encode_payload_json(kind: &AiJobKind) -> ServerResult<String> {
     match kind {
         AiJobKind::RecomputeNote { note_id } => serde_json::to_string(&RecomputeNotePayload {
@@ -573,6 +648,10 @@ fn encode_payload_json(kind: &AiJobKind) -> ServerResult<String> {
             request_id,
         } => serde_json::to_string(&IngestSourcePayload {
             source_note_id: source_note_id.to_string(),
+            request_id: request_id.clone(),
+        }),
+        AiJobKind::LintWiki { scope, request_id } => serde_json::to_string(&LintWikiPayload {
+            scope: scope.clone(),
             request_id: request_id.clone(),
         }),
     }
@@ -631,6 +710,14 @@ fn decode_job_kind(kind_name: &str, payload_json: &str) -> rusqlite::Result<AiJo
                 .map_err(|source| from_sql_conversion_failure(2, Type::Text, source))?;
             Ok(AiJobKind::IngestSource {
                 source_note_id: NoteId::new(&payload.source_note_id),
+                request_id: payload.request_id,
+            })
+        }
+        "lint_wiki" => {
+            let payload = serde_json::from_str::<LintWikiPayload>(payload_json)
+                .map_err(|source| from_sql_conversion_failure(2, Type::Text, source))?;
+            Ok(AiJobKind::LintWiki {
+                scope: payload.scope,
                 request_id: payload.request_id,
             })
         }

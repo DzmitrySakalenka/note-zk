@@ -17,7 +17,9 @@ mod timestamps;
 mod tokens;
 mod users;
 
-pub use ai_jobs::{AiJob, AiJobFilter, AiJobKind, AiJobKindFilter, AiJobStatus, AiJobsRepo};
+pub use ai_jobs::{
+    AiJob, AiJobFilter, AiJobKind, AiJobKindFilter, AiJobStatus, AiJobsRepo, WikiLintScope,
+};
 pub use assets::{AssetRow, AssetsRepo};
 pub use chunks::ChunksRepo;
 pub use conversations::{ConversationsRepo, ListConversationsParams};

@@ -62,7 +62,8 @@ async fn distinct_note_changes_enqueue_distinct_jobs() {
             AiJobKind::RecomputeNote { note_id } => note_id,
             AiJobKind::RecomputeVault
             | AiJobKind::ChatTurn { .. }
-            | AiJobKind::IngestSource { .. } => {
+            | AiJobKind::IngestSource { .. }
+            | AiJobKind::LintWiki { .. } => {
                 panic!("expected recompute-note jobs only")
             }
         })

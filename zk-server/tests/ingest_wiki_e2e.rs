@@ -484,7 +484,8 @@ impl IngestFixture {
                                 AiJobKind::RecomputeNote { note_id } => Some(note_id),
                                 AiJobKind::RecomputeVault
                                 | AiJobKind::ChatTurn { .. }
-                                | AiJobKind::IngestSource { .. } => None,
+                                | AiJobKind::IngestSource { .. }
+                                | AiJobKind::LintWiki { .. } => None,
                             })
                             .collect::<Vec<_>>()
                     })

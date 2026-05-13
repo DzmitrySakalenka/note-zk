@@ -12,11 +12,14 @@ use serde::Deserialize;
 use serde_json::json;
 use tempfile::NamedTempFile;
 use tower::ServiceExt;
-use zk_domain::{AuthScope, ExecutionMode, JobId, id::NoteId};
+use zk_domain::{
+    AuthScope, ExecutionMode, JobId,
+    id::{NoteId, RelativePath},
+};
 use zk_server::{
     config::{AiConfig, AiProviderKind, ServerConfig},
     http::build_router,
-    repo::{AiJobKind, AiJobsRepo},
+    repo::{AiJobKind, AiJobsRepo, WikiLintScope},
     service::{self, IssueTokenSpec},
     state::{ServerState, bootstrap_with_config},
 };
@@ -95,6 +98,24 @@ impl AiAdminFixture {
                 )
             })
             .expect("ingest-source job fixture should enqueue")
+            .job_id
+    }
+
+    fn enqueue_lint_wiki(&self, request_id: &str) -> JobId {
+        self.state
+            .db()
+            .with_conn(|connection| {
+                AiJobsRepo::new(connection).enqueue(
+                    AiJobKind::LintWiki {
+                        scope: WikiLintScope::Folder {
+                            path: RelativePath::new("wiki"),
+                        },
+                        request_id: request_id.to_string(),
+                    },
+                    Utc::now(),
+                )
+            })
+            .expect("lint-wiki job fixture should enqueue")
             .job_id
     }
 
@@ -264,6 +285,22 @@ async fn get_jobs_lists_ingest_source_job() {
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].job_id, job_id.to_string());
     assert_eq!(jobs[0].kind, "ingest_source");
+    assert_eq!(jobs[0].note_id, None);
+    assert_eq!(jobs[0].status, "pending");
+}
+
+#[tokio::test]
+async fn get_jobs_lists_lint_wiki_job() {
+    let fixture = AiAdminFixture::enabled();
+    let admin_token = fixture.issue_token(vec![AuthScope::Admin]);
+    let job_id = fixture.enqueue_lint_wiki("req-lint-wiki-admin");
+    let app = build_router(fixture.state.clone());
+
+    let jobs = get_jobs(&app, &admin_token, JOBS_PATH).await;
+
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].job_id, job_id.to_string());
+    assert_eq!(jobs[0].kind, "lint_wiki");
     assert_eq!(jobs[0].note_id, None);
     assert_eq!(jobs[0].status, "pending");
 }
