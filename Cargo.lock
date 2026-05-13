@@ -5701,6 +5701,7 @@ dependencies = [
  "zk-auth",
  "zk-backup",
  "zk-domain",
+ "zk-index",
  "zk-server",
  "zk-vault",
 ]

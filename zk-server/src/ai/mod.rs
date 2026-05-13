@@ -6,5 +6,7 @@ pub(crate) mod chat_runtime;
 pub mod ingest;
 /// Pure LLM Wiki ingest prompt assembly and response parsing.
 pub mod ingest_wiki;
+/// Pure heuristic LLM Wiki lint analysis.
+pub mod lint_wiki;
 /// In-process AI job worker.
 pub mod worker;

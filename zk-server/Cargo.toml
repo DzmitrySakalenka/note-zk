@@ -41,6 +41,7 @@ zk-app = { version = "0.1.0", path = "../zk-app" }
 zk-auth = { version = "0.1.0", path = "../zk-auth" }
 zk-backup = { version = "0.1.0", path = "../zk-backup" }
 zk-domain = { path = "../zk-domain" }
+zk-index = { version = "0.1.0", path = "../zk-index" }
 zk-vault = { version = "0.1.0", path = "../zk-vault" }
 
 [dev-dependencies]
