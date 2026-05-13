@@ -151,6 +151,7 @@ impl ChatE2eFixture {
                     &IssueTokenSpec {
                         label: "AI chat E2E token".to_string(),
                         device_id: None,
+                        user_id: None,
                         scopes,
                     },
                     Utc::now(),

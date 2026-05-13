@@ -298,8 +298,8 @@ zk-cli chat --conversation-id <id> -m "..."
 zk-cli chat conversations list
 ```
 
-The server chat API is user-owned and currently accepts browser-session
-chat auth. Device-token-only chat and local/offline chat are post-V1.
+`zk-cli chat` requires a user-bound device token issued with the `chat`
+scope: `zk-cli auth issue-token --scope chat`.
 
 ## Backup and Restore
 

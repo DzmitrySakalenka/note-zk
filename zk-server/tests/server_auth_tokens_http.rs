@@ -267,6 +267,7 @@ fn issue_service_token(
                 &IssueTokenSpec {
                     label: label.to_string(),
                     device_id: device_id.map(ToOwned::to_owned),
+                    user_id: Some(USER_ID.to_string()),
                     scopes,
                 },
                 Utc::now(),
@@ -309,6 +310,7 @@ async fn issue_returns_plaintext_once_and_persists_hash() {
 
     assert_eq!(row.token_id, body.token_id);
     assert_eq!(row.device_id, None);
+    assert_eq!(row.user_id.as_deref(), Some(USER_ID));
     assert_eq!(row.label, "Laptop");
     assert_eq!(row.token_sha256_hex, hash_device_token(&body.plaintext));
     assert_eq!(row.revoked_at, None);

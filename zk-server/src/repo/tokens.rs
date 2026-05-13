@@ -10,18 +10,20 @@ const INSERT_TOKEN_SQL: &str = r"
 INSERT INTO device_tokens (
     token_id,
     device_id,
+    user_id,
     label,
     token_sha256_hex,
     scopes_json,
     created_at
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7
 )
 ";
 const GET_TOKEN_BY_ID_SQL: &str = r"
 SELECT
     token_id,
     device_id,
+    user_id,
     label,
     token_sha256_hex,
     scopes_json,
@@ -36,6 +38,7 @@ const LOOKUP_TOKEN_BY_HASH_SQL: &str = r"
 SELECT
     token_id,
     device_id,
+    user_id,
     label,
     token_sha256_hex,
     scopes_json,
@@ -50,6 +53,7 @@ const LIST_TOKENS_FOR_DEVICE_SQL: &str = r"
 SELECT
     token_id,
     device_id,
+    user_id,
     label,
     token_sha256_hex,
     scopes_json,
@@ -64,6 +68,7 @@ const LIST_UNBOUND_TOKENS_SQL: &str = r"
 SELECT
     token_id,
     device_id,
+    user_id,
     label,
     token_sha256_hex,
     scopes_json,
@@ -78,6 +83,7 @@ const LIST_ALL_ACTIVE_TOKENS_SQL: &str = r"
 SELECT
     token_id,
     device_id,
+    user_id,
     label,
     token_sha256_hex,
     scopes_json,
@@ -103,6 +109,8 @@ pub struct DeviceTokenInsert {
     pub token_id: String,
     /// Optional owning device identifier.
     pub device_id: Option<String>,
+    /// Optional owning user identifier.
+    pub user_id: Option<String>,
     /// Human-readable operator label.
     pub label: String,
     /// Lowercase `SHA-256(plaintext_token)` hex digest.
@@ -120,6 +128,8 @@ pub struct DeviceTokenRow {
     pub token_id: String,
     /// Optional owning device identifier.
     pub device_id: Option<String>,
+    /// Optional owning user identifier.
+    pub user_id: Option<String>,
     /// Human-readable operator label.
     pub label: String,
     /// Lowercase `SHA-256(plaintext_token)` hex digest.
@@ -137,6 +147,7 @@ pub struct DeviceTokenRow {
 struct DeviceTokenLookupRow {
     token_id: String,
     device_id: Option<String>,
+    user_id: Option<String>,
     label: String,
     token_sha256_hex: String,
     scopes_json: String,
@@ -169,6 +180,7 @@ impl DeviceTokenRepo {
             .execute(rusqlite::params![
                 row.token_id,
                 row.device_id,
+                row.user_id,
                 row.label,
                 row.token_sha256_hex,
                 scopes_json,
@@ -324,6 +336,7 @@ impl DeviceTokenLookupRow {
         Ok(DeviceTokenRow {
             token_id: self.token_id,
             device_id: self.device_id,
+            user_id: self.user_id,
             label: self.label,
             token_sha256_hex: self.token_sha256_hex,
             scopes,
@@ -338,32 +351,34 @@ fn decode_device_token_lookup_row(row: &Row<'_>) -> rusqlite::Result<DeviceToken
     Ok(DeviceTokenLookupRow {
         token_id: row.get(0)?,
         device_id: row.get(1)?,
-        label: row.get(2)?,
-        token_sha256_hex: row.get(3)?,
-        scopes_json: row.get(4)?,
-        created_at: decode_timestamp(row, 5)?,
-        last_used_at: decode_optional_timestamp(row, 6)?,
-        revoked_at: decode_optional_timestamp(row, 7)?,
+        user_id: row.get(2)?,
+        label: row.get(3)?,
+        token_sha256_hex: row.get(4)?,
+        scopes_json: row.get(5)?,
+        created_at: decode_timestamp(row, 6)?,
+        last_used_at: decode_optional_timestamp(row, 7)?,
+        revoked_at: decode_optional_timestamp(row, 8)?,
     })
 }
 
 fn decode_device_token_row(row: &Row<'_>) -> rusqlite::Result<DeviceTokenRow> {
-    let scopes_json = row.get::<_, String>(4)?;
+    let scopes_json = row.get::<_, String>(5)?;
 
     Ok(DeviceTokenRow {
         token_id: row.get(0)?,
         device_id: row.get(1)?,
-        label: row.get(2)?,
-        token_sha256_hex: row.get(3)?,
+        user_id: row.get(2)?,
+        label: row.get(3)?,
+        token_sha256_hex: row.get(4)?,
         scopes: decode_scopes(&scopes_json)?,
-        created_at: decode_timestamp(row, 5)?,
-        last_used_at: decode_optional_timestamp(row, 6)?,
-        revoked_at: decode_optional_timestamp(row, 7)?,
+        created_at: decode_timestamp(row, 6)?,
+        last_used_at: decode_optional_timestamp(row, 7)?,
+        revoked_at: decode_optional_timestamp(row, 8)?,
     })
 }
 
 fn decode_scopes(scopes_json: &str) -> rusqlite::Result<Vec<AuthScope>> {
     serde_json::from_str(scopes_json).map_err(|source| {
-        rusqlite::Error::FromSqlConversionFailure(4, Type::Text, Box::new(source))
+        rusqlite::Error::FromSqlConversionFailure(5, Type::Text, Box::new(source))
     })
 }

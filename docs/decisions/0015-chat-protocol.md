@@ -99,3 +99,12 @@ TG17 rejects offline queueing and local generation in V1 because the
 local conversation cache and local chat provider are not part of this
 milestone. Users get an immediate typed failure instead of hidden pending
 state.
+
+### Auth
+
+Chat routes accept browser sessions with CSRF, header-discovered browser
+sessions with CSRF, and user-bound device tokens that carry the `chat`
+scope. The device-token path keeps CLI chat bearer-based without asking
+operators to pass passwords or captured browser cookies through the CLI.
+Existing device tokens are not backfilled; operators must reissue them
+with `zk-cli auth issue-token --scope chat` before using `zk-cli chat`.

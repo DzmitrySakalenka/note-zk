@@ -4,7 +4,7 @@
 use rusqlite::Connection;
 use zk_server::migration::ensure_schema;
 
-const CURRENT_SCHEMA_VERSION: i64 = 6;
+const CURRENT_SCHEMA_VERSION: i64 = 7;
 const MESSAGES_TABLE: &str = "messages";
 const REQUEST_ID_COLUMN: &str = "request_id";
 const REQUEST_ID_INDEX: &str = "idx_messages_request";
@@ -69,6 +69,48 @@ fn create_v5_messages_fixture(connection: &Connection) {
             [],
         )
         .expect("messages table should be created");
+    connection
+        .execute(
+            "CREATE TABLE devices (
+                device_id TEXT PRIMARY KEY,
+                device_name TEXT NOT NULL,
+                platform TEXT,
+                app_version TEXT,
+                capabilities_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL
+            )",
+            [],
+        )
+        .expect("devices table should be created");
+    connection
+        .execute(
+            "CREATE TABLE device_tokens (
+                token_id TEXT PRIMARY KEY,
+                device_id TEXT,
+                label TEXT NOT NULL,
+                token_sha256_hex TEXT NOT NULL UNIQUE,
+                scopes_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                last_used_at TEXT,
+                revoked_at TEXT,
+                FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE SET NULL
+            )",
+            [],
+        )
+        .expect("device tokens table should be created");
+    connection
+        .execute(
+            "CREATE TABLE users (
+                user_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                disabled_at TEXT
+            )",
+            [],
+        )
+        .expect("users table should be created");
     connection
         .execute(
             "INSERT INTO server_schema_version (id, version) VALUES (1, 5)",

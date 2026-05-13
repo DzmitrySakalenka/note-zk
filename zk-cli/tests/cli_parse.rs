@@ -523,6 +523,31 @@ fn auth_issue_token_defaults_scopes_to_sync() {
 }
 
 #[test]
+fn auth_issue_token_accepts_scope_alias_for_chat() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "auth",
+        "issue-token",
+        "--server-url",
+        "https://zk.example.com",
+        "--username",
+        "admin",
+        "--label",
+        "chat",
+        "--scope",
+        "chat",
+    ])
+    .expect("auth issue-token scope alias should parse");
+
+    match cli.command {
+        Command::Auth(AuthCommand::IssueToken(args)) => {
+            assert_eq!(args.scopes, "chat");
+        }
+        other => panic!("expected auth issue-token command, got {other:?}"),
+    }
+}
+
+#[test]
 fn admin_ai_recompute_parses_vault_scope() {
     let cli = Cli::try_parse_from([
         "zk-cli",

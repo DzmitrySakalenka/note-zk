@@ -63,6 +63,7 @@ async fn issue_token_against_running_server_prints_plaintext_once() {
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].label, LABEL);
+    assert!(rows[0].user_id.is_some());
     assert_eq!(
         rows[0]
             .device_id
@@ -72,6 +73,38 @@ async fn issue_token_against_running_server_prints_plaintext_once() {
         Some(DEVICE_ID)
     );
     assert_eq!(rows[0].scopes, vec![AuthScope::Sync, AuthScope::Read]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn issue_token_accepts_scope_alias_for_chat() {
+    let server = start_server().await;
+    create_admin_user(&server);
+    create_device(&server);
+
+    let assert = issue_token_command_with_scope_arg(&server, PASSWORD, "--scope", "chat")
+        .assert()
+        .success();
+    let output = assert.get_output();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let plaintext = plaintext_from_stdout(&stdout);
+
+    assert!(stdout.contains("Token id: "));
+    assert!(stdout.contains("Plaintext: "));
+    assert!(stdout.contains("Scopes: chat"));
+    assert_eq!(stdout.matches(&plaintext).count(), 1);
+    assert!(stderr.contains("Store the plaintext in ZK_DEVICE_TOKEN."));
+    assert!(!stderr.contains(&plaintext));
+
+    let rows = server
+        .state
+        .db()
+        .with_conn(DeviceTokenRepo::list_all_active)
+        .expect("active token rows should query");
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].scopes, vec![AuthScope::Chat]);
+    assert!(rows[0].user_id.is_some());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -180,6 +213,15 @@ fn create_device(server: &TestServer) {
 }
 
 fn issue_token_command(server: &TestServer, password: &str) -> Command {
+    issue_token_command_with_scope_arg(server, password, "--scopes", "sync,read")
+}
+
+fn issue_token_command_with_scope_arg(
+    server: &TestServer,
+    password: &str,
+    scope_flag: &str,
+    scopes: &str,
+) -> Command {
     let mut command = Command::cargo_bin("zk-cli").expect("zk-cli binary should build");
     command
         .arg("auth")
@@ -190,8 +232,8 @@ fn issue_token_command(server: &TestServer, password: &str) -> Command {
         .arg(USERNAME)
         .arg("--label")
         .arg(LABEL)
-        .arg("--scopes")
-        .arg("sync,read")
+        .arg(scope_flag)
+        .arg(scopes)
         .arg("--device-id")
         .arg(DEVICE_ID)
         .write_stdin(format!("{password}\n"));

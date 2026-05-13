@@ -71,6 +71,7 @@ fn issue_token_spec(label: &str) -> IssueTokenSpec {
     IssueTokenSpec {
         label: label.to_string(),
         device_id: None,
+        user_id: None,
         scopes: vec![AuthScope::Sync],
     }
 }
@@ -316,11 +317,33 @@ fn issue_returns_unique_plaintexts() {
 }
 
 #[test]
+fn issue_with_user_id_persists_user_binding() {
+    let connection = setup_connection();
+    create_user_fixture(&connection, "user-1", "alice", "correct horse battery");
+    let now = parse_timestamp("2026-04-29T12:00:00Z");
+    let spec = IssueTokenSpec {
+        label: "Chat token".to_string(),
+        device_id: None,
+        user_id: Some("user-1".to_string()),
+        scopes: vec![AuthScope::Chat],
+    };
+
+    let issued = issue_device_token(&connection, &spec, now).expect("token issue should succeed");
+    let row = DeviceTokenRepo::lookup_by_hash(&connection, &hash_device_token(&issued.plaintext))
+        .expect("issued token lookup should succeed")
+        .expect("issued token should be persisted");
+
+    assert_eq!(issued.scopes, vec![AuthScope::Chat]);
+    assert_eq!(row.user_id.as_deref(), Some("user-1"));
+}
+
+#[test]
 fn issue_with_empty_scopes_returns_invalid_request() {
     let connection = setup_connection();
     let spec = IssueTokenSpec {
         label: "Laptop".to_string(),
         device_id: None,
+        user_id: None,
         scopes: Vec::new(),
     };
 
@@ -433,6 +456,7 @@ fn rotate_revokes_old_and_issues_new_atomically() {
         current_token_id: issued.token_id.clone(),
         label: "Laptop replacement".to_string(),
         device_id: None,
+        user_id: None,
         scopes: vec![AuthScope::Sync, AuthScope::Admin],
     };
 
@@ -462,6 +486,7 @@ fn rotate_with_unknown_token_id_returns_not_found_and_does_not_issue() {
         current_token_id: "missing-token".to_string(),
         label: "Replacement".to_string(),
         device_id: None,
+        user_id: None,
         scopes: vec![AuthScope::Sync],
     };
 
@@ -492,6 +517,7 @@ fn rotate_with_unknown_device_id_rolls_back_revoke() {
         current_token_id: issued.token_id.clone(),
         label: "Replacement".to_string(),
         device_id: Some("missing-device".to_string()),
+        user_id: None,
         scopes: vec![AuthScope::Sync],
     };
 

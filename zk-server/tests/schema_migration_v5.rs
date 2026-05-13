@@ -4,7 +4,7 @@
 use rusqlite::Connection;
 use zk_server::migration::ensure_schema;
 
-const CURRENT_SCHEMA_VERSION: i64 = 6;
+const CURRENT_SCHEMA_VERSION: i64 = 7;
 const EXPECTED_V5_INDEXES: &[(&str, &str)] = &[
     ("notes", "idx_notes_revision"),
     ("assets", "idx_assets_revision"),
@@ -31,6 +31,51 @@ fn index_names(connection: &Connection, table_name: &str) -> Vec<String> {
 
     rows.collect::<Result<Vec<_>, _>>()
         .expect("index names should decode")
+}
+
+fn create_auth_tables(connection: &Connection) {
+    connection
+        .execute(
+            "CREATE TABLE devices (
+                device_id TEXT PRIMARY KEY,
+                device_name TEXT NOT NULL,
+                platform TEXT,
+                app_version TEXT,
+                capabilities_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL
+            )",
+            [],
+        )
+        .expect("devices table should be created");
+    connection
+        .execute(
+            "CREATE TABLE device_tokens (
+                token_id TEXT PRIMARY KEY,
+                device_id TEXT,
+                label TEXT NOT NULL,
+                token_sha256_hex TEXT NOT NULL UNIQUE,
+                scopes_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                last_used_at TEXT,
+                revoked_at TEXT,
+                FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE SET NULL
+            )",
+            [],
+        )
+        .expect("device tokens table should be created");
+    connection
+        .execute(
+            "CREATE TABLE users (
+                user_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                disabled_at TEXT
+            )",
+            [],
+        )
+        .expect("users table should be created");
 }
 
 fn create_v4_revision_fixture(connection: &Connection) {
@@ -64,6 +109,7 @@ fn create_v4_revision_fixture(connection: &Connection) {
             [],
         )
         .expect("notes table should be created");
+    create_auth_tables(connection);
     connection
         .execute(
             "CREATE TABLE assets (

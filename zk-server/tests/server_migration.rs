@@ -4,7 +4,7 @@
 use rusqlite::Connection;
 use zk_server::{ServerError, migration::ensure_schema};
 
-const CURRENT_SCHEMA_VERSION: i64 = 6;
+const CURRENT_SCHEMA_VERSION: i64 = 7;
 
 const EXPECTED_V1_TABLES: &[&str] = &[
     "devices",
@@ -60,6 +60,18 @@ fn query_pragma_int(connection: &Connection, pragma_name: &str) -> i64 {
     connection
         .query_row(&statement, [], |row| row.get(0))
         .expect("pragma query should succeed")
+}
+
+fn query_table_column_names(connection: &Connection, table_name: &str) -> Vec<String> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table_name})"))
+        .expect("table info query should prepare");
+    let rows = statement
+        .query_map([], |row| row.get(1))
+        .expect("table info query should execute");
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .expect("table column names should decode")
 }
 
 fn query_schema_version(connection: &Connection) -> i64 {
@@ -434,6 +446,46 @@ fn migrating_v1_db_with_data_preserves_rows() {
 }
 
 #[test]
+fn ensure_schema_adds_nullable_user_id_to_device_tokens() {
+    let connection = Connection::open_in_memory().expect("in-memory database should open");
+    connection
+        .pragma_update(None, "foreign_keys", true)
+        .expect("foreign keys pragma should be enabled");
+
+    ensure_schema(&connection).expect("schema migration should succeed");
+
+    let column_names = query_table_column_names(&connection, "device_tokens");
+
+    assert!(
+        column_names
+            .iter()
+            .any(|column_name| column_name == "user_id")
+    );
+    connection
+        .execute(
+            "INSERT INTO device_tokens (
+                token_id,
+                device_id,
+                user_id,
+                label,
+                token_sha256_hex,
+                scopes_json,
+                created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            (
+                "token-null-user",
+                Option::<String>::None,
+                Option::<String>::None,
+                "Legacy token",
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                r#"["sync"]"#,
+                "2026-05-13T12:00:00Z",
+            ),
+        )
+        .expect("nullable user_id insert should succeed");
+}
+
+#[test]
 fn ensure_schema_rejects_future_server_schema_versions() {
     let connection = Connection::open_in_memory().expect("in-memory database should open");
 
@@ -448,7 +500,7 @@ fn ensure_schema_rejects_future_server_schema_versions() {
         .expect("schema version table should be created");
     connection
         .execute(
-            "INSERT INTO server_schema_version (id, version) VALUES (1, 7)",
+            "INSERT INTO server_schema_version (id, version) VALUES (1, 8)",
             [],
         )
         .expect("future schema version should be inserted");

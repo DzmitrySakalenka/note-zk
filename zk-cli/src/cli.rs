@@ -116,7 +116,7 @@ pub struct IssueTokenArgs {
     #[arg(long)]
     pub label: String,
     /// Comma-separated authorization scopes for the issued token.
-    #[arg(long, default_value = "sync")]
+    #[arg(long, alias = "scope", default_value = "sync")]
     pub scopes: String,
 }
 

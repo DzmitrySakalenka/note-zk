@@ -31,7 +31,9 @@ pub(super) fn routes() -> Router<ServerState> {
 
 async fn issue(
     State(state): State<ServerState>,
-    AuthenticatedUser { scopes, .. }: AuthenticatedUser,
+    AuthenticatedUser {
+        user_id, scopes, ..
+    }: AuthenticatedUser,
     Json(request): Json<IssueTokenRequest>,
 ) -> Result<Json<IssueTokenResponse>, ApiError> {
     require_admin_scope(&scopes)?;
@@ -44,6 +46,7 @@ async fn issue(
                 &IssueTokenSpec {
                     label: request.label,
                     device_id: request.device_id,
+                    user_id: Some(user_id),
                     scopes: request.scopes,
                 },
                 Utc::now(),
@@ -100,7 +103,9 @@ async fn revoke(
 
 async fn rotate(
     State(state): State<ServerState>,
-    AuthenticatedUser { scopes, .. }: AuthenticatedUser,
+    AuthenticatedUser {
+        user_id, scopes, ..
+    }: AuthenticatedUser,
     Path(token_id): Path<String>,
     Json(request): Json<RotateTokenRequest>,
 ) -> Result<Json<IssueTokenResponse>, ApiError> {
@@ -116,6 +121,7 @@ async fn rotate(
                     current_token_id: token_id,
                     label: request.label,
                     device_id: request.device_id,
+                    user_id: Some(user_id),
                     scopes: request.scopes,
                 },
                 Utc::now(),

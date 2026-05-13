@@ -131,6 +131,7 @@ fn issue_device_token(state: &ServerState) {
                 &IssueTokenSpec {
                     label: "Bootstrap blocker".to_string(),
                     device_id: None,
+                    user_id: None,
                     scopes: vec![AuthScope::Sync],
                 },
                 Utc::now(),

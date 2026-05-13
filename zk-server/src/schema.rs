@@ -162,6 +162,7 @@ const CREATE_TABLE_MESSAGES: &str = r"CREATE TABLE messages (
   server_revision INTEGER
 )";
 const ALTER_TABLE_MESSAGES_ADD_REQUEST_ID: &str = "ALTER TABLE messages ADD COLUMN request_id TEXT";
+const ALTER_TABLE_DEVICE_TOKENS_ADD_USER_ID: &str = "ALTER TABLE device_tokens ADD COLUMN user_id TEXT REFERENCES users(user_id) ON DELETE SET NULL";
 
 const CREATE_TABLE_MESSAGE_CITATIONS: &str = r"CREATE TABLE message_citations (
   message_id TEXT NOT NULL REFERENCES messages(message_id) ON DELETE CASCADE,
@@ -278,3 +279,7 @@ pub(crate) const V5_INDEX_DDL: &[&str] =
 pub(crate) const V6_TABLE_DDL: &[&str] = &[ALTER_TABLE_MESSAGES_ADD_REQUEST_ID];
 
 pub(crate) const V6_INDEX_DDL: &[&str] = &[CREATE_INDEX_MESSAGES_REQUEST];
+
+pub(crate) const V7_TABLE_DDL: &[&str] = &[ALTER_TABLE_DEVICE_TOKENS_ADD_USER_ID];
+
+pub(crate) const V7_INDEX_DDL: &[&str] = &[];

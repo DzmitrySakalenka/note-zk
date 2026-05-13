@@ -16,6 +16,7 @@ const INSERT_DEVICE_TOKEN_SQL: &str = r"
 INSERT INTO device_tokens (
     token_id,
     device_id,
+    user_id,
     label,
     token_sha256_hex,
     scopes_json,
@@ -23,7 +24,17 @@ INSERT INTO device_tokens (
     last_used_at,
     revoked_at
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+)
+";
+const INSERT_USER_SQL: &str = r"
+INSERT OR IGNORE INTO users (
+    user_id,
+    username,
+    password_hash,
+    created_at
+) VALUES (
+    ?1, ?2, 'test-password-hash', '2026-05-13T12:00:00Z'
 )
 ";
 const INSERT_DEVICE_SQL: &str = r"
@@ -41,6 +52,7 @@ const SELECT_DEVICE_TOKEN_BY_ID_SQL: &str = r"
 SELECT
     token_id,
     device_id,
+    user_id,
     label,
     token_sha256_hex,
     scopes_json,
@@ -70,6 +82,7 @@ fn parse_timestamp(value: &str) -> DateTime<Utc> {
 struct TokenFixture<'a> {
     token_id: &'a str,
     device_id: Option<&'a str>,
+    user_id: Option<&'a str>,
     label: &'a str,
     token_sha256_hex: &'a str,
     scopes_json: &'a str,
@@ -82,6 +95,9 @@ fn insert_token_row(connection: &Connection, fixture: &TokenFixture<'_>) {
     if let Some(device_id) = fixture.device_id {
         insert_device(connection, device_id);
     }
+    if let Some(user_id) = fixture.user_id {
+        insert_user(connection, user_id);
+    }
 
     connection
         .execute(
@@ -89,6 +105,7 @@ fn insert_token_row(connection: &Connection, fixture: &TokenFixture<'_>) {
             rusqlite::params![
                 fixture.token_id,
                 fixture.device_id,
+                fixture.user_id,
                 fixture.label,
                 fixture.token_sha256_hex,
                 fixture.scopes_json,
@@ -106,30 +123,37 @@ fn insert_device(connection: &Connection, device_id: &str) {
         .expect("device fixture insert should succeed");
 }
 
+fn insert_user(connection: &Connection, user_id: &str) {
+    connection
+        .execute(INSERT_USER_SQL, rusqlite::params![user_id, user_id])
+        .expect("user fixture insert should succeed");
+}
+
 fn load_token_by_id(connection: &Connection, token_id: &str) -> DeviceTokenRow {
     connection
         .query_row(SELECT_DEVICE_TOKEN_BY_ID_SQL, [token_id], |row| {
-            let created_at = DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
+            let created_at = DateTime::parse_from_rfc3339(&row.get::<_, String>(6)?)
                 .expect("created_at fixture should parse")
                 .with_timezone(&Utc);
-            let last_used_at = row.get::<_, Option<String>>(6)?.map(|value| {
+            let last_used_at = row.get::<_, Option<String>>(7)?.map(|value| {
                 DateTime::parse_from_rfc3339(&value)
                     .expect("last_used_at fixture should parse")
                     .with_timezone(&Utc)
             });
-            let revoked_at = row.get::<_, Option<String>>(7)?.map(|value| {
+            let revoked_at = row.get::<_, Option<String>>(8)?.map(|value| {
                 DateTime::parse_from_rfc3339(&value)
                     .expect("revoked_at fixture should parse")
                     .with_timezone(&Utc)
             });
-            let scopes = serde_json::from_str(&row.get::<_, String>(4)?)
+            let scopes = serde_json::from_str(&row.get::<_, String>(5)?)
                 .expect("scopes fixture should parse");
 
             Ok(DeviceTokenRow {
                 token_id: row.get(0)?,
                 device_id: row.get(1)?,
-                label: row.get(2)?,
-                token_sha256_hex: row.get(3)?,
+                user_id: row.get(2)?,
+                label: row.get(3)?,
+                token_sha256_hex: row.get(4)?,
                 scopes,
                 created_at,
                 last_used_at,
@@ -150,6 +174,7 @@ fn insert_fixture(
         &TokenFixture {
             token_id,
             device_id,
+            user_id: None,
             label: "CLI token",
             token_sha256_hex,
             scopes_json: r#"["sync"]"#,
@@ -168,6 +193,7 @@ fn issue_row(
     DeviceTokenInsert {
         token_id: token_id.to_string(),
         device_id: device_id.map(str::to_string),
+        user_id: None,
         label: format!("Token {token_id}"),
         token_sha256_hex: hash_for_token_id(token_id),
         scopes: vec![AuthScope::Sync],
@@ -194,6 +220,7 @@ fn lookup_by_hash_finds_inserted_row() {
         &TokenFixture {
             token_id: "token-a",
             device_id: None,
+            user_id: None,
             label: "CLI token",
             token_sha256_hex: token_hash,
             scopes_json: r#"["sync"]"#,
@@ -209,6 +236,7 @@ fn lookup_by_hash_finds_inserted_row() {
 
     assert_eq!(loaded.token_id, "token-a");
     assert_eq!(loaded.device_id, None);
+    assert_eq!(loaded.user_id, None);
     assert_eq!(loaded.label, "CLI token");
     assert_eq!(loaded.token_sha256_hex, token_hash);
     assert_eq!(loaded.scopes, vec![AuthScope::Sync]);
@@ -245,6 +273,7 @@ fn revoked_row_is_hidden_from_lookup_by_hash() {
         &TokenFixture {
             token_id: "token-a",
             device_id: None,
+            user_id: None,
             label: "CLI token",
             token_sha256_hex: token_hash,
             scopes_json: r#"["sync"]"#,
@@ -269,6 +298,7 @@ fn touch_last_used_updates_only_last_used_at() {
         &TokenFixture {
             token_id: "token-a",
             device_id: None,
+            user_id: None,
             label: "CLI token",
             token_sha256_hex: token_hash,
             scopes_json: r#"["sync"]"#,
@@ -300,9 +330,11 @@ fn issue_then_get_round_trips_with_scopes() {
     let connection = setup_connection();
     let created_at = parse_timestamp("2026-04-24T10:00:00Z");
     insert_device(&connection, "device-a");
+    insert_user(&connection, "user-a");
     let row = DeviceTokenInsert {
         token_id: "token-a".to_string(),
         device_id: Some("device-a".to_string()),
+        user_id: Some("user-a".to_string()),
         label: "Laptop token".to_string(),
         token_sha256_hex: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
             .to_string(),
@@ -318,6 +350,7 @@ fn issue_then_get_round_trips_with_scopes() {
 
     assert_eq!(loaded.token_id, row.token_id);
     assert_eq!(loaded.device_id, row.device_id);
+    assert_eq!(loaded.user_id, row.user_id);
     assert_eq!(loaded.label, row.label);
     assert_eq!(loaded.token_sha256_hex, row.token_sha256_hex);
     assert_eq!(loaded.scopes, row.scopes);
@@ -371,6 +404,7 @@ fn list_for_device_excludes_revoked_rows() {
         &TokenFixture {
             token_id: "token-a",
             device_id: Some("device-a"),
+            user_id: None,
             label: "CLI token",
             token_sha256_hex: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             scopes_json: r#"["sync"]"#,
@@ -384,6 +418,7 @@ fn list_for_device_excludes_revoked_rows() {
         &TokenFixture {
             token_id: "token-b",
             device_id: Some("device-a"),
+            user_id: None,
             label: "CLI token",
             token_sha256_hex: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             scopes_json: r#"["sync"]"#,
@@ -473,6 +508,7 @@ fn malformed_scopes_json_returns_typed_error() {
         &TokenFixture {
             token_id: "token-a",
             device_id: None,
+            user_id: None,
             label: "CLI token",
             token_sha256_hex: token_hash,
             scopes_json: "not-json",

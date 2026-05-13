@@ -78,6 +78,7 @@ impl SearchFixture {
                     &IssueTokenSpec {
                         label: "Semantic search test token".to_string(),
                         device_id: None,
+                        user_id: None,
                         scopes,
                     },
                     Utc::now(),

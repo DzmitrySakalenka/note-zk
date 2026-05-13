@@ -52,6 +52,8 @@ pub struct IssueTokenSpec {
     pub label: String,
     /// Optional owning device identifier.
     pub device_id: Option<String>,
+    /// Optional owning user identifier.
+    pub user_id: Option<String>,
     /// Authorization scopes granted to the token.
     pub scopes: Vec<AuthScope>,
 }
@@ -65,6 +67,8 @@ pub struct RotateTokenSpec {
     pub label: String,
     /// Optional owning device identifier for the replacement token.
     pub device_id: Option<String>,
+    /// Optional owning user identifier for the replacement token.
+    pub user_id: Option<String>,
     /// Authorization scopes granted to the replacement token.
     pub scopes: Vec<AuthScope>,
 }
@@ -230,6 +234,7 @@ pub fn issue_device_token(
         &DeviceTokenInsert {
             token_id: token_id.clone(),
             device_id: spec.device_id.clone(),
+            user_id: spec.user_id.clone(),
             label: spec.label.clone(),
             token_sha256_hex: raw_token.sha256_hex,
             scopes: scopes.clone(),
@@ -280,6 +285,7 @@ pub fn rotate_device_token(
     let issue_spec = IssueTokenSpec {
         label: spec.label.clone(),
         device_id: spec.device_id.clone(),
+        user_id: spec.user_id.clone(),
         scopes: spec.scopes.clone(),
     };
     let issued = issue_device_token(&transaction, &issue_spec, now)?;
@@ -422,7 +428,8 @@ fn validate_password(password: &str) -> ServerResult<()> {
 fn validate_issue_token_spec(conn: &Connection, spec: &IssueTokenSpec) -> ServerResult<()> {
     validate_token_label(&spec.label)?;
     validate_token_scopes(&spec.scopes)?;
-    validate_device_id_exists(conn, spec.device_id.as_deref())
+    validate_device_id_exists(conn, spec.device_id.as_deref())?;
+    validate_user_id_exists(conn, spec.user_id.as_deref())
 }
 
 fn validate_device_id_exists(conn: &Connection, device_id: Option<&str>) -> ServerResult<()> {
@@ -435,6 +442,18 @@ fn validate_device_id_exists(conn: &Connection, device_id: Option<&str>) -> Serv
     }
 
     Err(ServerError::NotFound("device id".to_string()))
+}
+
+fn validate_user_id_exists(conn: &Connection, user_id: Option<&str>) -> ServerResult<()> {
+    let Some(user_id) = user_id else {
+        return Ok(());
+    };
+
+    if UserRepo::get_by_id(conn, user_id)?.is_some() {
+        return Ok(());
+    }
+
+    Err(ServerError::NotFound("user id".to_string()))
 }
 
 fn validate_token_label(label: &str) -> ServerResult<()> {

@@ -71,6 +71,7 @@ impl AiAdminFixture {
                     &IssueTokenSpec {
                         label: "Admin AI test token".to_string(),
                         device_id: None,
+                        user_id: None,
                         scopes,
                     },
                     Utc::now(),

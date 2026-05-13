@@ -22,7 +22,7 @@ use zk_server::{
     config::{AiChatConfig, AiConfig, AiProviderKind, ServerConfig, StubEmbeddingsConfig},
     http::build_router,
     repo::UserRepo,
-    service::{self, CreateSessionSpec, SessionLifetime},
+    service::{self, CreateSessionSpec, IssueTokenSpec, SessionLifetime},
     state::{ServerState, bootstrap_with_config},
 };
 
@@ -99,6 +99,25 @@ impl AuthzFixture {
             csrf_token: issued_session.plaintext_csrf_token,
         }
     }
+
+    fn issue_device_token(&self, user_id: Option<&str>, scopes: Vec<AuthScope>) -> String {
+        self.state
+            .db()
+            .with_conn(|connection| {
+                service::issue_device_token(
+                    connection,
+                    &IssueTokenSpec {
+                        label: "chat token".to_string(),
+                        device_id: None,
+                        user_id: user_id.map(ToOwned::to_owned),
+                        scopes,
+                    },
+                    Utc::now(),
+                )
+            })
+            .expect("device token fixture should be issued")
+            .plaintext
+    }
 }
 
 #[tokio::test]
@@ -147,6 +166,78 @@ async fn wrong_scope_session_receives_403_on_chat_post() {
     assert_json_error(response, StatusCode::FORBIDDEN, "forbidden", "sync").await;
 }
 
+#[tokio::test]
+async fn device_token_without_chat_scope_receives_existing_403_on_chat_post() {
+    let fixture = AuthzFixture::new();
+    let owner = fixture.issue_session(USER_ID, vec![AuthScope::Sync]);
+    let token = fixture.issue_device_token(Some(USER_ID), vec![AuthScope::Sync]);
+    let app = build_router(fixture.state.clone());
+    let conversation = create_conversation(&app, &owner).await;
+
+    let response = app
+        .oneshot(chat_request_with_auth(
+            &conversation.conversation_id,
+            bearer_auth(&token),
+            "hello",
+        ))
+        .await
+        .expect("chat request should complete");
+
+    assert_json_error(
+        response,
+        StatusCode::FORBIDDEN,
+        "forbidden",
+        "browser session required for chat",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn chat_scoped_device_token_with_user_id_is_accepted_on_chat_post() {
+    let fixture = AuthzFixture::new();
+    let owner = fixture.issue_session(USER_ID, vec![AuthScope::Sync]);
+    let token = fixture.issue_device_token(Some(USER_ID), vec![AuthScope::Chat]);
+    let app = build_router(fixture.state.clone());
+    let conversation = create_conversation(&app, &owner).await;
+
+    let response = app
+        .oneshot(chat_request_with_auth(
+            &conversation.conversation_id,
+            bearer_auth(&token),
+            "hello",
+        ))
+        .await
+        .expect("chat request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn chat_scoped_device_token_without_user_id_receives_existing_403_on_chat_post() {
+    let fixture = AuthzFixture::new();
+    let owner = fixture.issue_session(USER_ID, vec![AuthScope::Sync]);
+    let token = fixture.issue_device_token(None, vec![AuthScope::Chat]);
+    let app = build_router(fixture.state.clone());
+    let conversation = create_conversation(&app, &owner).await;
+
+    let response = app
+        .oneshot(chat_request_with_auth(
+            &conversation.conversation_id,
+            bearer_auth(&token),
+            "hello",
+        ))
+        .await
+        .expect("chat request should complete");
+
+    assert_json_error(
+        response,
+        StatusCode::FORBIDDEN,
+        "forbidden",
+        "browser session required for chat",
+    )
+    .await;
+}
+
 async fn create_conversation(app: &axum::Router, session: &ChatSession) -> ConversationDto {
     let response = app
         .clone()
@@ -168,6 +259,14 @@ fn chat_request(
     session: &ChatSession,
     user_query: &str,
 ) -> axum::http::Request<Body> {
+    chat_request_with_auth(conversation_id, session_auth(session), user_query)
+}
+
+fn chat_request_with_auth(
+    conversation_id: &ConversationId,
+    auth: RequestAuth<'_>,
+    user_query: &str,
+) -> axum::http::Request<Body> {
     json_request(
         Method::POST,
         CHAT_PATH,
@@ -177,7 +276,7 @@ fn chat_request(
             "top_k": 2,
             "stream": true,
         }),
-        session_auth(session),
+        auth,
     )
 }
 
@@ -190,6 +289,14 @@ fn session_auth(session: &ChatSession) -> RequestAuth<'_> {
         cookie_header: Some(&session.cookie_header),
         csrf_token: Some(&session.csrf_token),
         bearer_token: None,
+    }
+}
+
+fn bearer_auth(token: &str) -> RequestAuth<'_> {
+    RequestAuth {
+        cookie_header: None,
+        csrf_token: None,
+        bearer_token: Some(token),
     }
 }
 

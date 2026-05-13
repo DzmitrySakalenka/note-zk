@@ -155,6 +155,31 @@ fn issue_token_request_round_trips_json() {
 }
 
 #[test]
+fn issue_token_request_accepts_chat_scope_json() {
+    let request = IssueTokenRequest {
+        label: "Chat token".to_string(),
+        device_id: None,
+        scopes: vec![AuthScope::Chat],
+    };
+
+    let encoded = serde_json::to_value(&request).expect("issue token request should serialize");
+
+    assert_eq!(
+        encoded,
+        json!({
+            "label": "Chat token",
+            "device_id": null,
+            "scopes": ["chat"],
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<IssueTokenRequest>(encoded)
+            .expect("issue token request should deserialize"),
+        request
+    );
+}
+
+#[test]
 fn rotate_token_request_round_trips_json() {
     let request = RotateTokenRequest {
         label: "Laptop replacement".to_string(),

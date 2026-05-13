@@ -110,6 +110,8 @@ pub enum AuthScope {
     Read,
     /// Administrative access.
     Admin,
+    /// User-bound chat API access.
+    Chat,
 }
 
 impl AuthScope {
@@ -119,6 +121,7 @@ impl AuthScope {
             Self::Sync => "sync",
             Self::Read => "read",
             Self::Admin => "admin",
+            Self::Chat => "chat",
         }
     }
 }
@@ -153,6 +156,7 @@ impl FromStr for AuthScope {
             "sync" => Ok(Self::Sync),
             "read" => Ok(Self::Read),
             "admin" => Ok(Self::Admin),
+            "chat" => Ok(Self::Chat),
             other => Err(AuthScopeParseError {
                 value: other.to_string(),
             }),

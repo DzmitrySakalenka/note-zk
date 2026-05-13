@@ -328,7 +328,7 @@ async fn stub_token_emits_deprecation_warning_once_per_process() {
     assert_eq!(second_response.status(), StatusCode::OK);
     assert_eq!(
         response_json(first_response).await,
-        json!({"token_id": null, "device_id": null, "scopes": ["sync", "read", "admin"]})
+        json!({"token_id": null, "device_id": null, "scopes": ["sync", "read", "admin", "chat"]})
     );
     assert_eq!(
         logs.contents()
@@ -482,7 +482,7 @@ async fn auth_disabled_allows_request_without_authorization_header() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response_json(response).await,
-        json!({"token_id": null, "device_id": null, "scopes": ["sync", "read", "admin"]})
+        json!({"token_id": null, "device_id": null, "scopes": ["sync", "read", "admin", "chat"]})
     );
 }
 
