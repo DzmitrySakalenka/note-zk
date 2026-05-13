@@ -18,7 +18,7 @@ use super::{
 };
 use crate::{
     AiError, AiResult,
-    provider::{ChatChunk, ChatProvider, ChatRequest, ChatUsage},
+    provider::{ChatChunk, ChatProvider, ChatRequest, ChatUsage, FinishReason},
 };
 
 const CONVERSATION_NOT_FOUND: &str = "conversation not found";
@@ -158,6 +158,7 @@ impl ChatServiceRepos {
 /// Orchestrates one persisted, streaming chat turn.
 pub struct ChatService {
     retrieval: Arc<RetrievalService>,
+    retrieval_params: RetrievalParams,
     prompt: Arc<PromptAssembler>,
     provider_resolver: Arc<dyn ChatProviderResolver>,
     repos: ChatServiceRepos,
@@ -172,8 +173,28 @@ impl ChatService {
         provider_resolver: Arc<dyn ChatProviderResolver>,
         repos: ChatServiceRepos,
     ) -> Self {
+        let retrieval_params = retrieval.default_params();
+        Self::new_with_retrieval_params(
+            retrieval,
+            retrieval_params,
+            prompt,
+            provider_resolver,
+            repos,
+        )
+    }
+
+    /// Creates a chat orchestration service with explicit retrieval parameters.
+    #[must_use]
+    pub fn new_with_retrieval_params(
+        retrieval: Arc<RetrievalService>,
+        retrieval_params: RetrievalParams,
+        prompt: Arc<PromptAssembler>,
+        provider_resolver: Arc<dyn ChatProviderResolver>,
+        repos: ChatServiceRepos,
+    ) -> Self {
         Self {
             retrieval,
+            retrieval_params,
             prompt,
             provider_resolver,
             repos,
@@ -204,6 +225,23 @@ impl ChatService {
         }
 
         let request_id = request.request_id.clone();
+        if let Some(assistant_message) = self.repos.messages.find_by_request(
+            &request.conversation_id,
+            &request_id,
+            MessageRole::Assistant,
+        )? {
+            if conversation
+                .last_message_at
+                .is_none_or(|last_message_at| last_message_at < assistant_message.created_at)
+            {
+                self.repos.conversations.touch_last_message_at(
+                    &request.conversation_id,
+                    assistant_message.created_at,
+                )?;
+            }
+            return Ok(replay_assistant_stream(assistant_message));
+        }
+
         let existing_user_message = self.repos.messages.find_by_request(
             &request.conversation_id,
             &request_id,
@@ -228,7 +266,7 @@ impl ChatService {
 
         let provider = self.provider_resolver.select_chat()?;
         let capability = provider.capability();
-        let mut retrieval_params = RetrievalParams::new(capability.model.clone());
+        let mut retrieval_params = self.retrieval_params.clone();
         retrieval_params.top_k = request.top_k;
         let retrieval = self
             .retrieval
@@ -246,7 +284,7 @@ impl ChatService {
                 max_output_tokens: Some(capability.max_output_tokens),
                 temperature: None,
                 stream: true,
-                request_id,
+                request_id: request_id.clone(),
             })
             .await?;
 
@@ -261,8 +299,27 @@ impl ChatService {
             conversations: Arc::clone(&self.repos.conversations),
             messages: Arc::clone(&self.repos.messages),
             citation_repo: Arc::clone(&self.repos.citations),
+            request_id,
         }))
     }
+}
+
+fn replay_assistant_stream(assistant: MessageRecord) -> BoxStream<'static, AiResult<ChatChunk>> {
+    let mut chunks = Vec::with_capacity(2);
+    if !assistant.content.is_empty() {
+        chunks.push(ChatChunk::Delta {
+            text: assistant.content,
+        });
+    }
+    chunks.push(ChatChunk::Done {
+        finish_reason: FinishReason::Stop,
+        usage: ChatUsage {
+            input_tokens: 0,
+            output_tokens: assistant.token_count.unwrap_or(0),
+        },
+    });
+
+    Box::pin(stream::iter(chunks.into_iter().map(Ok)))
 }
 
 fn chat_stream(state: ChatStreamState) -> BoxStream<'static, AiResult<ChatChunk>> {
@@ -282,6 +339,7 @@ struct ChatStreamState {
     conversations: Arc<dyn ChatConversationsRepo>,
     messages: Arc<dyn ChatMessagesRepo>,
     citation_repo: Arc<dyn ChatMessageCitationsRepo>,
+    request_id: String,
 }
 
 impl ChatStreamState {
@@ -364,7 +422,7 @@ impl ChatStreamState {
             role: MessageRole::Assistant,
             content: self.assistant_content.clone(),
             token_count: Some(usage.output_tokens),
-            request_id: None,
+            request_id: Some(self.request_id.clone()),
             now: Utc::now(),
         })?;
         self.conversations

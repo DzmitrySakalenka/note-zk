@@ -50,7 +50,7 @@ use zk_server::{
 
 const CHAT_PATH: &str = "/ai/chat";
 const CONVERSATIONS_PATH: &str = "/ai/chat/conversations";
-const EMBEDDING_MODEL_ID: &str = "stub/sha256-128";
+const CHAT_MODEL_ID: &str = "stub/chat-model";
 const QUERY: &str = "terminal retrieval bridge";
 const SYNC_DEVICE_ID: &str = "device-ai-chat-e2e";
 const NOTE_ONE_ID: &str = "01K7C000000000000000000001";
@@ -112,14 +112,25 @@ struct SseFrame {
 
 impl ChatE2eFixture {
     fn new() -> Self {
+        Self::new_with_chat_config(|_| {})
+    }
+
+    fn new_with_chat_config(configure_chat: impl FnOnce(&mut AiChatConfig)) -> Self {
         let tempdir = TempDir::new().expect("tempdir should be created");
         let vault_root = tempdir.path().join("vault");
         let database_file = NamedTempFile::new().expect("temp database file should be created");
         let database_path = database_file.path().to_path_buf();
 
         write_fixture_vault(&vault_root);
-        let state = bootstrap_with_config(test_config(vault_root.clone(), database_path.clone()))
-            .expect("server state should bootstrap");
+        let mut config = test_config(vault_root.clone(), database_path.clone());
+        configure_chat(
+            config
+                .ai
+                .as_mut()
+                .and_then(|ai| ai.chat.as_mut())
+                .expect("chat config fixture should exist"),
+        );
+        let state = bootstrap_with_config(config).expect("server state should bootstrap");
         state
             .db()
             .with_conn(|connection| {
@@ -303,6 +314,70 @@ async fn chat_turn_streams_retrieved_citations_and_persists_messages() {
     assert_eq!(
         updated_conversation.last_message_at,
         Some(messages[1].created_at)
+    );
+
+    worker_shutdown.cancel();
+    ingest_shutdown.cancel();
+    join_task(worker_handle).await;
+    join_task(ingest_handle).await;
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn chat_turn_honors_configured_retrieval_token_budget() {
+    let fixture = ChatE2eFixture::new_with_chat_config(|chat| {
+        chat.retrieval_token_budget = 1;
+    });
+    let sync_token = fixture.token(vec![AuthScope::Sync]);
+    let session = fixture.session(vec![AuthScope::Sync]);
+    let app = build_router(fixture.state.clone());
+    let ingest_shutdown = CancellationToken::new();
+    let ingest_handle = spawn_ingest_flush_loop(&fixture.state, ingest_shutdown.clone());
+
+    let push_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/sync/push",
+            &push_body(&fixture.vault_root),
+            RequestAuth {
+                bearer_token: Some(&sync_token),
+                ..RequestAuth::default()
+            },
+        ))
+        .await
+        .expect("sync push request should complete");
+    assert_eq!(push_response.status(), StatusCode::OK);
+
+    advance(DEFAULT_INGEST_DEBOUNCE).await;
+    wait_for_job_count(&fixture.state, FIXTURE_NOTES.len(), AiJobStatus::Pending).await;
+
+    let worker_shutdown = CancellationToken::new();
+    let worker_handle = spawn_worker(
+        &fixture.state,
+        &fixture.database_path,
+        worker_shutdown.clone(),
+    );
+    wait_for_job_count(&fixture.state, FIXTURE_NOTES.len(), AiJobStatus::Done).await;
+
+    let conversation = create_conversation(&app, &session).await;
+    let response = app
+        .oneshot(chat_request(&conversation.conversation_id, &session, QUERY))
+        .await
+        .expect("chat request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let frames = parse_sse_frames(&response_text(response).await);
+    assert!(frames.iter().any(|frame| frame.event == "delta"));
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|frame| frame.event == "citation")
+            .count(),
+        0
+    );
+    assert_eq!(
+        frames.last().map(|frame| frame.event.as_str()),
+        Some("done")
     );
 
     worker_shutdown.cancel();
@@ -534,7 +609,7 @@ fn test_config(vault_path: PathBuf, database_path: PathBuf) -> ServerConfig {
             local: None,
             stub: Some(StubEmbeddingsConfig { dim: 128 }),
             chat: Some(AiChatConfig {
-                model_id: EMBEDDING_MODEL_ID
+                model_id: CHAT_MODEL_ID
                     .parse()
                     .expect("stub chat model id should parse"),
                 ..AiChatConfig::default()

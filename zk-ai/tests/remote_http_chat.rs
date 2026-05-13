@@ -15,6 +15,10 @@ mod remote_http_chat {
 
     use futures::StreamExt;
     use serde_json::json;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+    };
     use wiremock::{
         Mock, MockServer, ResponseTemplate,
         matchers::{body_json, header, method, path},
@@ -78,6 +82,59 @@ mod remote_http_chat {
             })
         );
         server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn streaming_response_preserves_utf8_split_across_byte_chunks() {
+        let _env = EnvGuard::set(API_KEY_ENV_VAR, "test-secret");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener should bind");
+        let base_url = format!(
+            "http://{}",
+            listener
+                .local_addr()
+                .expect("test listener address should be available")
+        );
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener
+                .accept()
+                .await
+                .expect("test server should accept one request");
+            let mut request_buffer = [0_u8; 4096];
+            let _ = socket
+                .read(&mut request_buffer)
+                .await
+                .expect("test server should read request");
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n",
+                )
+                .await
+                .expect("test server should write response headers");
+
+            let frame = "data: {\"choices\":[{\"delta\":{\"content\":\"café\"},\"finish_reason\":null}]}\n\n";
+            let frame_bytes = frame.as_bytes();
+            let split_index = frame_bytes
+                .windows("é".len())
+                .position(|window| window == "é".as_bytes())
+                .expect("fixture should contain multibyte character")
+                + 1;
+            write_http_chunk(&mut socket, &frame_bytes[..split_index]).await;
+            write_http_chunk(&mut socket, &frame_bytes[split_index..]).await;
+            write_http_chunk(&mut socket, b"data: [DONE]\n\n").await;
+            socket
+                .write_all(b"0\r\n\r\n")
+                .await
+                .expect("test server should finish chunked response");
+        });
+        let provider = RemoteHttpChatProvider::new(config_for_url(&base_url, 1))
+            .expect("remote chat provider config should be valid");
+
+        let chunks = collect_chunks(&provider, request()).await;
+
+        assert_eq!(assembled_text(&chunks), "café");
+        server.await.expect("test server should finish");
     }
 
     #[tokio::test]
@@ -197,8 +254,12 @@ mod remote_http_chat {
     }
 
     fn config(server: &MockServer, max_attempts: u8) -> RemoteHttpChatConfig {
+        config_for_url(&server.uri(), max_attempts)
+    }
+
+    fn config_for_url(base_url: &str, max_attempts: u8) -> RemoteHttpChatConfig {
         RemoteHttpChatConfig {
-            base_url: server.uri(),
+            base_url: base_url.to_string(),
             model_id: model_id(),
             api_key_env_var: API_KEY_ENV_VAR.to_string(),
             timeout: Duration::from_secs(1),
@@ -206,6 +267,21 @@ mod remote_http_chat {
             max_input_tokens: 8192,
             max_output_tokens: 1024,
         }
+    }
+
+    async fn write_http_chunk(socket: &mut TcpStream, bytes: &[u8]) {
+        socket
+            .write_all(format!("{:x}\r\n", bytes.len()).as_bytes())
+            .await
+            .expect("test server should write chunk size");
+        socket
+            .write_all(bytes)
+            .await
+            .expect("test server should write chunk body");
+        socket
+            .write_all(b"\r\n")
+            .await
+            .expect("test server should write chunk terminator");
     }
 
     fn model_id() -> EmbeddingModelId {

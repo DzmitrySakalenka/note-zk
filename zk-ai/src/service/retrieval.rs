@@ -64,6 +64,12 @@ impl RetrievalService {
         Self { reader, embed }
     }
 
+    /// Returns V1 retrieval defaults for the configured embeddings provider.
+    #[must_use]
+    pub fn default_params(&self) -> RetrievalParams {
+        RetrievalParams::new(self.embed.capability().model.clone())
+    }
+
     /// Embeds `query`, searches stored embeddings, and returns prompt chunks.
     ///
     /// Retrieval uses a cheap `text.len() / 4` token estimate. This avoids

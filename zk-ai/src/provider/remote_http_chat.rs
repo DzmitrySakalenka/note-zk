@@ -314,7 +314,7 @@ struct ChatCompletionUsage {
 
 struct ChatSseState {
     byte_stream: BoxStream<'static, Result<Vec<u8>, reqwest::Error>>,
-    buffer: String,
+    buffer: Vec<u8>,
     pending: VecDeque<AiResult<ChatChunk>>,
     finish_reason: FinishReason,
     usage: Option<ChatUsage>,
@@ -326,7 +326,7 @@ impl ChatSseState {
     fn new(byte_stream: BoxStream<'static, Result<Vec<u8>, reqwest::Error>>) -> Self {
         Self {
             byte_stream,
-            buffer: String::new(),
+            buffer: Vec::new(),
             pending: VecDeque::new(),
             finish_reason: FinishReason::Stop,
             usage: None,
@@ -337,9 +337,9 @@ impl ChatSseState {
 
     fn parse_available_frames(&mut self) -> AiResult<()> {
         while let Some((frame_end, delimiter_len)) = next_frame_boundary(&self.buffer) {
-            let frame = self.buffer[..frame_end].to_string();
+            let frame = self.buffer[..frame_end].to_vec();
             self.buffer.drain(..frame_end + delimiter_len);
-            self.parse_frame(&frame)?;
+            self.parse_frame_bytes(&frame)?;
 
             if self.saw_done {
                 self.buffer.clear();
@@ -348,6 +348,13 @@ impl ChatSseState {
         }
 
         Ok(())
+    }
+
+    fn parse_frame_bytes(&mut self, frame: &[u8]) -> AiResult<()> {
+        let frame = str::from_utf8(frame).map_err(|error| {
+            AiError::ProviderRequest(format!("decode chat stream utf-8: {error}"))
+        })?;
+        self.parse_frame(frame)
     }
 
     fn parse_frame(&mut self, frame: &str) -> AiResult<()> {
@@ -421,24 +428,13 @@ fn chat_sse_stream(response: Response) -> BoxStream<'static, AiResult<ChatChunk>
                 }
 
                 match state.byte_stream.next().await {
-                    Some(Ok(bytes)) => match str::from_utf8(&bytes) {
-                        Ok(text) => {
-                            state.buffer.push_str(text);
-                            if let Err(error) = state.parse_available_frames() {
-                                state.failed = true;
-                                return Some((Err(error), state));
-                            }
-                        }
-                        Err(error) => {
+                    Some(Ok(bytes)) => {
+                        state.buffer.extend_from_slice(&bytes);
+                        if let Err(error) = state.parse_available_frames() {
                             state.failed = true;
-                            return Some((
-                                Err(AiError::ProviderRequest(format!(
-                                    "decode chat stream utf-8: {error}"
-                                ))),
-                                state,
-                            ));
+                            return Some((Err(error), state));
                         }
-                    },
+                    }
                     Some(Err(error)) => {
                         state.failed = true;
                         return Some((
@@ -561,8 +557,10 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
     truncated
 }
 
-fn next_frame_boundary(buffer: &str) -> Option<(usize, usize)> {
-    match (buffer.find("\n\n"), buffer.find("\r\n\r\n")) {
+fn next_frame_boundary(buffer: &[u8]) -> Option<(usize, usize)> {
+    let lf = buffer.windows(2).position(|window| window == b"\n\n");
+    let crlf = buffer.windows(4).position(|window| window == b"\r\n\r\n");
+    match (lf, crlf) {
         (Some(lf), Some(crlf)) if lf < crlf => Some((lf, 2)),
         (Some(_) | None, Some(crlf)) => Some((crlf, 4)),
         (Some(lf), None) => Some((lf, 2)),

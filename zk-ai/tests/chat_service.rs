@@ -24,7 +24,7 @@ use zk_ai::{
             ChatMessagesRepo, ChatProviderResolver, ChatService, ChatServiceRepos, ChatTurnRequest,
         },
         prompt::{CitationFormat, PromptAssembler, PromptConfig},
-        retrieval::RetrievalService,
+        retrieval::{RetrievalParams, RetrievalService},
         semantic_search::{EmbeddingsReader, TopHit},
     },
 };
@@ -87,6 +87,136 @@ async fn turn_persists_messages_citations_and_streams_ordered_frames() {
     assert_successful_chunks(&chunks);
     assert_persisted_success(&messages, &citations, &conversations, &conversation_id);
     assert_provider_request(&provider);
+}
+
+#[tokio::test]
+async fn retrieval_uses_embeddings_model_when_chat_model_differs() {
+    let user_id = user_id(1);
+    let conversation_id = conversation_id();
+    let conversations = MemoryConversations::new(conversation(&conversation_id, &user_id));
+    let messages = Arc::new(MemoryMessages::default());
+    let citations = Arc::new(MemoryCitations::default());
+    let provider = Arc::new(
+        ScriptedChatProvider::new(vec![ProviderStep::Chunk(ChatChunk::Done {
+            finish_reason: FinishReason::Stop,
+            usage: ChatUsage {
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        })])
+        .with_model(chat_model()),
+    );
+    let service = chat_service(
+        conversations,
+        messages,
+        citations,
+        Arc::new(StaticProviderResolver::new(provider.clone())),
+    );
+
+    let chunks = service
+        .turn(ChatTurnRequest {
+            conversation_id,
+            user_id,
+            user_query: "Which model should retrieval use?".to_string(),
+            top_k: 2,
+            request_id: "request-model".to_string(),
+        })
+        .await
+        .expect("chat turn should start")
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<AiResult<Vec<_>>>()
+        .expect("chat stream should complete");
+
+    assert_eq!(
+        chunks
+            .iter()
+            .filter(|chunk| matches!(chunk, ChatChunk::Done { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        provider.requests()[0]
+            .retrieval
+            .as_ref()
+            .map(|ctx| &ctx.model),
+        Some(&embedding_model())
+    );
+}
+
+#[tokio::test]
+async fn configured_retrieval_params_limit_chunks_and_budget() {
+    let user_id = user_id(1);
+    let conversation_id = conversation_id();
+    let conversations = MemoryConversations::new(conversation(&conversation_id, &user_id));
+    let messages = Arc::new(MemoryMessages::default());
+    let citations = Arc::new(MemoryCitations::default());
+    let provider = Arc::new(ScriptedChatProvider::new(vec![ProviderStep::Chunk(
+        ChatChunk::Done {
+            finish_reason: FinishReason::Stop,
+            usage: ChatUsage {
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        },
+    )]));
+    let retrieval = retrieval_service_with_reader(
+        FakeEmbeddingsReader::new(
+            vec![
+                hit_for(0, 0, 0.99),
+                hit_for(0, 1, 0.98),
+                hit_for(1, 2, 0.97),
+            ],
+            HashMap::from([
+                (chunk_id(0), "abcdefghijklmnopqrst".to_string()),
+                (chunk_id(1), "uvwxyzabcdefghijklmn".to_string()),
+                (chunk_id(2), "opqrstuvwxyzabcdefgh".to_string()),
+            ]),
+        ),
+        embedding_model(),
+    );
+    let mut retrieval_params = RetrievalParams::new(embedding_model());
+    retrieval_params.max_chunks_per_note = 1;
+    retrieval_params.token_budget = 6;
+    let service = chat_service_with_retrieval_params(
+        conversations,
+        messages,
+        citations,
+        Arc::new(StaticProviderResolver::new(provider.clone())),
+        (retrieval, retrieval_params),
+    );
+
+    service
+        .turn(ChatTurnRequest {
+            conversation_id,
+            user_id,
+            user_query: "Respect retrieval budgets.".to_string(),
+            top_k: 3,
+            request_id: "request-budget".to_string(),
+        })
+        .await
+        .expect("chat turn should start")
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<AiResult<Vec<_>>>()
+        .expect("chat stream should complete");
+
+    let provider_requests = provider.requests();
+    let retrieval = provider_requests[0]
+        .retrieval
+        .as_ref()
+        .expect("retrieval context should be sent");
+    assert_eq!(
+        retrieval
+            .chunks
+            .iter()
+            .map(|chunk| chunk.chunk_id.clone())
+            .collect::<Vec<_>>(),
+        vec![chunk_id(0)]
+    );
+    assert_eq!(retrieval.total_token_estimate, 5);
 }
 
 #[tokio::test]
@@ -231,6 +361,83 @@ async fn retry_with_same_request_id_reuses_user_message() {
     );
 }
 
+#[tokio::test]
+async fn retry_with_existing_assistant_request_id_replays_without_duplicate_write() {
+    let user_id = user_id(1);
+    let conversation_id = conversation_id();
+    let conversations = MemoryConversations::new(conversation(&conversation_id, &user_id));
+    let messages = MemoryMessages::new_stored(vec![
+        (
+            message_record(
+                "message-user",
+                &conversation_id,
+                MessageRole::User,
+                "Retry this turn.",
+                None,
+            ),
+            Some("request-retry"),
+        ),
+        (
+            message_record(
+                "message-assistant",
+                &conversation_id,
+                MessageRole::Assistant,
+                "already persisted",
+                Some(3),
+            ),
+            Some("request-retry"),
+        ),
+    ]);
+    let citations = Arc::new(MemoryCitations::default());
+    let provider = Arc::new(ScriptedChatProvider::new(vec![
+        ProviderStep::ProviderError("provider should not be called"),
+    ]));
+    let service = chat_service(
+        Arc::clone(&conversations),
+        Arc::clone(&messages),
+        citations,
+        Arc::new(StaticProviderResolver::new(provider.clone())),
+    );
+
+    let chunks = service
+        .turn(ChatTurnRequest {
+            conversation_id: conversation_id.clone(),
+            user_id,
+            user_query: "Retry this turn.".to_string(),
+            top_k: 2,
+            request_id: "request-retry".to_string(),
+        })
+        .await
+        .expect("retry replay should start")
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<AiResult<Vec<_>>>()
+        .expect("retry replay stream should complete");
+
+    assert_eq!(
+        chunks,
+        vec![
+            ChatChunk::Delta {
+                text: "already persisted".to_string(),
+            },
+            ChatChunk::Done {
+                finish_reason: FinishReason::Stop,
+                usage: ChatUsage {
+                    input_tokens: 0,
+                    output_tokens: 3,
+                },
+            },
+        ]
+    );
+    assert_eq!(provider.requests().len(), 0);
+    assert_eq!(messages.records().len(), 2);
+    assert_eq!(
+        conversations.last_message_at(&conversation_id),
+        Some(fixed_time(1))
+    );
+}
+
 async fn run_failed_retry_attempt(
     conversations: Arc<MemoryConversations>,
     messages: Arc<MemoryMessages>,
@@ -349,6 +556,28 @@ fn chat_service(
     )
 }
 
+#[allow(clippy::arc_with_non_send_sync)]
+fn chat_service_with_retrieval_params(
+    conversations: Arc<MemoryConversations>,
+    messages: Arc<MemoryMessages>,
+    citations: Arc<MemoryCitations>,
+    resolver: Arc<dyn ChatProviderResolver>,
+    configured_retrieval: (RetrievalService, RetrievalParams),
+) -> ChatService {
+    let (retrieval, retrieval_params) = configured_retrieval;
+    ChatService::new_with_retrieval_params(
+        Arc::new(retrieval),
+        retrieval_params,
+        Arc::new(PromptAssembler::new(PromptConfig {
+            system_prompt: "Use context.".to_string(),
+            citation_format: CitationFormat::EndOfMessage,
+            max_input_tokens: 4096,
+        })),
+        resolver,
+        ChatServiceRepos::new(conversations, messages, citations),
+    )
+}
+
 fn assert_successful_chunks(chunks: &[ChatChunk]) {
     assert_eq!(
         chunks,
@@ -406,6 +635,14 @@ fn assert_persisted_success(
         conversations.last_message_at(conversation_id),
         persisted.last().map(|message| message.created_at)
     );
+    assert_eq!(
+        messages.request_ids(),
+        vec![
+            (MessageRole::Assistant, None),
+            (MessageRole::User, Some("request-1".to_string())),
+            (MessageRole::Assistant, Some("request-1".to_string())),
+        ]
+    );
 }
 
 fn assert_provider_request(provider: &ScriptedChatProvider) {
@@ -437,14 +674,23 @@ fn assert_provider_request(provider: &ScriptedChatProvider) {
 }
 
 fn retrieval_service() -> RetrievalService {
-    let model = model();
-    let reader = Arc::new(FakeEmbeddingsReader::new(
-        vec![hit(0, 0.99), hit(1, 0.88)],
-        HashMap::from([
-            (chunk_id(0), "Alpha chunk about the vault.".to_string()),
-            (chunk_id(1), "Beta chunk with extra context.".to_string()),
-        ]),
-    ));
+    retrieval_service_with_reader(
+        FakeEmbeddingsReader::new(
+            vec![hit(0, 0.99), hit(1, 0.88)],
+            HashMap::from([
+                (chunk_id(0), "Alpha chunk about the vault.".to_string()),
+                (chunk_id(1), "Beta chunk with extra context.".to_string()),
+            ]),
+        ),
+        embedding_model(),
+    )
+}
+
+fn retrieval_service_with_reader(
+    reader: FakeEmbeddingsReader,
+    model: EmbeddingModelId,
+) -> RetrievalService {
+    let reader = Arc::new(reader);
     let provider = Arc::new(RecordingEmbeddingsProvider::new(model));
 
     RetrievalService::new(reader, provider)
@@ -466,7 +712,7 @@ impl ScriptedChatProvider {
     fn new(steps: Vec<ProviderStep>) -> Self {
         Self {
             capability: ChatCapability {
-                model: model(),
+                model: chat_model(),
                 max_input_tokens: 4096,
                 max_output_tokens: 128,
                 supports_streaming: true,
@@ -474,6 +720,11 @@ impl ScriptedChatProvider {
             steps,
             requests: Mutex::default(),
         }
+    }
+
+    fn with_model(mut self, model: EmbeddingModelId) -> Self {
+        self.capability.model = model;
+        self
     }
 
     fn requests(&self) -> Vec<ChatRequest> {
@@ -690,12 +941,35 @@ impl MemoryMessages {
         })
     }
 
+    fn new_stored(records: Vec<(MessageRecord, Option<&str>)>) -> Arc<Self> {
+        Arc::new(Self {
+            records: Arc::new(Mutex::new(
+                records
+                    .into_iter()
+                    .map(|(record, request_id)| StoredMessage {
+                        record,
+                        request_id: request_id.map(str::to_string),
+                    })
+                    .collect(),
+            )),
+        })
+    }
+
     fn records(&self) -> Vec<MessageRecord> {
         self.records
             .lock()
             .expect("messages lock should not be poisoned")
             .iter()
             .map(|stored| stored.record.clone())
+            .collect()
+    }
+
+    fn request_ids(&self) -> Vec<(MessageRole, Option<String>)> {
+        self.records
+            .lock()
+            .expect("messages lock should not be poisoned")
+            .iter()
+            .map(|stored| (stored.record.role, stored.request_id.clone()))
             .collect()
     }
 }
@@ -841,9 +1115,13 @@ fn message_record(
 }
 
 fn hit(index: u32, similarity: f32) -> TopHit {
+    hit_for(index, index, similarity)
+}
+
+fn hit_for(note_index: u32, chunk_index: u32, similarity: f32) -> TopHit {
     TopHit {
-        note_id: note_id(index),
-        chunk_id: chunk_id(index),
+        note_id: note_id(note_index),
+        chunk_id: chunk_id(chunk_index),
         similarity,
     }
 }
@@ -874,10 +1152,16 @@ fn chunk_id(index: u32) -> ChunkId {
     ChunkId::new(&format!("01JAR5A3PJEZ3SKG67PN8N6S6{index}"))
 }
 
-fn model() -> EmbeddingModelId {
+fn chat_model() -> EmbeddingModelId {
     "test/chat-model"
         .parse()
         .expect("model fixture should be valid")
+}
+
+fn embedding_model() -> EmbeddingModelId {
+    "test/embedding-model"
+        .parse()
+        .expect("embedding model fixture should be valid")
 }
 
 fn fixed_time(second: u32) -> DateTime<Utc> {

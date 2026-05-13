@@ -13,7 +13,7 @@ use zk_ai::{
             ChatMessagesRepo, ChatProviderResolver, ChatService, ChatServiceRepos,
         },
         prompt::{CitationFormat, PromptAssembler, PromptConfig},
-        retrieval::RetrievalService,
+        retrieval::{RetrievalParams, RetrievalService},
         semantic_search::{EmbeddingsReader, TopHit as AiTopHit},
     },
 };
@@ -60,6 +60,9 @@ pub(crate) fn build_chat_service(
     config: &AiChatConfig,
 ) -> Result<ChatService, ChatRuntimeError> {
     let embeddings_provider = selector.select_embeddings(Capability::Embeddings)?;
+    let mut retrieval_params = RetrievalParams::new(embeddings_provider.capability().model.clone());
+    retrieval_params.max_chunks_per_note = config.retrieval_max_chunks_per_note;
+    retrieval_params.token_budget = config.retrieval_token_budget;
     let retrieval = Arc::new(RetrievalService::new(
         Arc::new(ServerEmbeddingsReader {
             db: Arc::clone(&db),
@@ -78,8 +81,9 @@ pub(crate) fn build_chat_service(
         Arc::new(ServerChatMessageCitationsRepo { db }),
     );
 
-    Ok(ChatService::new(
+    Ok(ChatService::new_with_retrieval_params(
         retrieval,
+        retrieval_params,
         prompt,
         provider_resolver,
         repos,
