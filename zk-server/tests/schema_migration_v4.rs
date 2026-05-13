@@ -4,7 +4,7 @@
 use rusqlite::Connection;
 use zk_server::migration::ensure_schema;
 
-const CURRENT_SCHEMA_VERSION: i64 = 4;
+const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 const EXPECTED_V4_TABLES: &[&str] = &["conversations", "messages", "message_citations"];
 
@@ -90,6 +90,25 @@ fn create_v3_chat_parent_fixture(connection: &Connection) {
             [],
         )
         .expect("notes table should be created");
+    connection
+        .execute(
+            "CREATE TABLE assets (
+                asset_id TEXT PRIMARY KEY,
+                current_path TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                trashed_at TEXT,
+                deleted_at TEXT,
+                is_trashed INTEGER NOT NULL DEFAULT 0,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                server_revision INTEGER NOT NULL
+            )",
+            [],
+        )
+        .expect("assets table should be created");
     connection
         .execute(
             "CREATE TABLE note_chunks (

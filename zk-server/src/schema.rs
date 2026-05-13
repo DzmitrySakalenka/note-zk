@@ -178,8 +178,12 @@ const CREATE_INDEX_SYNC_EVENTS_ITEM: &str =
     "CREATE INDEX idx_sync_events_item ON sync_events(item_id, item_type)";
 const CREATE_INDEX_NOTES_PATH: &str =
     "CREATE INDEX idx_notes_path ON notes(current_path) WHERE is_deleted = 0";
+const CREATE_INDEX_NOTES_REVISION: &str =
+    "CREATE INDEX IF NOT EXISTS idx_notes_revision ON notes(server_revision)";
 const CREATE_INDEX_ASSETS_PATH: &str =
     "CREATE INDEX idx_assets_path ON assets(current_path) WHERE is_deleted = 0";
+const CREATE_INDEX_ASSETS_REVISION: &str =
+    "CREATE INDEX IF NOT EXISTS idx_assets_revision ON assets(server_revision)";
 const CREATE_INDEX_DELETE_RECORDS_RETENTION: &str =
     "CREATE INDEX idx_delete_records_retention ON delete_records(retention_until)";
 const CREATE_INDEX_DEVICE_TOKENS_HASH: &str =
@@ -261,3 +265,8 @@ pub(crate) const V4_INDEX_DDL: &[&str] = &[
     CREATE_INDEX_MESSAGES_CONVERSATION_CREATED,
     CREATE_INDEX_MESSAGE_CITATIONS_NOTE,
 ];
+
+pub(crate) const V5_TABLE_DDL: &[&str] = &[];
+
+pub(crate) const V5_INDEX_DDL: &[&str] =
+    &[CREATE_INDEX_NOTES_REVISION, CREATE_INDEX_ASSETS_REVISION];

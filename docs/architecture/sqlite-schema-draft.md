@@ -446,6 +446,9 @@ At minimum:
 - `delete_records.retention_until`
 - `sync_events.cursor`
 
+Server `notes.server_revision` and `assets.server_revision` indexes last
+verified against `zk-server/src/schema.rs:181-186,269-274` on 2026-05-13.
+
 ## Practical Notes
 
 - keep `frontmatter_json` for flexibility

@@ -4,7 +4,7 @@
 use rusqlite::Connection;
 use zk_server::{ServerError, migration::ensure_schema};
 
-const CURRENT_SCHEMA_VERSION: i64 = 4;
+const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 const EXPECTED_V1_TABLES: &[&str] = &[
     "devices",
@@ -112,6 +112,46 @@ fn create_v1_device_token_schema(connection: &Connection) {
             [],
         )
         .expect("device tokens table should be created");
+    connection
+        .execute(
+            "CREATE TABLE notes (
+                note_id TEXT PRIMARY KEY,
+                current_path TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                body_markdown TEXT NOT NULL,
+                frontmatter_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                trashed_at TEXT,
+                deleted_at TEXT,
+                is_trashed INTEGER NOT NULL DEFAULT 0,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                last_editor_device_id TEXT,
+                server_revision INTEGER NOT NULL
+            )",
+            [],
+        )
+        .expect("notes table should be created");
+    connection
+        .execute(
+            "CREATE TABLE assets (
+                asset_id TEXT PRIMARY KEY,
+                current_path TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                trashed_at TEXT,
+                deleted_at TEXT,
+                is_trashed INTEGER NOT NULL DEFAULT 0,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                server_revision INTEGER NOT NULL
+            )",
+            [],
+        )
+        .expect("assets table should be created");
     connection
         .execute(
             "INSERT INTO server_schema_version (id, version) VALUES (1, 1)",
@@ -408,7 +448,7 @@ fn ensure_schema_rejects_future_server_schema_versions() {
         .expect("schema version table should be created");
     connection
         .execute(
-            "INSERT INTO server_schema_version (id, version) VALUES (1, 5)",
+            "INSERT INTO server_schema_version (id, version) VALUES (1, 6)",
             [],
         )
         .expect("future schema version should be inserted");
