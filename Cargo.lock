@@ -5677,6 +5677,7 @@ dependencies = [
  "dirs",
  "futures",
  "hex",
+ "insta",
  "reqwest",
  "rpassword",
  "rusqlite",

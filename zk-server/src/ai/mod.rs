@@ -4,5 +4,7 @@
 pub(crate) mod chat_runtime;
 /// Debounced sync-push ingestion into AI jobs.
 pub mod ingest;
+/// Pure LLM Wiki ingest prompt assembly and response parsing.
+pub mod ingest_wiki;
 /// In-process AI job worker.
 pub mod worker;
