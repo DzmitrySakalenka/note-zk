@@ -120,7 +120,7 @@ async fn health_endpoint_returns_expected_body_after_bootstrap() {
     assert_eq!(content_type, "application/json");
     assert_eq!(health_response.status, "ok");
     assert!(health_response.db_ok);
-    assert_eq!(health_response.schema_version, 3);
+    assert_eq!(health_response.schema_version, 8);
     assert!(health_response.uptime_seconds >= 0);
 }
 
@@ -136,6 +136,29 @@ async fn health_endpoint_is_unauthenticated_even_when_other_routes_are_protected
     let json_body = response_json(response).await;
     assert_eq!(json_body["status"], "ok");
     assert_eq!(json_body["db_ok"], true);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn concurrent_health_requests_complete_successfully() {
+    let harness = build_harness(None);
+    let app = build_router(harness.state);
+
+    let first = app.clone().oneshot(request("/health"));
+    let second = app.oneshot(request("/health"));
+    let (first_response, second_response) = tokio::join!(first, second);
+    let first_response = first_response.expect("first health request should complete");
+    let second_response = second_response.expect("second health request should complete");
+
+    assert_eq!(first_response.status(), StatusCode::OK);
+    assert_eq!(second_response.status(), StatusCode::OK);
+
+    let first_json = response_json(first_response).await;
+    let second_json = response_json(second_response).await;
+    for json_body in [&first_json, &second_json] {
+        assert_eq!(json_body["status"], "ok");
+        assert_eq!(json_body["db_ok"], true);
+        assert_eq!(json_body["schema_version"], 8);
+    }
 }
 
 #[tokio::test]

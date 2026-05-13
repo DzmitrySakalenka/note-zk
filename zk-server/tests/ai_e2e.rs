@@ -122,6 +122,7 @@ impl E2eFixture {
                     &IssueTokenSpec {
                         label: "AI E2E test token".to_string(),
                         device_id: None,
+                        user_id: None,
                         scopes,
                     },
                     Utc::now(),
@@ -352,6 +353,7 @@ fn test_config(vault_path: PathBuf, database_path: PathBuf) -> ServerConfig {
             remote: None,
             local: None,
             stub: Some(StubEmbeddingsConfig { dim: 128 }),
+            chat: None,
             default_mode: ExecutionMode::Connected,
             recompute_concurrency: 1,
             max_attempts: 3,

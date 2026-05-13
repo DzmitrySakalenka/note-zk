@@ -38,11 +38,15 @@ pub mod write_request;
 
 pub use ai::{
     AiIdentifierError, Capability, ChunkEmbeddingRecord, ChunkId, ChunkIdParseError, ChunkRecord,
-    EmbeddingModelId, EmbeddingVector, EmbeddingVectorError, EmbeddingVectorResult, ExecutionMode,
-    ExecutionModeParseError, JobId, JobIdParseError, ProviderId, ProviderSelectorPolicy,
-    SemanticEdgeRecord, decode_vector, encode_vector,
+    Citation, ConversationId, ConversationIdParseError, ConversationRecord, EmbeddingModelId,
+    EmbeddingVector, EmbeddingVectorError, EmbeddingVectorResult, ExecutionMode,
+    ExecutionModeParseError, JobId, JobIdParseError, MessageId, MessageIdParseError, MessageRecord,
+    MessageRole, MessageRoleParseError, ProviderId, ProviderSelectorPolicy, RetrievalChunk,
+    RetrievalContext, SemanticEdgeRecord, decode_vector, encode_vector,
 };
-pub use auth::{AuthScope, AuthScopeParseError, DeviceTokenRecord, PasswordUser, WebSessionRecord};
+pub use auth::{
+    AuthScope, AuthScopeParseError, DeviceTokenRecord, PasswordUser, UserId, WebSessionRecord,
+};
 pub use auth_wire::{
     CreateUserRequest, CreateUserResponse, IssueTokenRequest, IssueTokenResponse,
     ListTokensResponse, ListedToken, LoginRequest, LoginResponse, RefreshResponse,

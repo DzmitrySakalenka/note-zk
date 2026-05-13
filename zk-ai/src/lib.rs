@@ -15,14 +15,25 @@ pub use error::{AiError, AiResult};
 pub use provider::local_candle::{LocalEmbeddingsConfig, LocalEmbeddingsProvider};
 #[cfg(feature = "provider-http")]
 pub use provider::remote_http::{RemoteEmbeddingsConfig, RemoteEmbeddingsProvider};
+#[cfg(feature = "provider-http")]
+pub use provider::remote_http_chat::{RemoteHttpChatConfig, RemoteHttpChatProvider};
 pub use provider::stub::StubEmbeddingsProvider;
+pub use provider::stub_chat::StubChatProvider;
 pub use provider::{
-    EmbeddingsCapability, EmbeddingsProvider, EmbeddingsRequest, EmbeddingsResponse, embed_one,
+    ChatCapability, ChatChunk, ChatMessage, ChatProvider, ChatRequest, ChatUsage,
+    EmbeddingsCapability, EmbeddingsProvider, EmbeddingsRequest, EmbeddingsResponse, FinishReason,
+    embed_one,
 };
 pub use selector::{ProviderRegistry, ProviderSelector};
 pub use service::{
+    chat::{
+        AppendChatMessageParams, ChatConversationsRepo, ChatMessageCitationsRepo, ChatMessagesRepo,
+        ChatProviderResolver, ChatService, ChatServiceRepos, ChatTurnRequest,
+    },
     chunking::{ChunkOutcome, ChunkingService, ChunksWriter},
     embeddings::{EmbeddingsService, EmbeddingsServiceOptions, EmbeddingsWriter, RecomputeOutcome},
+    prompt::{AssembleParams, CitationFormat, PromptAssembler, PromptConfig},
+    retrieval::{RetrievalParams, RetrievalService},
     semantic_search::{EmbeddingsReader, SearchHit, SemanticSearchService},
 };
 

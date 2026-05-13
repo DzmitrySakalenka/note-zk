@@ -3,6 +3,7 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use chrono::Utc;
+use futures::StreamExt;
 use rusqlite::Connection;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -10,15 +11,19 @@ use tracing::{Instrument, Level};
 use zk_ai::{
     AiError, AiResult,
     chunker::ParagraphChunker,
-    provider::{LocalEmbeddingsProvider, RemoteEmbeddingsProvider, StubEmbeddingsProvider},
+    provider::{
+        LocalEmbeddingsProvider, RemoteEmbeddingsProvider, RemoteHttpChatProvider,
+        StubChatProvider, StubEmbeddingsProvider,
+    },
     selector::{ProviderRegistry, ProviderSelector},
     service::{
+        chat::ChatTurnRequest,
         chunking::{ChunkingService, ChunksWriter},
         embeddings::{EmbeddingsService, EmbeddingsServiceOptions, EmbeddingsWriter},
     },
 };
 use zk_domain::{
-    Capability, ChunkEmbeddingRecord, ChunkRecord, EmbeddingModelId, ProviderId,
+    Capability, ChunkEmbeddingRecord, ChunkRecord, ConversationId, EmbeddingModelId, ProviderId,
     ProviderSelectorPolicy,
     id::{NoteId, RelativePath},
 };
@@ -26,8 +31,11 @@ use zk_vault::parse_note_file;
 
 use crate::{
     ServerDb, ServerError,
-    config::{AiConfig, AiProviderKind},
-    repo::{AiJob, AiJobKind, AiJobsRepo, ChunksRepo, EmbeddingsRepo, NotesRepo},
+    ai::chat_runtime::{ChatRuntimeError, build_chat_service},
+    config::{AiChatConfig, AiChatProviderKind, AiConfig, AiProviderKind},
+    repo::{
+        AiJob, AiJobKind, AiJobsRepo, ChunksRepo, ConversationsRepo, EmbeddingsRepo, NotesRepo,
+    },
 };
 
 const IDLE_INTERVAL: Duration = Duration::from_secs(1);
@@ -88,6 +96,26 @@ pub(crate) fn provider_selector_from_config(config: &AiConfig) -> Arc<ProviderSe
         .as_ref()
         .map_or(DEFAULT_STUB_DIM, |stub| stub.dim);
     registry.register_embeddings(Arc::new(StubEmbeddingsProvider::new(stub_dim)));
+    if let Some(chat) = &config.chat {
+        match chat.provider {
+            AiChatProviderKind::Stub => {
+                registry.register_chat(Arc::new(StubChatProvider::new(
+                    chat.model_id.clone(),
+                    chat.max_output_tokens,
+                )));
+            }
+            AiChatProviderKind::RemoteHttp => {
+                match RemoteHttpChatProvider::new(chat.to_remote_http_config()) {
+                    Ok(provider) => registry.register_chat(Arc::new(provider)),
+                    Err(error) => tracing::warn!(
+                        target: LOG_TARGET,
+                        error = %error,
+                        "remote chat provider is unavailable"
+                    ),
+                }
+            }
+        }
+    }
 
     Arc::new(ProviderSelector::new(
         Arc::new(registry),
@@ -183,7 +211,8 @@ fn recover_in_flight_jobs(deps: &AiWorkerDeps) {
 
 fn claim_next_job(deps: &AiWorkerDeps) -> Option<AiJob> {
     match deps.db.with_conn(|connection| {
-        AiJobsRepo::new(connection).claim_next(deps.config.max_attempts, Utc::now())
+        // claim_next is kind-agnostic, so claim broadly and enforce per-kind retry caps on failure.
+        AiJobsRepo::new(connection).claim_next(claim_max_attempts(deps), Utc::now())
     }) {
         Ok(job) => job,
         Err(error) => {
@@ -217,6 +246,11 @@ async fn process_job(deps: &AiWorkerDeps, job: &AiJob) -> Result<(), AiWorkerErr
     match &job.kind {
         AiJobKind::RecomputeNote { note_id } => recompute_note(deps, note_id).await,
         AiJobKind::RecomputeVault => enqueue_vault_recompute_jobs(deps),
+        AiJobKind::ChatTurn {
+            conversation_id,
+            request_id,
+            user_query,
+        } => process_chat_turn(deps, conversation_id, request_id, user_query).await,
     }
 }
 
@@ -269,6 +303,39 @@ fn enqueue_vault_recompute_jobs(deps: &AiWorkerDeps) -> Result<(), AiWorkerError
     Ok(())
 }
 
+/// Runs one fire-and-forget chat job.
+///
+/// V1 consumes the stream to let `ChatService` persist the assistant message,
+/// then discards emitted chunks because there is no `chat_job_outputs` table.
+async fn process_chat_turn(
+    deps: &AiWorkerDeps,
+    conversation_id: &ConversationId,
+    request_id: &str,
+    user_query: &str,
+) -> Result<(), AiWorkerError> {
+    let chat_config = deps.config.chat.clone().unwrap_or_default();
+    let conversation = deps
+        .db
+        .with_conn(|connection| ConversationsRepo::get(connection, conversation_id))?
+        .ok_or_else(|| AiWorkerError::ConversationNotFound(conversation_id.clone()))?;
+    let service = build_chat_service(Arc::clone(&deps.db), deps.selector.clone(), &chat_config)?;
+    let mut stream = service
+        .turn(ChatTurnRequest {
+            conversation_id: conversation_id.clone(),
+            user_id: conversation.user_id,
+            user_query: user_query.to_string(),
+            top_k: chat_config.retrieval_top_k,
+            request_id: request_id.to_string(),
+        })
+        .await?;
+
+    while let Some(chunk) = stream.next().await {
+        chunk?;
+    }
+
+    Ok(())
+}
+
 fn read_note_body(deps: &AiWorkerDeps, note_id: &NoteId) -> Result<String, AiWorkerError> {
     let note_path = deps
         .db
@@ -317,7 +384,7 @@ fn mark_job_failed(deps: &AiWorkerDeps, job: &AiJob, error: &AiWorkerError) {
         AiJobsRepo::new(connection).mark_failed(
             &job.job_id,
             &error.to_string(),
-            deps.config.max_attempts,
+            max_attempts_for_job(deps, &job.kind),
             Utc::now(),
         )
     }) {
@@ -330,10 +397,29 @@ fn mark_job_failed(deps: &AiWorkerDeps, job: &AiJob, error: &AiWorkerError) {
     }
 }
 
+fn claim_max_attempts(deps: &AiWorkerDeps) -> u32 {
+    deps.config.max_attempts.max(chat_max_attempts(deps))
+}
+
+fn max_attempts_for_job(deps: &AiWorkerDeps, kind: &AiJobKind) -> u32 {
+    match kind {
+        AiJobKind::ChatTurn { .. } => chat_max_attempts(deps),
+        AiJobKind::RecomputeNote { .. } | AiJobKind::RecomputeVault => deps.config.max_attempts,
+    }
+}
+
+fn chat_max_attempts(deps: &AiWorkerDeps) -> u32 {
+    deps.config.chat.as_ref().map_or_else(
+        || u32::from(AiChatConfig::default().max_attempts),
+        |chat| u32::from(chat.max_attempts),
+    )
+}
+
 fn job_kind_label(kind: &AiJobKind) -> &'static str {
     match kind {
         AiJobKind::RecomputeNote { .. } => "recompute_note",
         AiJobKind::RecomputeVault => "recompute_vault",
+        AiJobKind::ChatTurn { .. } => "chat_turn",
     }
 }
 
@@ -431,4 +517,23 @@ enum AiWorkerError {
     Vault(#[from] zk_vault::error::VaultError),
     #[error("note not found: {0}")]
     NoteNotFound(NoteId),
+    #[error("conversation not found: {0}")]
+    ConversationNotFound(ConversationId),
+    #[error("read AI chat system prompt {path}: {source}")]
+    ReadSystemPrompt {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+impl From<ChatRuntimeError> for AiWorkerError {
+    fn from(error: ChatRuntimeError) -> Self {
+        match error {
+            ChatRuntimeError::Ai(error) => Self::Ai(error),
+            ChatRuntimeError::ReadSystemPrompt { path, source } => {
+                Self::ReadSystemPrompt { path, source }
+            }
+        }
+    }
 }

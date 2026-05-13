@@ -9,6 +9,9 @@ pub mod admin;
 /// Handles local AI cache subcommands.
 #[cfg(feature = "ai")]
 pub mod ai;
+/// Handles the `chat` subcommand.
+#[cfg(feature = "ai")]
+pub mod chat;
 /// Handles the `doctor` subcommand.
 pub mod doctor;
 /// Handles the `purge` subcommand.

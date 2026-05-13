@@ -175,6 +175,7 @@ fn listed_job(job: AiJob) -> ListedJob {
     let (kind, note_id) = match job.kind {
         AiJobKind::RecomputeNote { note_id } => ("recompute_note", Some(note_id.to_string())),
         AiJobKind::RecomputeVault => ("recompute_vault", None),
+        AiJobKind::ChatTurn { .. } => ("chat_turn", None),
     };
 
     ListedJob {

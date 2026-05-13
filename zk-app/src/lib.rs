@@ -95,7 +95,8 @@ pub use sync::{
 #[cfg(feature = "ai")]
 #[rustfmt::skip]
 pub use ai::{
-    AiFacade, AiFacadeDeps, LocalEmbeddingsRepoHandle, RecomputeLocalSummary,
+    AiFacade, AiFacadeDeps, ChatChunk, ChatRequest, ConversationDetail, ConversationDto,
+    ListConversationsParams, LocalEmbeddingsRepoHandle, MessageDto, RecomputeLocalSummary,
     SemanticSearchRequest,
 };
 pub use write_policy::{ensure_writable, is_path_immutable};

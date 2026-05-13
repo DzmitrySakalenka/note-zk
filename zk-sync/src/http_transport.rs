@@ -3,6 +3,7 @@
 use std::io;
 
 use async_trait::async_trait;
+use futures::{StreamExt, stream::BoxStream};
 use reqwest::{Client, Method, RequestBuilder, Response, StatusCode};
 use serde_json::Value;
 use url::Url;
@@ -24,6 +25,23 @@ pub struct HttpTransport {
     client: Client,
     base_url: Url,
     bearer_token: Option<String>,
+}
+
+/// Raw text HTTP response for higher-level facades with their own error mapping.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpTextResponse {
+    /// Numeric HTTP response status.
+    pub status: u16,
+    /// Response body decoded as text.
+    pub body: String,
+}
+
+/// Raw streaming HTTP response for higher-level facades with their own protocol parser.
+pub struct HttpStreamResponse {
+    /// Numeric HTTP response status.
+    pub status: u16,
+    /// Response body bytes.
+    pub body: BoxStream<'static, SyncResult<Vec<u8>>>,
 }
 
 impl HttpTransport {
@@ -86,6 +104,102 @@ impl HttpTransport {
             .map_err(|error| SyncError::Transport(Box::new(error)))
     }
 
+    /// Posts JSON to an arbitrary path and returns status plus raw text body.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError::Transport`] when URL construction, request send,
+    /// or response body decoding fails.
+    pub async fn post_json_text(&self, path: &str, body: &Value) -> SyncResult<HttpTextResponse> {
+        let response = self
+            .post(path)?
+            .json(body)
+            .send()
+            .await
+            .map_err(|error| SyncError::Transport(Box::new(error)))?;
+
+        text_response(response).await
+    }
+
+    /// Sends a GET request and returns status plus raw text body.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError::Transport`] when URL construction, request send,
+    /// or response body decoding fails.
+    pub async fn get_text(&self, path: &str) -> SyncResult<HttpTextResponse> {
+        let response = self
+            .request(Method::GET, path)?
+            .send()
+            .await
+            .map_err(|error| SyncError::Transport(Box::new(error)))?;
+
+        text_response(response).await
+    }
+
+    /// Sends a PATCH request with JSON and returns status plus raw text body.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError::Transport`] when URL construction, request send,
+    /// or response body decoding fails.
+    pub async fn patch_json_text(&self, path: &str, body: &Value) -> SyncResult<HttpTextResponse> {
+        let response = self
+            .request(Method::PATCH, path)?
+            .json(body)
+            .send()
+            .await
+            .map_err(|error| SyncError::Transport(Box::new(error)))?;
+
+        text_response(response).await
+    }
+
+    /// Sends a DELETE request and returns status plus raw text body.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError::Transport`] when URL construction, request send,
+    /// or response body decoding fails.
+    pub async fn delete_text(&self, path: &str) -> SyncResult<HttpTextResponse> {
+        let response = self
+            .request(Method::DELETE, path)?
+            .send()
+            .await
+            .map_err(|error| SyncError::Transport(Box::new(error)))?;
+
+        text_response(response).await
+    }
+
+    /// Posts JSON to an arbitrary path and returns status plus streaming body bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError::Transport`] when URL construction or request send
+    /// fails.
+    pub async fn post_json_stream(
+        &self,
+        path: &str,
+        body: &Value,
+    ) -> SyncResult<HttpStreamResponse> {
+        let response = self
+            .post(path)?
+            .json(body)
+            .send()
+            .await
+            .map_err(|error| SyncError::Transport(Box::new(error)))?;
+        let status = response.status().as_u16();
+        let body = response
+            .bytes_stream()
+            .map(|result| {
+                result
+                    .map(|bytes| bytes.to_vec())
+                    .map_err(|error| SyncError::Transport(Box::new(error)))
+            })
+            .boxed();
+
+        Ok(HttpStreamResponse { status, body })
+    }
+
     /// Sends a GET request to an arbitrary server path and returns the status code.
     ///
     /// # Errors
@@ -118,6 +232,16 @@ impl HttpTransport {
             None => builder,
         })
     }
+}
+
+async fn text_response(response: Response) -> SyncResult<HttpTextResponse> {
+    let status = response.status().as_u16();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| SyncError::Transport(Box::new(error)))?;
+
+    Ok(HttpTextResponse { status, body })
 }
 
 #[async_trait]

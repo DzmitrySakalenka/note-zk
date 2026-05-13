@@ -257,6 +257,58 @@ Index:
 
 - `idx_ai_jobs_status_enqueued ON ai_jobs(status, enqueued_at)`
 
+## Chat Tables (server schema v4)
+
+Chat tables are server-only in V1. The server owns conversations, messages,
+and citations; local offline replay is deferred.
+
+### `conversations` (server schema v4 only)
+
+- `conversation_id TEXT PRIMARY KEY`
+- `user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE`
+- `title TEXT`
+- `created_at TEXT NOT NULL`
+- `updated_at TEXT NOT NULL`
+- `last_message_at TEXT`
+- `archived_at TEXT`
+
+Index:
+
+- `idx_conversations_user_recent ON conversations(user_id, last_message_at DESC) WHERE archived_at IS NULL`
+
+### `messages` (server schema v4 only)
+
+- `message_id TEXT PRIMARY KEY`
+- `conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id) ON DELETE CASCADE`
+- `role TEXT NOT NULL`
+- `content TEXT NOT NULL`
+- `token_count INTEGER`
+- `created_at TEXT NOT NULL`
+- `server_revision INTEGER`
+
+Index:
+
+- `idx_messages_conversation_created ON messages(conversation_id, created_at)`
+
+### `message_citations` (server schema v4 only)
+
+- `message_id TEXT NOT NULL REFERENCES messages(message_id) ON DELETE CASCADE`
+- `ordinal INTEGER NOT NULL`
+- `note_id TEXT NOT NULL REFERENCES notes(note_id) ON DELETE CASCADE`
+- `chunk_id TEXT REFERENCES note_chunks(chunk_id) ON DELETE SET NULL`
+- `similarity REAL NOT NULL`
+- `snippet TEXT NOT NULL`
+
+Primary key:
+
+- `(message_id, ordinal)`
+
+Index:
+
+- `idx_message_citations_note ON message_citations(note_id)`
+
+Last verified against `zk-server/src/schema.rs:145-209,253-263` on 2026-05-07.
+
 ## Server SQLite Schema
 
 The server schema mirrors some local concepts but remains authoritative for shared sync state.
@@ -336,10 +388,11 @@ store.
 
 Indexes:
 
-- `idx_device_tokens_hash` on `token_sha256_hex`
 - `idx_device_tokens_device` on `device_id` where `revoked_at IS NULL`
 
-Last verified against `zk-server/src/schema.rs:71-81,113-122` on 2026-04-30.
+The `token_sha256_hex` `UNIQUE` constraint creates SQLite's lookup autoindex.
+
+Last verified against `zk-server/src/schema.rs` on 2026-05-13.
 
 ### `users`
 
@@ -392,7 +445,12 @@ At minimum:
 - `note_sync_state.sync_status`
 - `asset_sync_state.sync_status`
 - `delete_records.retention_until`
-- `sync_events.cursor`
+- `sync_events.item_id, item_type`
+
+`sync_events.event_seq` uses the table rowid through `INTEGER PRIMARY KEY`, so
+it does not need a secondary cursor index. Server `notes.server_revision` and
+`assets.server_revision` indexes last verified against `zk-server/src/schema.rs`
+on 2026-05-13.
 
 ## Practical Notes
 

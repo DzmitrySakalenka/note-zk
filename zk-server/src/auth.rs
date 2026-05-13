@@ -16,7 +16,7 @@ use zk_auth::{
     session::{hash_csrf_token, hash_session_id, validate_session_id_format},
     token::hash_device_token,
 };
-use zk_domain::AuthScope;
+use zk_domain::{AuthScope, auth::UserId};
 
 use crate::{
     ServerError, ServerResult,
@@ -40,6 +40,8 @@ pub struct AuthenticatedDevice {
     pub token_id: Option<String>,
     /// Owning device id, when one device token is bound to a device.
     pub device_id: Option<String>,
+    /// Owning user id, when one device token is bound to a user.
+    pub user_id: Option<String>,
     /// Authorization scopes granted to the authenticated caller.
     pub scopes: Vec<AuthScope>,
 }
@@ -60,6 +62,13 @@ pub struct AuthenticatedUser {
 /// Marker extracted by admin-only routes after scope checks pass.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuthenticatedAdmin;
+
+/// Authenticated browser-session user accepted by chat routes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthenticatedChatUser {
+    /// User identifier bound to the authenticated browser session.
+    pub user_id: UserId,
+}
 
 /// Middleware that enforces device-token authentication rules.
 ///
@@ -225,6 +234,57 @@ impl FromRequestParts<ServerState> for AuthenticatedAdmin {
     }
 }
 
+impl FromRequestParts<ServerState> for AuthenticatedChatUser {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &ServerState,
+    ) -> Result<Self, Self::Rejection> {
+        if let Some(authenticated_user) = parts.extensions.get::<AuthenticatedUser>().cloned() {
+            require_chat_scope(&authenticated_user.scopes)?;
+            require_csrf_for_method(&parts.method, &parts.headers, &authenticated_user)?;
+            return Ok(Self {
+                user_id: UserId::new(&authenticated_user.user_id),
+            });
+        }
+
+        if let Some(authenticated_user) = authenticated_user_from_headers(state, &parts.headers)? {
+            require_chat_scope(&authenticated_user.scopes)?;
+            require_csrf_for_method(&parts.method, &parts.headers, &authenticated_user)?;
+            let user_id = UserId::new(&authenticated_user.user_id);
+            parts.extensions.insert(authenticated_user);
+            return Ok(Self { user_id });
+        }
+
+        if let Some(authenticated_device) = parts.extensions.get::<AuthenticatedDevice>().cloned() {
+            if let Some(user_id) = chat_user_id_from_device(&authenticated_device) {
+                return Ok(Self { user_id });
+            }
+            return Err(ApiError::from(ServerError::Forbidden(
+                "browser session required for chat".to_string(),
+            )));
+        }
+
+        if parts.headers.contains_key(header::AUTHORIZATION) {
+            if let Some(authenticated_device) =
+                authenticated_device_from_headers(state, &parts.headers)?
+            {
+                let user_id = chat_user_id_from_device(&authenticated_device);
+                parts.extensions.insert(authenticated_device);
+                if let Some(user_id) = user_id {
+                    return Ok(Self { user_id });
+                }
+                return Err(ApiError::from(ServerError::Forbidden(
+                    "browser session required for chat".to_string(),
+                )));
+            }
+        }
+
+        Err(ApiError::from(ServerError::Unauthorized))
+    }
+}
+
 pub(crate) fn auth_disabled(state: &ServerState) -> ServerResult<bool> {
     if state.config().stub_auth_token_sha256_hex.is_some() {
         return Ok(false);
@@ -326,6 +386,7 @@ fn authenticated_device_from_headers(
         return Ok(Some(AuthenticatedDevice {
             token_id: None,
             device_id: None,
+            user_id: None,
             scopes: wide_scopes(),
         }));
     }
@@ -341,6 +402,7 @@ fn authenticated_device_from_headers(
             return Ok(Some(AuthenticatedDevice {
                 token_id: None,
                 device_id: None,
+                user_id: None,
                 scopes: wide_scopes(),
             }));
         }
@@ -349,6 +411,7 @@ fn authenticated_device_from_headers(
     if let Some(token_row) = lookup_device_token(state, &token_sha256_hex)? {
         let token_id = token_row.token_id;
         let device_id = token_row.device_id;
+        let user_id = token_row.user_id;
         let scopes = token_row.scopes;
 
         state.db().with_conn(|connection| {
@@ -358,6 +421,7 @@ fn authenticated_device_from_headers(
         return Ok(Some(AuthenticatedDevice {
             token_id: Some(token_id),
             device_id,
+            user_id,
             scopes,
         }));
     }
@@ -459,6 +523,22 @@ fn require_admin_scope(scopes: &[AuthScope]) -> Result<(), ApiError> {
     )))
 }
 
+fn require_chat_scope(scopes: &[AuthScope]) -> Result<(), ApiError> {
+    if scopes.contains(&AuthScope::Sync) || scopes.contains(&AuthScope::Admin) {
+        return Ok(());
+    }
+
+    Err(ApiError::from(ServerError::Forbidden("sync".to_string())))
+}
+
+fn chat_user_id_from_device(authenticated_device: &AuthenticatedDevice) -> Option<UserId> {
+    if authenticated_device.scopes.contains(&AuthScope::Chat) {
+        return authenticated_device.user_id.as_deref().map(UserId::new);
+    }
+
+    None
+}
+
 fn hashes_match_constant_time(candidate: &str, expected: &str) -> bool {
     let candidate_bytes = candidate.as_bytes();
     let expected_bytes = expected.as_bytes();
@@ -471,7 +551,12 @@ fn hashes_match_constant_time(candidate: &str, expected: &str) -> bool {
 }
 
 fn wide_scopes() -> Vec<AuthScope> {
-    vec![AuthScope::Sync, AuthScope::Read, AuthScope::Admin]
+    vec![
+        AuthScope::Sync,
+        AuthScope::Read,
+        AuthScope::Admin,
+        AuthScope::Chat,
+    ]
 }
 
 fn warn_once_for_stub_token() {

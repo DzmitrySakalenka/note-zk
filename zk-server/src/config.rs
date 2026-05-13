@@ -7,11 +7,12 @@ use std::{
     num::NonZeroU32,
     path::{Path, PathBuf},
     str::FromStr,
+    time::Duration,
 };
 
 use serde::Deserialize;
 use thiserror::Error;
-use zk_ai::provider::{LocalEmbeddingsConfig, RemoteEmbeddingsConfig};
+use zk_ai::provider::{LocalEmbeddingsConfig, RemoteEmbeddingsConfig, RemoteHttpChatConfig};
 use zk_domain::{
     AiIdentifierError, BackupConfig, BackupConfigError, BackupEncryption, BackupSchedule,
     EmbeddingModelId, ExecutionMode, ExecutionModeParseError,
@@ -46,8 +47,31 @@ const ENV_AI_REMOTE_API_KEY_ENV_VAR: &str = "ZK_SERVER_AI_REMOTE_API_KEY_ENV_VAR
 const ENV_AI_LOCAL_MODEL_DIR: &str = "ZK_SERVER_AI_LOCAL_MODEL_DIR";
 const ENV_AI_RECOMPUTE_CONCURRENCY: &str = "ZK_SERVER_AI_RECOMPUTE_CONCURRENCY";
 const ENV_AI_MAX_ATTEMPTS: &str = "ZK_SERVER_AI_MAX_ATTEMPTS";
+const ENV_AI_CHAT_PROVIDER: &str = "ZK_SERVER_AI_CHAT_PROVIDER";
+const ENV_AI_CHAT_MODEL_ID: &str = "ZK_SERVER_AI_CHAT_MODEL_ID";
+const ENV_AI_CHAT_BASE_URL: &str = "ZK_SERVER_AI_CHAT_BASE_URL";
+const ENV_AI_CHAT_API_KEY_ENV_VAR: &str = "ZK_SERVER_AI_CHAT_API_KEY_ENV_VAR";
+const ENV_AI_CHAT_MAX_INPUT_TOKENS: &str = "ZK_SERVER_AI_CHAT_MAX_INPUT_TOKENS";
+const ENV_AI_CHAT_MAX_OUTPUT_TOKENS: &str = "ZK_SERVER_AI_CHAT_MAX_OUTPUT_TOKENS";
+const ENV_AI_CHAT_TIMEOUT_SECS: &str = "ZK_SERVER_AI_CHAT_TIMEOUT_SECS";
+const ENV_AI_CHAT_MAX_ATTEMPTS: &str = "ZK_SERVER_AI_CHAT_MAX_ATTEMPTS";
+const ENV_AI_CHAT_SYSTEM_PROMPT_PATH: &str = "ZK_SERVER_AI_CHAT_SYSTEM_PROMPT_PATH";
+const ENV_AI_CHAT_RETRIEVAL_TOP_K: &str = "ZK_SERVER_AI_CHAT_RETRIEVAL_TOP_K";
+const ENV_AI_CHAT_RETRIEVAL_MAX_CHUNKS_PER_NOTE: &str =
+    "ZK_SERVER_AI_CHAT_RETRIEVAL_MAX_CHUNKS_PER_NOTE";
+const ENV_AI_CHAT_RETRIEVAL_TOKEN_BUDGET: &str = "ZK_SERVER_AI_CHAT_RETRIEVAL_TOKEN_BUDGET";
 const DEFAULT_AI_RECOMPUTE_CONCURRENCY: u32 = 1;
 const DEFAULT_AI_MAX_ATTEMPTS: u32 = 3;
+const DEFAULT_AI_CHAT_MODEL_ID: &str = "gpt-4o-mini";
+const DEFAULT_AI_CHAT_BASE_URL: &str = "https://api.openai.com";
+const DEFAULT_AI_CHAT_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
+const DEFAULT_AI_CHAT_MAX_INPUT_TOKENS: u32 = 8192;
+const DEFAULT_AI_CHAT_MAX_OUTPUT_TOKENS: u32 = 1024;
+const DEFAULT_AI_CHAT_TIMEOUT_SECS: u64 = 60;
+const DEFAULT_AI_CHAT_MAX_ATTEMPTS: u8 = 3;
+const DEFAULT_AI_CHAT_RETRIEVAL_TOP_K: u32 = 8;
+const DEFAULT_AI_CHAT_RETRIEVAL_MAX_CHUNKS_PER_NOTE: u32 = 2;
+const DEFAULT_AI_CHAT_RETRIEVAL_TOKEN_BUDGET: u32 = 2048;
 
 /// Result alias used by server configuration APIs.
 pub type ConfigResult<T> = Result<T, ConfigError>;
@@ -187,6 +211,12 @@ pub enum ConfigError {
         /// Raw provider kind that failed validation.
         value: String,
     },
+    /// The configured AI chat provider kind is not recognized.
+    #[error("invalid AI chat provider '{value}': expected 'stub' or 'remote-http'")]
+    InvalidAiChatProvider {
+        /// Raw provider kind that failed validation.
+        value: String,
+    },
     /// The configured AI default execution mode is not recognized.
     #[error("invalid AI default mode '{value}': {source}")]
     InvalidAiDefaultMode {
@@ -219,6 +249,14 @@ pub enum ConfigError {
         /// Raw env override value that failed to parse.
         raw: String,
     },
+    /// An AI chat numeric env override was not a valid unsigned integer.
+    #[error("invalid {name} '{raw}': not a valid number")]
+    MalformedAiChatNumberEnv {
+        /// Env var name whose value failed to parse.
+        name: &'static str,
+        /// Raw env override value that failed to parse.
+        raw: String,
+    },
     /// Remote HTTP was selected without a matching remote provider config.
     #[error("AI provider 'remote-http' requires an [ai.remote] section")]
     MissingAiRemoteConfig,
@@ -245,6 +283,39 @@ pub enum ConfigError {
         /// Parsed max-attempts value that failed validation.
         value: u32,
     },
+    /// AI chat input-token budget was below the accepted minimum.
+    #[error("invalid AI chat max_input_tokens '{value}': expected a value of at least 512")]
+    InvalidAiChatMaxInputTokens {
+        /// Parsed max-input token budget that failed validation.
+        value: u32,
+    },
+    /// AI chat output-token budget was below the accepted minimum.
+    #[error("invalid AI chat max_output_tokens '{value}': expected a value of at least 64")]
+    InvalidAiChatMaxOutputTokens {
+        /// Parsed max-output token budget that failed validation.
+        value: u32,
+    },
+    /// AI chat retrieval top-k was above the accepted maximum.
+    #[error("invalid AI chat retrieval_top_k '{value}': expected a value no greater than 64")]
+    InvalidAiChatRetrievalTopK {
+        /// Parsed retrieval top-k that failed validation.
+        value: u32,
+    },
+    /// AI chat max attempts was zero.
+    #[error("invalid AI chat max_attempts '{value}': expected a value greater than zero")]
+    InvalidAiChatMaxAttempts {
+        /// Parsed max-attempts value that failed validation.
+        value: u8,
+    },
+    /// AI chat system prompt path could not be read.
+    #[error("invalid AI chat system_prompt_path '{path}': {source}")]
+    InvalidAiChatSystemPromptPath {
+        /// Prompt path that failed validation.
+        path: PathBuf,
+        /// Source I/O error returned by file reading.
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// AI provider family selected by server configuration.
@@ -260,11 +331,87 @@ pub enum AiProviderKind {
     LocalCandle,
 }
 
+/// Chat provider family selected by server configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiChatProviderKind {
+    /// Deterministic in-process stub chat provider.
+    #[default]
+    Stub,
+    /// OpenAI-compatible HTTP chat provider.
+    RemoteHttp,
+}
+
 /// Optional deterministic stub embeddings provider configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct StubEmbeddingsConfig {
     /// Embedding vector dimension produced by the stub provider.
     pub dim: usize,
+}
+
+/// Optional server-side chat provider and retrieval configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct AiChatConfig {
+    /// Chat provider family selected for chat completions.
+    pub provider: AiChatProviderKind,
+    /// Provider model sent to the chat backend.
+    pub model_id: EmbeddingModelId,
+    /// Base URL for the remote chat backend.
+    pub base_url: String,
+    /// Environment variable that stores the remote chat API key.
+    pub api_key_env_var: String,
+    /// Maximum input-token budget for prompt assembly.
+    pub max_input_tokens: u32,
+    /// Maximum output-token budget sent to chat providers.
+    pub max_output_tokens: u32,
+    /// Per-request HTTP timeout in seconds.
+    pub timeout_secs: u64,
+    /// Maximum HTTP attempts for retryable chat failures.
+    pub max_attempts: u8,
+    /// Optional file containing the system prompt text.
+    pub system_prompt_path: Option<PathBuf>,
+    /// Chat retrieval top-k limit.
+    pub retrieval_top_k: u32,
+    /// Maximum retrieved chunks selected per note.
+    pub retrieval_max_chunks_per_note: u32,
+    /// Retrieval token budget for selected chunks.
+    pub retrieval_token_budget: u32,
+}
+
+impl Default for AiChatConfig {
+    fn default() -> Self {
+        Self {
+            provider: AiChatProviderKind::Stub,
+            model_id: default_ai_chat_model_id(),
+            base_url: DEFAULT_AI_CHAT_BASE_URL.to_string(),
+            api_key_env_var: DEFAULT_AI_CHAT_API_KEY_ENV_VAR.to_string(),
+            max_input_tokens: DEFAULT_AI_CHAT_MAX_INPUT_TOKENS,
+            max_output_tokens: DEFAULT_AI_CHAT_MAX_OUTPUT_TOKENS,
+            timeout_secs: DEFAULT_AI_CHAT_TIMEOUT_SECS,
+            max_attempts: DEFAULT_AI_CHAT_MAX_ATTEMPTS,
+            system_prompt_path: None,
+            retrieval_top_k: DEFAULT_AI_CHAT_RETRIEVAL_TOP_K,
+            retrieval_max_chunks_per_note: DEFAULT_AI_CHAT_RETRIEVAL_MAX_CHUNKS_PER_NOTE,
+            retrieval_token_budget: DEFAULT_AI_CHAT_RETRIEVAL_TOKEN_BUDGET,
+        }
+    }
+}
+
+impl AiChatConfig {
+    /// Converts server config into remote chat provider config.
+    #[must_use]
+    pub fn to_remote_http_config(&self) -> RemoteHttpChatConfig {
+        RemoteHttpChatConfig {
+            base_url: self.base_url.clone(),
+            model_id: self.model_id.clone(),
+            api_key_env_var: self.api_key_env_var.clone(),
+            timeout: Duration::from_secs(self.timeout_secs),
+            max_attempts: self.max_attempts,
+            max_input_tokens: self.max_input_tokens,
+            max_output_tokens: self.max_output_tokens,
+        }
+    }
 }
 
 /// Optional server-side AI subsystem configuration.
@@ -279,6 +426,8 @@ pub struct AiConfig {
     pub local: Option<LocalEmbeddingsConfig>,
     /// Optional deterministic stub provider configuration.
     pub stub: Option<StubEmbeddingsConfig>,
+    /// Optional chat provider and retrieval configuration.
+    pub chat: Option<AiChatConfig>,
     /// Default execution mode for provider selection.
     pub default_mode: ExecutionMode,
     /// Maximum number of notes recomputed concurrently by the AI worker.
@@ -294,6 +443,7 @@ impl Default for AiConfig {
             remote: None,
             local: None,
             stub: None,
+            chat: None,
             default_mode: ExecutionMode::Hybrid,
             recompute_concurrency: DEFAULT_AI_RECOMPUTE_CONCURRENCY,
             max_attempts: DEFAULT_AI_MAX_ATTEMPTS,
@@ -647,6 +797,10 @@ fn apply_ai_env_overrides(ai: &mut Option<AiConfig>) -> ConfigResult<()> {
         ai.get_or_insert_with(AiConfig::default).max_attempts =
             parse_ai_max_attempts(&max_attempts)?;
     }
+    if has_ai_chat_env_override() {
+        let chat = &mut ai.get_or_insert_with(AiConfig::default).chat;
+        apply_ai_chat_env_overrides(chat.get_or_insert_with(AiChatConfig::default))?;
+    }
 
     let Some(ai) = ai else {
         return Ok(());
@@ -657,6 +811,73 @@ fn apply_ai_env_overrides(ai: &mut Option<AiConfig>) -> ConfigResult<()> {
     }
     if let Some(local) = &mut ai.local {
         apply_local_ai_env_overrides(local);
+    }
+
+    Ok(())
+}
+
+fn has_ai_chat_env_override() -> bool {
+    [
+        ENV_AI_CHAT_PROVIDER,
+        ENV_AI_CHAT_MODEL_ID,
+        ENV_AI_CHAT_BASE_URL,
+        ENV_AI_CHAT_API_KEY_ENV_VAR,
+        ENV_AI_CHAT_MAX_INPUT_TOKENS,
+        ENV_AI_CHAT_MAX_OUTPUT_TOKENS,
+        ENV_AI_CHAT_TIMEOUT_SECS,
+        ENV_AI_CHAT_MAX_ATTEMPTS,
+        ENV_AI_CHAT_SYSTEM_PROMPT_PATH,
+        ENV_AI_CHAT_RETRIEVAL_TOP_K,
+        ENV_AI_CHAT_RETRIEVAL_MAX_CHUNKS_PER_NOTE,
+        ENV_AI_CHAT_RETRIEVAL_TOKEN_BUDGET,
+    ]
+    .into_iter()
+    .any(|name| std::env::var_os(name).is_some())
+}
+
+fn apply_ai_chat_env_overrides(chat: &mut AiChatConfig) -> ConfigResult<()> {
+    if let Ok(provider) = std::env::var(ENV_AI_CHAT_PROVIDER) {
+        chat.provider = parse_ai_chat_provider_kind(&provider)?;
+    }
+    if let Ok(model_id) = std::env::var(ENV_AI_CHAT_MODEL_ID) {
+        chat.model_id = parse_ai_model_id(ENV_AI_CHAT_MODEL_ID, &model_id)?;
+    }
+    if let Ok(base_url) = std::env::var(ENV_AI_CHAT_BASE_URL) {
+        chat.base_url = base_url;
+    }
+    if let Ok(api_key_env_var) = std::env::var(ENV_AI_CHAT_API_KEY_ENV_VAR) {
+        chat.api_key_env_var = api_key_env_var;
+    }
+    if let Ok(max_input_tokens) = std::env::var(ENV_AI_CHAT_MAX_INPUT_TOKENS) {
+        chat.max_input_tokens = parse_ai_chat_u32(ENV_AI_CHAT_MAX_INPUT_TOKENS, &max_input_tokens)?;
+    }
+    if let Ok(max_output_tokens) = std::env::var(ENV_AI_CHAT_MAX_OUTPUT_TOKENS) {
+        chat.max_output_tokens =
+            parse_ai_chat_u32(ENV_AI_CHAT_MAX_OUTPUT_TOKENS, &max_output_tokens)?;
+    }
+    if let Ok(timeout_secs) = std::env::var(ENV_AI_CHAT_TIMEOUT_SECS) {
+        chat.timeout_secs = parse_ai_chat_u64(ENV_AI_CHAT_TIMEOUT_SECS, &timeout_secs)?;
+    }
+    if let Ok(max_attempts) = std::env::var(ENV_AI_CHAT_MAX_ATTEMPTS) {
+        chat.max_attempts = parse_ai_chat_u8(ENV_AI_CHAT_MAX_ATTEMPTS, &max_attempts)?;
+    }
+    if let Some(system_prompt_path) = std::env::var_os(ENV_AI_CHAT_SYSTEM_PROMPT_PATH) {
+        chat.system_prompt_path = Some(expand_tilde(PathBuf::from(system_prompt_path)));
+    }
+    if let Ok(retrieval_top_k) = std::env::var(ENV_AI_CHAT_RETRIEVAL_TOP_K) {
+        chat.retrieval_top_k = parse_ai_chat_u32(ENV_AI_CHAT_RETRIEVAL_TOP_K, &retrieval_top_k)?;
+    }
+    if let Ok(retrieval_max_chunks_per_note) =
+        std::env::var(ENV_AI_CHAT_RETRIEVAL_MAX_CHUNKS_PER_NOTE)
+    {
+        chat.retrieval_max_chunks_per_note = parse_ai_chat_u32(
+            ENV_AI_CHAT_RETRIEVAL_MAX_CHUNKS_PER_NOTE,
+            &retrieval_max_chunks_per_note,
+        )?;
+    }
+    if let Ok(retrieval_token_budget) = std::env::var(ENV_AI_CHAT_RETRIEVAL_TOKEN_BUDGET) {
+        chat.retrieval_token_budget =
+            parse_ai_chat_u32(ENV_AI_CHAT_RETRIEVAL_TOKEN_BUDGET, &retrieval_token_budget)?;
     }
 
     Ok(())
@@ -693,6 +914,16 @@ fn parse_ai_provider_kind(value: &str) -> ConfigResult<AiProviderKind> {
     }
 }
 
+fn parse_ai_chat_provider_kind(value: &str) -> ConfigResult<AiChatProviderKind> {
+    match value {
+        "stub" => Ok(AiChatProviderKind::Stub),
+        "remote-http" => Ok(AiChatProviderKind::RemoteHttp),
+        other => Err(ConfigError::InvalidAiChatProvider {
+            value: other.to_string(),
+        }),
+    }
+}
+
 fn parse_ai_default_mode(value: &str) -> ConfigResult<ExecutionMode> {
     ExecutionMode::from_str(value).map_err(|source| ConfigError::InvalidAiDefaultMode {
         value: value.to_string(),
@@ -708,6 +939,12 @@ fn parse_ai_model_id(name: &'static str, value: &str) -> ConfigResult<EmbeddingM
             value: value.to_string(),
             source,
         })
+}
+
+fn default_ai_chat_model_id() -> EmbeddingModelId {
+    DEFAULT_AI_CHAT_MODEL_ID
+        .parse()
+        .expect("default chat model id should be valid")
 }
 
 fn parse_ai_recompute_concurrency(value: &str) -> ConfigResult<u32> {
@@ -726,9 +963,41 @@ fn parse_ai_max_attempts(value: &str) -> ConfigResult<u32> {
         })
 }
 
+fn parse_ai_chat_u32(name: &'static str, value: &str) -> ConfigResult<u32> {
+    value
+        .parse()
+        .map_err(|_| ConfigError::MalformedAiChatNumberEnv {
+            name,
+            raw: value.to_string(),
+        })
+}
+
+fn parse_ai_chat_u64(name: &'static str, value: &str) -> ConfigResult<u64> {
+    value
+        .parse()
+        .map_err(|_| ConfigError::MalformedAiChatNumberEnv {
+            name,
+            raw: value.to_string(),
+        })
+}
+
+fn parse_ai_chat_u8(name: &'static str, value: &str) -> ConfigResult<u8> {
+    value
+        .parse()
+        .map_err(|_| ConfigError::MalformedAiChatNumberEnv {
+            name,
+            raw: value.to_string(),
+        })
+}
+
 fn normalize_ai_config_paths(ai: &mut AiConfig) {
     if let Some(local) = &mut ai.local {
         local.model_dir = expand_tilde(local.model_dir.clone());
+    }
+    if let Some(chat) = &mut ai.chat {
+        if let Some(system_prompt_path) = &mut chat.system_prompt_path {
+            *system_prompt_path = expand_tilde(system_prompt_path.clone());
+        }
     }
 }
 
@@ -914,6 +1183,9 @@ fn validate_ai_config(config: &AiConfig) -> ConfigResult<()> {
             value: config.max_attempts,
         });
     }
+    if let Some(chat) = &config.chat {
+        validate_ai_chat_config(chat)?;
+    }
     if config.default_mode == ExecutionMode::Offline && config.local.is_none() {
         tracing::warn!("AI default_mode is offline but no [ai.local] section is configured");
     }
@@ -924,6 +1196,39 @@ fn validate_ai_config(config: &AiConfig) -> ConfigResult<()> {
 fn validate_ai_dim(section: &'static str, value: usize) -> ConfigResult<()> {
     if value == 0 {
         return Err(ConfigError::InvalidAiDim { section, value });
+    }
+
+    Ok(())
+}
+
+fn validate_ai_chat_config(config: &AiChatConfig) -> ConfigResult<()> {
+    if config.max_input_tokens < 512 {
+        return Err(ConfigError::InvalidAiChatMaxInputTokens {
+            value: config.max_input_tokens,
+        });
+    }
+    if config.max_output_tokens < 64 {
+        return Err(ConfigError::InvalidAiChatMaxOutputTokens {
+            value: config.max_output_tokens,
+        });
+    }
+    if config.retrieval_top_k > 64 {
+        return Err(ConfigError::InvalidAiChatRetrievalTopK {
+            value: config.retrieval_top_k,
+        });
+    }
+    if config.max_attempts == 0 {
+        return Err(ConfigError::InvalidAiChatMaxAttempts {
+            value: config.max_attempts,
+        });
+    }
+    if let Some(system_prompt_path) = &config.system_prompt_path {
+        fs::read_to_string(system_prompt_path).map_err(|source| {
+            ConfigError::InvalidAiChatSystemPromptPath {
+                path: system_prompt_path.clone(),
+                source,
+            }
+        })?;
     }
 
     Ok(())

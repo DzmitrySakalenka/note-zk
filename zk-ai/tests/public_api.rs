@@ -4,10 +4,14 @@
 use std::any::{type_name, type_name_of_val};
 
 use zk_ai::{
-    ChunkOutcome, Chunker, ChunkerOptions, ChunkingService, ChunksWriter, EmbeddingsCapability,
+    AppendChatMessageParams, AssembleParams, ChatCapability, ChatChunk, ChatConversationsRepo,
+    ChatMessage, ChatMessageCitationsRepo, ChatMessagesRepo, ChatProvider, ChatProviderResolver,
+    ChatRequest, ChatService, ChatServiceRepos, ChatTurnRequest, ChatUsage, ChunkOutcome, Chunker,
+    ChunkerOptions, ChunkingService, ChunksWriter, CitationFormat, EmbeddingsCapability,
     EmbeddingsProvider, EmbeddingsReader, EmbeddingsRequest, EmbeddingsResponse, EmbeddingsService,
-    EmbeddingsServiceOptions, EmbeddingsWriter, ParagraphChunker, ProviderRegistry,
-    ProviderSelector, RecomputeOutcome, SearchHit, SemanticSearchService, StubEmbeddingsProvider,
+    EmbeddingsServiceOptions, EmbeddingsWriter, FinishReason, ParagraphChunker, PromptAssembler,
+    PromptConfig, ProviderRegistry, ProviderSelector, RecomputeOutcome, RetrievalParams,
+    RetrievalService, SearchHit, SemanticSearchService, StubChatProvider, StubEmbeddingsProvider,
     embed_one,
 };
 use zk_domain::{
@@ -35,6 +39,28 @@ fn ai_operator_public_api_is_available_from_crate_root() {
     assert!(!type_name::<dyn EmbeddingsWriter>().is_empty());
     assert!(!type_name::<EmbeddingsServiceOptions>().is_empty());
     assert!(!type_name::<RecomputeOutcome>().is_empty());
+    assert!(!type_name::<RetrievalParams>().is_empty());
+    assert!(!type_name::<RetrievalService>().is_empty());
+    assert!(!type_name::<PromptConfig>().is_empty());
+    assert!(!type_name::<CitationFormat>().is_empty());
+    assert!(!type_name::<AssembleParams<'static>>().is_empty());
+    assert!(!type_name::<PromptAssembler>().is_empty());
+    assert!(!type_name::<ChatCapability>().is_empty());
+    assert!(!type_name::<ChatRequest>().is_empty());
+    assert!(!type_name::<ChatMessage>().is_empty());
+    assert!(!type_name::<ChatChunk>().is_empty());
+    assert!(!type_name::<ChatUsage>().is_empty());
+    assert!(!type_name::<FinishReason>().is_empty());
+    assert!(!type_name::<dyn ChatProvider>().is_empty());
+    assert!(!type_name::<StubChatProvider>().is_empty());
+    assert!(!type_name::<ChatTurnRequest>().is_empty());
+    assert!(!type_name::<AppendChatMessageParams>().is_empty());
+    assert!(!type_name::<ChatService>().is_empty());
+    assert!(!type_name::<ChatServiceRepos>().is_empty());
+    assert!(!type_name::<dyn ChatConversationsRepo>().is_empty());
+    assert!(!type_name::<dyn ChatMessagesRepo>().is_empty());
+    assert!(!type_name::<dyn ChatMessageCitationsRepo>().is_empty());
+    assert!(!type_name::<dyn ChatProviderResolver>().is_empty());
     assert!(
         !type_name::<SemanticSearchService<StubEmbeddingsProvider, NoopEmbeddingsRepo>>()
             .is_empty()
@@ -48,10 +74,15 @@ fn ai_operator_public_api_is_available_from_crate_root() {
 #[cfg(feature = "provider-http")]
 #[test]
 fn remote_provider_public_api_is_available_from_crate_root() {
-    use zk_ai::{RemoteEmbeddingsConfig, RemoteEmbeddingsProvider};
+    use zk_ai::{
+        RemoteEmbeddingsConfig, RemoteEmbeddingsProvider, RemoteHttpChatConfig,
+        RemoteHttpChatProvider,
+    };
 
     assert!(!type_name::<RemoteEmbeddingsProvider>().is_empty());
     assert!(!type_name::<RemoteEmbeddingsConfig>().is_empty());
+    assert!(!type_name::<RemoteHttpChatProvider>().is_empty());
+    assert!(!type_name::<RemoteHttpChatConfig>().is_empty());
 }
 
 #[cfg(feature = "provider-local")]

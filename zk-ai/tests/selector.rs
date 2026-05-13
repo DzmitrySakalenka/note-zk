@@ -83,7 +83,7 @@ fn connected_mode_without_remote_returns_provider_unavailable() {
 }
 
 #[test]
-fn chat_capability_is_explicitly_unavailable() {
+fn chat_capability_is_not_routed_through_embeddings_selector() {
     let selector = ProviderSelector::new(
         Arc::new(registry_with(&["stub", "remote-http", "local-candle"])),
         ProviderSelectorPolicy::default(),
@@ -92,10 +92,10 @@ fn chat_capability_is_explicitly_unavailable() {
     let error = selector
         .select_embeddings(Capability::Chat)
         .err()
-        .expect("chat capability should be TG17 scope");
+        .expect("chat capability should use chat selector");
 
     assert!(
-        matches!(error, AiError::ProviderUnavailable(message) if message == "chat is TG17 scope")
+        matches!(error, AiError::ProviderUnavailable(message) if message == "chat capability must use select_chat")
     );
 }
 

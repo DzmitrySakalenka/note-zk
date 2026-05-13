@@ -159,5 +159,5 @@ async fn register_device_is_idempotent_for_existing_device() {
             .expect("schema version lookup should succeed"),
         schema_version_after_first
     );
-    assert_eq!(schema_version_after_first, 3);
+    assert_eq!(schema_version_after_first, 8);
 }

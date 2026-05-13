@@ -78,6 +78,7 @@ impl SearchFixture {
                     &IssueTokenSpec {
                         label: "Semantic search test token".to_string(),
                         device_id: None,
+                        user_id: None,
                         scopes,
                     },
                     Utc::now(),
@@ -502,6 +503,7 @@ fn ai_config(mode: ExecutionMode) -> AiConfig {
         remote: None,
         local: None,
         stub: Some(StubEmbeddingsConfig { dim: 2 }),
+        chat: None,
         default_mode: mode,
         recompute_concurrency: 1,
         max_attempts: 3,

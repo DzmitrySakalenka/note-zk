@@ -7,6 +7,42 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::DeviceId;
 
+/// Stable identifier for an authenticated user.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct UserId(String);
+
+impl UserId {
+    /// Generates a new ULID-backed user identifier.
+    #[must_use]
+    pub fn generate() -> Self {
+        Self(ulid::Ulid::new().to_string())
+    }
+
+    /// Creates a user identifier wrapper from an existing string value.
+    #[must_use]
+    pub fn new(value: &str) -> Self {
+        Self(value.to_string())
+    }
+
+    /// Returns the identifier as a borrowed string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for UserId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl fmt::Display for UserId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}", self.0)
+    }
+}
+
 /// Password-authenticated user record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PasswordUser {
@@ -74,6 +110,8 @@ pub enum AuthScope {
     Read,
     /// Administrative access.
     Admin,
+    /// User-bound chat API access.
+    Chat,
 }
 
 impl AuthScope {
@@ -83,6 +121,7 @@ impl AuthScope {
             Self::Sync => "sync",
             Self::Read => "read",
             Self::Admin => "admin",
+            Self::Chat => "chat",
         }
     }
 }
@@ -117,6 +156,7 @@ impl FromStr for AuthScope {
             "sync" => Ok(Self::Sync),
             "read" => Ok(Self::Read),
             "admin" => Ok(Self::Admin),
+            "chat" => Ok(Self::Chat),
             other => Err(AuthScopeParseError {
                 value: other.to_string(),
             }),

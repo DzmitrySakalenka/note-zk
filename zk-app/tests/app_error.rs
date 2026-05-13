@@ -83,6 +83,9 @@ fn preserves_app_owned_payloads() {
         context: "delete record for note 01TESTNOTEID00000000000000 should exist after trash"
             .to_string(),
     };
+    let provider_unavailable = AppError::ProviderUnavailable {
+        message: "chat requires server connectivity in V1".to_string(),
+    };
     let path_exists = AppError::NotePathExists {
         path: RelativePath::new("notes/existing.md"),
     };
@@ -107,6 +110,11 @@ fn preserves_app_owned_payloads() {
         invariant_violation,
         AppError::InvariantViolation { context }
             if context == "delete record for note 01TESTNOTEID00000000000000 should exist after trash"
+    ));
+    assert!(matches!(
+        provider_unavailable,
+        AppError::ProviderUnavailable { message }
+            if message == "chat requires server connectivity in V1"
     ));
     assert!(matches!(
         path_exists,

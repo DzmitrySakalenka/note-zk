@@ -76,6 +76,15 @@ impl ServerState {
     }
 
     fn from_parts(config: ServerConfig, db: ServerDb, started_at: DateTime<Utc>) -> Self {
+        Self::from_parts_with_ai_selector(config, db, started_at, None)
+    }
+
+    fn from_parts_with_ai_selector(
+        config: ServerConfig,
+        db: ServerDb,
+        started_at: DateTime<Utc>,
+        ai_selector: Option<Arc<ProviderSelector>>,
+    ) -> Self {
         let db = Arc::new(db);
         let ai_ingest = config.ai.as_ref().map(|_| {
             Arc::new(IngestEnqueuer::new(
@@ -83,7 +92,8 @@ impl ServerState {
                 DEFAULT_INGEST_DEBOUNCE,
             ))
         });
-        let ai_selector = config.ai.as_ref().map(provider_selector_from_config);
+        let ai_selector =
+            ai_selector.or_else(|| config.ai.as_ref().map(provider_selector_from_config));
 
         Self {
             inner: Arc::new(StateInner {
@@ -122,4 +132,28 @@ pub fn bootstrap_with_config(config: ServerConfig) -> ServerResult<ServerState> 
     database.with_conn(|connection| sweep_expired_sessions(connection, started_at))?;
 
     Ok(ServerState::from_parts(config, database, started_at))
+}
+
+/// Opens server state with an injected AI selector for integration tests.
+///
+/// # Errors
+///
+/// Returns [`ServerError`] when config validation fails, or when the database
+/// cannot be opened and migrated.
+#[cfg(feature = "test-helpers")]
+pub fn bootstrap_with_config_and_ai_selector(
+    config: ServerConfig,
+    ai_selector: Option<Arc<ProviderSelector>>,
+) -> ServerResult<ServerState> {
+    config.validate().map_err(ServerError::Config)?;
+    let database = ServerDb::open(&config.database_path)?;
+    let started_at = Utc::now();
+    database.with_conn(|connection| sweep_expired_sessions(connection, started_at))?;
+
+    Ok(ServerState::from_parts_with_ai_selector(
+        config,
+        database,
+        started_at,
+        ai_selector,
+    ))
 }

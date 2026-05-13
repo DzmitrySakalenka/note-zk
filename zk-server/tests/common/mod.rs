@@ -61,6 +61,18 @@ pub struct EnvGuard {
     zk_server_ai_local_model_dir: Option<OsString>,
     zk_server_ai_recompute_concurrency: Option<OsString>,
     zk_server_ai_max_attempts: Option<OsString>,
+    zk_server_ai_chat_provider: Option<OsString>,
+    zk_server_ai_chat_model_id: Option<OsString>,
+    zk_server_ai_chat_base_url: Option<OsString>,
+    zk_server_ai_chat_api_key_env_var: Option<OsString>,
+    zk_server_ai_chat_max_input_tokens: Option<OsString>,
+    zk_server_ai_chat_max_output_tokens: Option<OsString>,
+    zk_server_ai_chat_timeout_secs: Option<OsString>,
+    zk_server_ai_chat_max_attempts: Option<OsString>,
+    zk_server_ai_chat_system_prompt_path: Option<OsString>,
+    zk_server_ai_chat_retrieval_top_k: Option<OsString>,
+    zk_server_ai_chat_retrieval_max_chunks_per_note: Option<OsString>,
+    zk_server_ai_chat_retrieval_token_budget: Option<OsString>,
     home: Option<OsString>,
     xdg_config_home: Option<OsString>,
 }
@@ -103,6 +115,32 @@ impl EnvGuard {
                 "ZK_SERVER_AI_RECOMPUTE_CONCURRENCY",
             ),
             zk_server_ai_max_attempts: std::env::var_os("ZK_SERVER_AI_MAX_ATTEMPTS"),
+            zk_server_ai_chat_provider: std::env::var_os("ZK_SERVER_AI_CHAT_PROVIDER"),
+            zk_server_ai_chat_model_id: std::env::var_os("ZK_SERVER_AI_CHAT_MODEL_ID"),
+            zk_server_ai_chat_base_url: std::env::var_os("ZK_SERVER_AI_CHAT_BASE_URL"),
+            zk_server_ai_chat_api_key_env_var: std::env::var_os(
+                "ZK_SERVER_AI_CHAT_API_KEY_ENV_VAR",
+            ),
+            zk_server_ai_chat_max_input_tokens: std::env::var_os(
+                "ZK_SERVER_AI_CHAT_MAX_INPUT_TOKENS",
+            ),
+            zk_server_ai_chat_max_output_tokens: std::env::var_os(
+                "ZK_SERVER_AI_CHAT_MAX_OUTPUT_TOKENS",
+            ),
+            zk_server_ai_chat_timeout_secs: std::env::var_os("ZK_SERVER_AI_CHAT_TIMEOUT_SECS"),
+            zk_server_ai_chat_max_attempts: std::env::var_os("ZK_SERVER_AI_CHAT_MAX_ATTEMPTS"),
+            zk_server_ai_chat_system_prompt_path: std::env::var_os(
+                "ZK_SERVER_AI_CHAT_SYSTEM_PROMPT_PATH",
+            ),
+            zk_server_ai_chat_retrieval_top_k: std::env::var_os(
+                "ZK_SERVER_AI_CHAT_RETRIEVAL_TOP_K",
+            ),
+            zk_server_ai_chat_retrieval_max_chunks_per_note: std::env::var_os(
+                "ZK_SERVER_AI_CHAT_RETRIEVAL_MAX_CHUNKS_PER_NOTE",
+            ),
+            zk_server_ai_chat_retrieval_token_budget: std::env::var_os(
+                "ZK_SERVER_AI_CHAT_RETRIEVAL_TOKEN_BUDGET",
+            ),
             home: std::env::var_os("HOME"),
             xdg_config_home: std::env::var_os("XDG_CONFIG_HOME"),
         }
@@ -133,6 +171,7 @@ impl EnvGuard {
 }
 
 impl Drop for EnvGuard {
+    #[allow(clippy::too_many_lines)]
     fn drop(&mut self) {
         restore_env_var("ZK_SERVER_CONFIG", self.zk_server_config.as_ref());
         restore_env_var("ZK_SERVER_VAULT_PATH", self.zk_server_vault_path.as_ref());
@@ -206,6 +245,55 @@ impl Drop for EnvGuard {
         restore_env_var(
             "ZK_SERVER_AI_MAX_ATTEMPTS",
             self.zk_server_ai_max_attempts.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_CHAT_PROVIDER",
+            self.zk_server_ai_chat_provider.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_CHAT_MODEL_ID",
+            self.zk_server_ai_chat_model_id.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_CHAT_BASE_URL",
+            self.zk_server_ai_chat_base_url.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_CHAT_API_KEY_ENV_VAR",
+            self.zk_server_ai_chat_api_key_env_var.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_CHAT_MAX_INPUT_TOKENS",
+            self.zk_server_ai_chat_max_input_tokens.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_CHAT_MAX_OUTPUT_TOKENS",
+            self.zk_server_ai_chat_max_output_tokens.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_CHAT_TIMEOUT_SECS",
+            self.zk_server_ai_chat_timeout_secs.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_CHAT_MAX_ATTEMPTS",
+            self.zk_server_ai_chat_max_attempts.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_CHAT_SYSTEM_PROMPT_PATH",
+            self.zk_server_ai_chat_system_prompt_path.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_CHAT_RETRIEVAL_TOP_K",
+            self.zk_server_ai_chat_retrieval_top_k.as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_CHAT_RETRIEVAL_MAX_CHUNKS_PER_NOTE",
+            self.zk_server_ai_chat_retrieval_max_chunks_per_note
+                .as_ref(),
+        );
+        restore_env_var(
+            "ZK_SERVER_AI_CHAT_RETRIEVAL_TOKEN_BUDGET",
+            self.zk_server_ai_chat_retrieval_token_budget.as_ref(),
         );
         restore_env_var("HOME", self.home.as_ref());
         restore_env_var("XDG_CONFIG_HOME", self.xdg_config_home.as_ref());

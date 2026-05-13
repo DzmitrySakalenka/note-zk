@@ -71,14 +71,12 @@ fn ensure_schema_creates_all_expected_indexes() {
 
     let expected_indexes = BTreeSet::from([
         "idx_asset_sync_state_status".to_string(),
-        "idx_assets_index_path".to_string(),
         "idx_chunk_embeddings_model".to_string(),
         "idx_delete_records_retention".to_string(),
         "idx_note_chunks_note".to_string(),
         "idx_note_links_source".to_string(),
         "idx_note_sync_state_status".to_string(),
         "idx_note_tags_tag".to_string(),
-        "idx_notes_index_path".to_string(),
     ]);
     let indexes = sqlite_master_names(&connection, "index");
 
@@ -89,11 +87,11 @@ fn ensure_schema_creates_all_expected_indexes() {
 }
 
 #[test]
-fn ensure_schema_sets_version_to_three() {
+fn ensure_schema_sets_version_to_four() {
     let connection = open_memory().expect("in-memory database should open");
     ensure_schema(&connection).expect("schema migration should succeed");
 
-    assert_eq!(schema_version(&connection), 3);
+    assert_eq!(schema_version(&connection), 4);
 }
 
 #[test]
@@ -106,7 +104,7 @@ fn ensure_schema_is_idempotent() {
 
     ensure_schema(&connection).expect("second schema migration should succeed");
 
-    assert_eq!(schema_version(&connection), 3);
+    assert_eq!(schema_version(&connection), 4);
     assert_eq!(sqlite_master_names(&connection, "table"), initial_tables);
     assert_eq!(sqlite_master_names(&connection, "index"), initial_indexes);
 }
@@ -119,7 +117,7 @@ fn ensure_schema_rejects_future_schema_versions() {
     let initial_tables = sqlite_master_names(&connection, "table");
     let initial_indexes = sqlite_master_names(&connection, "index");
     connection
-        .execute("UPDATE schema_version SET version = 4", [])
+        .execute("UPDATE schema_version SET version = 5", [])
         .expect("schema version should be writable for fixture setup");
 
     let err = ensure_schema(&connection).expect_err("future schema version should be rejected");
@@ -127,11 +125,11 @@ fn ensure_schema_rejects_future_schema_versions() {
     assert!(matches!(
         err,
         IndexError::UnsupportedSchemaVersion {
-            found: 4,
-            max_supported: 3,
+            found: 5,
+            max_supported: 4,
         }
     ));
-    assert_eq!(schema_version(&connection), 4);
+    assert_eq!(schema_version(&connection), 5);
     assert_eq!(sqlite_master_names(&connection, "table"), initial_tables);
     assert_eq!(sqlite_master_names(&connection, "index"), initial_indexes);
 }
@@ -143,7 +141,7 @@ fn ensure_schema_upgrades_v1_sync_state_tables_with_last_synced_path() {
 
     ensure_schema(&connection).expect("schema migration should succeed");
 
-    assert_eq!(schema_version(&connection), 3);
+    assert_eq!(schema_version(&connection), 4);
     let note_columns = pragma_table_columns(&connection, "note_sync_state");
     let asset_columns = pragma_table_columns(&connection, "asset_sync_state");
     let tables = sqlite_master_names(&connection, "table");

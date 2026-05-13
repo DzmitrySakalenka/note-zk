@@ -4,7 +4,7 @@
 use rusqlite::Connection;
 use zk_server::migration::ensure_schema;
 
-const CURRENT_SCHEMA_VERSION: i64 = 3;
+const CURRENT_SCHEMA_VERSION: i64 = 8;
 
 const EXPECTED_V3_TABLES: &[&str] = &[
     "note_chunks",
@@ -81,6 +81,67 @@ fn create_v2_notes_fixture(connection: &Connection) {
             [],
         )
         .expect("notes table should be created");
+    connection
+        .execute(
+            "CREATE TABLE devices (
+                device_id TEXT PRIMARY KEY,
+                device_name TEXT NOT NULL,
+                platform TEXT,
+                app_version TEXT,
+                capabilities_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL
+            )",
+            [],
+        )
+        .expect("devices table should be created");
+    connection
+        .execute(
+            "CREATE TABLE device_tokens (
+                token_id TEXT PRIMARY KEY,
+                device_id TEXT,
+                label TEXT NOT NULL,
+                token_sha256_hex TEXT NOT NULL UNIQUE,
+                scopes_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                last_used_at TEXT,
+                revoked_at TEXT,
+                FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE SET NULL
+            )",
+            [],
+        )
+        .expect("device tokens table should be created");
+    connection
+        .execute(
+            "CREATE TABLE users (
+                user_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                disabled_at TEXT
+            )",
+            [],
+        )
+        .expect("users table should be created");
+    connection
+        .execute(
+            "CREATE TABLE assets (
+                asset_id TEXT PRIMARY KEY,
+                current_path TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                trashed_at TEXT,
+                deleted_at TEXT,
+                is_trashed INTEGER NOT NULL DEFAULT 0,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                server_revision INTEGER NOT NULL
+            )",
+            [],
+        )
+        .expect("assets table should be created");
     connection
         .execute(
             "INSERT INTO server_schema_version (id, version) VALUES (1, 2)",

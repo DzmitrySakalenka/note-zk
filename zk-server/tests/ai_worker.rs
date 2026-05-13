@@ -479,6 +479,7 @@ fn ai_config(max_attempts: u32) -> AiConfig {
         remote: None,
         local: None,
         stub: None,
+        chat: None,
         default_mode: ExecutionMode::Hybrid,
         recompute_concurrency: 1,
         max_attempts,

@@ -1,0 +1,14 @@
+---
+source: zk-ai/tests/prompt_assembler.rs
+expression: render_messages(&messages)
+---
+[
+  {
+    "role": "system",
+    "content": "Use the vault context before answering.\n\nRetrieved context:\n[1] (note: 01JAR5A3PJEZ3SKG67PN8N6S60, chunk: 01JAR5A3PJEZ3SKG67PN8N6S60) Alpha note explains the local-first sync boundary.\n[2] (note: 01JAR5A3PJEZ3SKG67PN8N6S61, chunk: 01JAR5A3PJEZ3SKG67PN8N6S61) Beta note covers prompt determinism.\n[3] (note: 01JAR5A3PJEZ3SKG67PN8N6S62, chunk: 01JAR5A3PJEZ3SKG67PN8N6S62) Gamma note lists open follow-up work."
+  },
+  {
+    "role": "user",
+    "content": "How should I connect alpha and beta?"
+  }
+]

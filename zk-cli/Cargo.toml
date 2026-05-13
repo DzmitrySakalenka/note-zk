@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }
+futures = { version = "0.3.32", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "cookies", "rustls-tls"] }
 rpassword = "7.5.1"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
@@ -41,6 +42,6 @@ zk-server = { path = "../zk-server" }
 zk-vault = { version = "0.1.0", path = "../zk-vault" }
 
 [features]
-ai = ["dep:toml", "dep:zk-ai", "dep:zk-index", "zk-ai/provider-local", "zk-app/ai"]
+ai = ["dep:futures", "dep:toml", "dep:zk-ai", "dep:zk-index", "zk-ai/provider-local", "zk-app/ai"]
 ai-local = ["ai"]
 test-stub-ai = ["ai"]

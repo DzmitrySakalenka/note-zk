@@ -34,6 +34,7 @@ fn auth_scope_serde_round_trip() {
         (AuthScope::Sync, "sync"),
         (AuthScope::Read, "read"),
         (AuthScope::Admin, "admin"),
+        (AuthScope::Chat, "chat"),
     ] {
         let serialized = serde_json::to_string(&scope).expect("scope should serialize");
 
@@ -59,6 +60,7 @@ fn auth_scope_parses_stable_lowercase_names() {
         ("sync", AuthScope::Sync),
         ("read", AuthScope::Read),
         ("admin", AuthScope::Admin),
+        ("chat", AuthScope::Chat),
     ] {
         let parsed = raw.parse::<AuthScope>().expect("scope should parse");
 

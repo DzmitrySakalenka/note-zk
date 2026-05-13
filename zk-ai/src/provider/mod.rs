@@ -1,24 +1,37 @@
-//! Embeddings provider traits and concrete provider backends.
+//! AI provider traits and concrete provider backends.
 
 use async_trait::async_trait;
 use zk_domain::{EmbeddingModelId, EmbeddingVector, ProviderId};
 
 use crate::{AiError, AiResult};
 
+/// Chat completion provider trait and streaming DTOs.
+pub mod chat;
 /// Local Candle-backed embeddings provider.
 #[cfg(feature = "provider-local")]
 pub mod local_candle;
 /// OpenAI-compatible HTTP embeddings provider.
 #[cfg(feature = "provider-http")]
 pub mod remote_http;
+/// OpenAI-compatible HTTP chat provider.
+#[cfg(feature = "provider-http")]
+pub mod remote_http_chat;
 /// Deterministic test embeddings provider.
 pub mod stub;
+/// Deterministic test chat provider.
+pub mod stub_chat;
 
+pub use chat::{
+    ChatCapability, ChatChunk, ChatMessage, ChatProvider, ChatRequest, ChatUsage, FinishReason,
+};
 #[cfg(feature = "provider-local")]
 pub use local_candle::{LocalDevice, LocalEmbeddingsConfig, LocalEmbeddingsProvider};
 #[cfg(feature = "provider-http")]
 pub use remote_http::{RemoteEmbeddingsConfig, RemoteEmbeddingsProvider};
+#[cfg(feature = "provider-http")]
+pub use remote_http_chat::{RemoteHttpChatConfig, RemoteHttpChatProvider};
 pub use stub::StubEmbeddingsProvider;
+pub use stub_chat::StubChatProvider;
 
 /// Async provider interface for batched embedding generation.
 #[async_trait]
