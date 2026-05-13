@@ -24,6 +24,7 @@ mod scan;
 mod status;
 mod trash;
 mod trash_path;
+mod wiki;
 mod write;
 mod write_policy;
 
@@ -92,6 +93,8 @@ pub use sync::{
     BootstrapOutcome, DeviceSyncStatus, PullApplyOutcome, PushApplyOutcome, SyncContext, bootstrap,
     get_device_sync_status, plan_and_push, pull_and_apply, register_device,
 };
+#[rustfmt::skip]
+pub use wiki::{list_pages_using_source, list_sources_for_note};
 #[cfg(feature = "ai")]
 #[rustfmt::skip]
 pub use ai::{
