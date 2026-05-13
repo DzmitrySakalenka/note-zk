@@ -208,18 +208,21 @@ fn scan_marks_note_immutability_using_longest_prefix_match() {
             "raw".to_string(),
             FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         ),
         (
             "raw/safe".to_string(),
             FolderPolicy {
                 immutable: Some(false),
+                derived: None,
             },
         ),
         (
             "wiki/meta".to_string(),
             FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         ),
     ]);

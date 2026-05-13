@@ -54,12 +54,14 @@ fn merge_uses_vault_for_vault_scoped_fields_when_cli_missing() {
                 "raw".to_string(),
                 FolderPolicy {
                     immutable: Some(true),
+                    derived: None,
                 },
             ),
             (
                 "wiki/meta".to_string(),
                 FolderPolicy {
                     immutable: Some(false),
+                    derived: None,
                 },
             ),
         ]),
@@ -99,6 +101,7 @@ fn merge_cli_overrides_vault_and_global() {
             "raw".to_string(),
             FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         )]),
     };
@@ -149,6 +152,7 @@ fn merge_is_deterministic_for_identical_inputs() {
             "raw".to_string(),
             FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         )]),
     };
@@ -303,12 +307,14 @@ fn folder_policy_resolution_prefers_most_specific_prefix() {
             "raw".to_string(),
             FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         ),
         (
             "raw/drafts".to_string(),
             FolderPolicy {
                 immutable: Some(false),
+                derived: None,
             },
         ),
     ]);
@@ -324,6 +330,7 @@ fn folder_policy_resolution_uses_less_specific_prefix_when_needed() {
         "raw".to_string(),
         FolderPolicy {
             immutable: Some(true),
+            derived: None,
         },
     )]);
 
@@ -338,6 +345,7 @@ fn folder_policy_resolution_returns_none_without_matching_prefix() {
         "raw".to_string(),
         FolderPolicy {
             immutable: Some(true),
+            derived: None,
         },
     )]);
 

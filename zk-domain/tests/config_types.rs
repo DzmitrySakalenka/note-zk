@@ -131,6 +131,32 @@ immutable = true
 }
 
 #[test]
+fn vault_config_round_trips_derived_folder_policy() {
+    let input = r#"
+[folders."wiki/"]
+derived = true
+"#;
+
+    let parsed: VaultConfig = toml::from_str(input).expect("parse derived folder policy");
+    let wiki_policy = parsed
+        .folders
+        .get("wiki/")
+        .expect("wiki folder policy should deserialize");
+    assert_eq!(wiki_policy.immutable, None);
+    assert_eq!(wiki_policy.derived, Some(true));
+
+    let serialized = toml::to_string(&parsed).expect("vault config should serialize");
+    assert!(
+        serialized.contains("derived = true"),
+        "serialized config should preserve derived flag: {serialized}"
+    );
+
+    let reparsed: VaultConfig =
+        toml::from_str(&serialized).expect("serialized vault config should parse");
+    assert_eq!(reparsed, parsed);
+}
+
+#[test]
 fn vault_config_deserializes_validation_section() {
     let input = r#"
 [validation]

@@ -93,7 +93,8 @@ immutable = true
         BTreeMap::from([(
             "raw".to_string(),
             FolderPolicy {
-                immutable: Some(true)
+                immutable: Some(true),
+                derived: None,
             },
         )])
     );

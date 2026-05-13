@@ -54,8 +54,14 @@ pub struct SyncConfig {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
 /// Per-folder policy flags that tune scan and write behavior.
 pub struct FolderPolicy {
+    #[serde(default)]
     /// Marks folder content as readable but immutable for normalization writes.
     pub immutable: Option<bool>,
+    #[serde(default)]
+    /// Marks system-derived content whose future sync conflicts use last-write-wins.
+    ///
+    /// ADR 0016 will define the conflict-policy implications.
+    pub derived: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]

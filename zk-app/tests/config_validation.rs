@@ -143,6 +143,7 @@ fn validate_effective_config_rejects_invalid_folder_prefix() {
             "../raw".to_string(),
             FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         )]),
         ..EffectiveConfig::default()
@@ -167,6 +168,7 @@ fn validate_effective_config_rejects_absolute_folder_prefix_variants() {
                 invalid_prefix.to_string(),
                 FolderPolicy {
                     immutable: Some(true),
+                    derived: None,
                 },
             )]),
             ..EffectiveConfig::default()
@@ -189,6 +191,7 @@ fn resolve_folder_policy_matches_exact_prefix_and_nested_paths() {
         "raw".to_string(),
         FolderPolicy {
             immutable: Some(true),
+            derived: None,
         },
     )]);
 
@@ -210,6 +213,47 @@ fn resolve_folder_policy_matches_exact_prefix_and_nested_paths() {
         non_match.is_none(),
         "path with only partial segment overlap should not match"
     );
+}
+
+#[test]
+fn validate_effective_config_accepts_derived_folder_policy() {
+    let config = EffectiveConfig {
+        folders: BTreeMap::from([(
+            "wiki".to_string(),
+            FolderPolicy {
+                immutable: None,
+                derived: Some(true),
+            },
+        )]),
+        ..EffectiveConfig::default()
+    };
+
+    validate_effective_config(&config).expect("derived-only folder policy should validate");
+}
+
+#[test]
+fn validate_effective_config_rejects_immutable_derived_folder_policy() {
+    let config = EffectiveConfig {
+        folders: BTreeMap::from([(
+            "wiki".to_string(),
+            FolderPolicy {
+                immutable: Some(true),
+                derived: Some(true),
+            },
+        )]),
+        ..EffectiveConfig::default()
+    };
+
+    let err = validate_effective_config(&config)
+        .expect_err("immutable and derived folder policy should fail");
+    match err {
+        ConfigValidationError::InvalidFolderPolicy { prefix, reason } => {
+            assert_eq!(prefix, "wiki".to_string());
+            assert!(reason.contains("immutable"));
+            assert!(reason.contains("derived"));
+        }
+        other => panic!("expected InvalidFolderPolicy, got {other:?}"),
+    }
 }
 
 // ==========================================================================

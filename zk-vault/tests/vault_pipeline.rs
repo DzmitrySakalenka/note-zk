@@ -298,6 +298,7 @@ fn apply_normalization_skips_immutable_notes() {
         "raw".to_string(),
         FolderPolicy {
             immutable: Some(true),
+            derived: None,
         },
     )]);
 

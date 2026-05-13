@@ -102,4 +102,4 @@ pub use ai::{
     ListConversationsParams, LocalEmbeddingsRepoHandle, MessageDto, RecomputeLocalSummary,
     SemanticSearchRequest,
 };
-pub use write_policy::{ensure_writable, is_path_immutable};
+pub use write_policy::{ensure_writable, is_path_derived, is_path_immutable};

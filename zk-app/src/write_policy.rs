@@ -14,6 +14,16 @@ pub fn is_path_immutable(
         .is_some_and(|policy| policy.immutable == Some(true))
 }
 
+/// Returns whether a vault-relative path is marked as system-derived content.
+#[must_use]
+pub fn is_path_derived(
+    relative_path: &RelativePath,
+    folders: &BTreeMap<String, FolderPolicy>,
+) -> bool {
+    resolve_folder_policy(relative_path.as_str(), folders)
+        .is_some_and(|policy| policy.derived == Some(true))
+}
+
 /// Ensures writes to a vault-relative path are allowed by folder policy.
 ///
 /// # Errors

@@ -106,6 +106,14 @@ pub enum ConfigValidationError {
         /// Reason describing why the prefix was rejected.
         reason: String,
     },
+    /// A folder policy flag combination was invalid.
+    #[error("invalid folder policy for '{prefix}': {reason}")]
+    InvalidFolderPolicy {
+        /// Folder prefix whose policy failed validation.
+        prefix: String,
+        /// Reason describing why the policy was rejected.
+        reason: String,
+    },
     /// The configured trash directory path was invalid.
     #[error("invalid trash_dir '{trash_dir}': {reason}")]
     InvalidTrashDir {
@@ -407,9 +415,24 @@ fn validate_non_empty_path(field: &'static str, path: &Path) -> Result<(), Confi
 fn validate_folder_prefixes(
     folders: &BTreeMap<String, FolderPolicy>,
 ) -> Result<(), ConfigValidationError> {
-    for prefix in folders.keys() {
+    for (prefix, policy) in folders {
         validate_folder_prefix(prefix)?;
+        validate_folder_policy(prefix, policy)?;
     }
+    Ok(())
+}
+
+fn validate_folder_policy(
+    prefix: &str,
+    policy: &FolderPolicy,
+) -> Result<(), ConfigValidationError> {
+    if policy.immutable == Some(true) && policy.derived == Some(true) {
+        return Err(ConfigValidationError::InvalidFolderPolicy {
+            prefix: prefix.to_string(),
+            reason: "folder cannot set both immutable = true and derived = true".to_string(),
+        });
+    }
+
     Ok(())
 }
 

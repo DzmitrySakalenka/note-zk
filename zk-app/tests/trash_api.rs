@@ -711,6 +711,7 @@ fn restore_note_rejects_immutable_destination_without_touching_file_or_db() {
             "raw".to_string(),
             FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         )]),
         ..EffectiveConfig::default()
@@ -1234,6 +1235,7 @@ fn trash_note_rejects_immutable_folder_without_touching_file_or_db() {
             "raw".to_string(),
             FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         )]),
         ..EffectiveConfig::default()
