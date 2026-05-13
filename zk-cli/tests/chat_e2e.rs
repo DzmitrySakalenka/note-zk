@@ -2,6 +2,8 @@
 #![allow(unused_crate_dependencies)]
 #![cfg(feature = "ai")]
 
+// Real-router chat authentication is covered in chat_real_server_e2e.rs.
+
 use std::{
     fs,
     path::{Path, PathBuf},
