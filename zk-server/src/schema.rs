@@ -174,6 +174,17 @@ const CREATE_TABLE_MESSAGE_CITATIONS: &str = r"CREATE TABLE message_citations (
   PRIMARY KEY (message_id, ordinal)
 )";
 
+const CREATE_TABLE_WIKI_LINT_FINDINGS: &str = r"CREATE TABLE wiki_lint_findings (
+  finding_id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL REFERENCES ai_jobs(job_id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  page_id TEXT REFERENCES notes(note_id) ON DELETE SET NULL,
+  source_id TEXT REFERENCES notes(note_id) ON DELETE SET NULL,
+  message TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  created_at TEXT NOT NULL
+)";
+
 const CREATE_INDEX_SYNC_EVENTS_ITEM: &str =
     "CREATE INDEX idx_sync_events_item ON sync_events(item_id, item_type)";
 const CREATE_INDEX_NOTES_PATH: &str =
@@ -210,6 +221,11 @@ const CREATE_INDEX_MESSAGES_REQUEST: &str = r"CREATE INDEX IF NOT EXISTS idx_mes
   WHERE request_id IS NOT NULL";
 const CREATE_INDEX_MESSAGE_CITATIONS_NOTE: &str =
     "CREATE INDEX idx_message_citations_note ON message_citations(note_id)";
+const CREATE_INDEX_WIKI_LINT_FINDINGS_JOB: &str =
+    "CREATE INDEX idx_wiki_lint_findings_job ON wiki_lint_findings(job_id)";
+const CREATE_INDEX_WIKI_LINT_FINDINGS_PAGE: &str = r"CREATE INDEX idx_wiki_lint_findings_page
+  ON wiki_lint_findings(page_id)
+  WHERE page_id IS NOT NULL";
 const DROP_INDEX_SYNC_EVENTS_SEQ: &str = "DROP INDEX IF EXISTS idx_sync_events_seq";
 const DROP_INDEX_DEVICE_TOKENS_HASH: &str = "DROP INDEX IF EXISTS idx_device_tokens_hash";
 const DROP_INDEX_USERS_USERNAME: &str = "DROP INDEX IF EXISTS idx_users_username";
@@ -265,22 +281,29 @@ pub(crate) const V4_INDEX_DDL: &[&str] = &[
     CREATE_INDEX_MESSAGE_CITATIONS_NOTE,
 ];
 
-pub(crate) const V5_TABLE_DDL: &[&str] = &[];
+pub(crate) const V5_TABLE_DDL: &[&str] = &[CREATE_TABLE_WIKI_LINT_FINDINGS];
 
-pub(crate) const V5_INDEX_DDL: &[&str] =
+pub(crate) const V5_INDEX_DDL: &[&str] = &[
+    CREATE_INDEX_WIKI_LINT_FINDINGS_JOB,
+    CREATE_INDEX_WIKI_LINT_FINDINGS_PAGE,
+];
+
+pub(crate) const V6_TABLE_DDL: &[&str] = &[];
+
+pub(crate) const V6_INDEX_DDL: &[&str] =
     &[CREATE_INDEX_NOTES_REVISION, CREATE_INDEX_ASSETS_REVISION];
 
-pub(crate) const V6_TABLE_DDL: &[&str] = &[ALTER_TABLE_MESSAGES_ADD_REQUEST_ID];
+pub(crate) const V7_TABLE_DDL: &[&str] = &[ALTER_TABLE_MESSAGES_ADD_REQUEST_ID];
 
-pub(crate) const V6_INDEX_DDL: &[&str] = &[CREATE_INDEX_MESSAGES_REQUEST];
+pub(crate) const V7_INDEX_DDL: &[&str] = &[CREATE_INDEX_MESSAGES_REQUEST];
 
-pub(crate) const V7_TABLE_DDL: &[&str] = &[ALTER_TABLE_DEVICE_TOKENS_ADD_USER_ID];
+pub(crate) const V8_TABLE_DDL: &[&str] = &[ALTER_TABLE_DEVICE_TOKENS_ADD_USER_ID];
 
-pub(crate) const V7_INDEX_DDL: &[&str] = &[];
+pub(crate) const V8_INDEX_DDL: &[&str] = &[];
 
-pub(crate) const V8_TABLE_DDL: &[&str] = &[];
+pub(crate) const V9_TABLE_DDL: &[&str] = &[];
 
-pub(crate) const V8_INDEX_DDL: &[&str] = &[
+pub(crate) const V9_INDEX_DDL: &[&str] = &[
     DROP_INDEX_SYNC_EVENTS_SEQ,
     DROP_INDEX_DEVICE_TOKENS_HASH,
     DROP_INDEX_USERS_USERNAME,

@@ -4,7 +4,7 @@
 use rusqlite::Connection;
 use zk_server::migration::ensure_schema;
 
-const CURRENT_SCHEMA_VERSION: i64 = 8;
+const CURRENT_SCHEMA_VERSION: i64 = 9;
 const REDUNDANT_INDEXES: &[&str] = &[
     "idx_sync_events_seq",
     "idx_device_tokens_hash",
@@ -108,7 +108,7 @@ fn assert_plan_uses_rowid(plan_details: &[String]) {
     );
 }
 
-fn create_v7_redundant_index_fixture(connection: &Connection) {
+fn create_v8_redundant_index_fixture(connection: &Connection) {
     connection
         .execute(
             "CREATE TABLE server_schema_version (
@@ -166,16 +166,16 @@ fn create_v7_redundant_index_fixture(connection: &Connection) {
         .expect("legacy username index should be created");
     connection
         .execute(
-            "INSERT INTO server_schema_version (id, version) VALUES (1, 7)",
+            "INSERT INTO server_schema_version (id, version) VALUES (1, 8)",
             [],
         )
-        .expect("V7 schema version should be inserted");
+        .expect("V8 schema version should be inserted");
 }
 
 #[test]
-fn migrating_from_v7_drops_redundant_indexes() {
+fn migrating_from_v8_drops_redundant_indexes() {
     let connection = Connection::open_in_memory().expect("in-memory database should open");
-    create_v7_redundant_index_fixture(&connection);
+    create_v8_redundant_index_fixture(&connection);
 
     ensure_schema(&connection).expect("schema migration should succeed");
 

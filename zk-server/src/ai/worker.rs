@@ -43,11 +43,12 @@ use crate::{
     ai::{
         chat_runtime::{ChatRuntimeError, build_chat_service},
         ingest_wiki::{IngestSourceService, WikiIngestError, WikiIngestPlan, WikiVocabulary},
+        lint_wiki::{LintWikiService, WikiLintError},
     },
     config::{AiChatConfig, AiChatProviderKind, AiConfig, AiProviderKind},
     repo::{
         AiJob, AiJobKind, AiJobsRepo, ChunksRepo, ConversationsRepo, EmbeddingsRepo, NoteRow,
-        NotesRepo,
+        NotesRepo, WikiLintFindingsRepo, WikiLintScope,
     },
     service::{RecordNoteChange, next_server_revision, record_note_change},
 };
@@ -311,7 +312,16 @@ async fn process_job(deps: &AiWorkerDeps, job: &AiJob) -> Result<(), AiWorkerErr
                 .instrument(span)
                 .await
         }
-        AiJobKind::LintWiki { .. } => Err(AiWorkerError::NotYetImplemented("lint_wiki")),
+        AiJobKind::LintWiki { scope, request_id } => {
+            let span = tracing::span!(
+                Level::INFO,
+                "lint_wiki_job",
+                job_id = %job.job_id,
+                request_id = %request_id
+            );
+            let _entered = span.enter();
+            process_lint_wiki(deps, &job.job_id, scope)
+        }
     }
 }
 
@@ -743,6 +753,31 @@ fn enqueue_recompute_for_changed_pages(
     Ok(())
 }
 
+fn process_lint_wiki(
+    deps: &AiWorkerDeps,
+    job_id: &zk_domain::JobId,
+    scope: &WikiLintScope,
+) -> Result<(), AiWorkerError> {
+    if deps.app_config.wiki.is_none() {
+        return Err(AiWorkerError::WikiConfigMissing);
+    }
+
+    let local_connection = zk_app::bootstrap_index_connection(&deps.app_config)?;
+    let findings = LintWikiService::new().lint(
+        &local_connection,
+        &deps.vault_root,
+        &deps.app_config,
+        scope,
+    )?;
+    deps.db.with_tx(|transaction| {
+        WikiLintFindingsRepo::new(transaction)
+            .insert_many(job_id, &findings, Utc::now())
+            .map(|_| ())
+    })?;
+
+    Ok(())
+}
+
 fn path_for_note_id(deps: &AiWorkerDeps, note_id: &NoteId) -> Result<RelativePath, AiWorkerError> {
     let index = zk_vault::build_note_path_index(&deps.vault_root, &deps.app_config)?.index;
     index
@@ -1017,6 +1052,8 @@ enum AiWorkerError {
     #[error(transparent)]
     WikiIngest(#[from] WikiIngestError),
     #[error(transparent)]
+    WikiLint(#[from] WikiLintError),
+    #[error(transparent)]
     Vault(#[from] zk_vault::error::VaultError),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
@@ -1028,8 +1065,6 @@ enum AiWorkerError {
     MissingFrontmatter(RelativePath),
     #[error("conversation not found: {0}")]
     ConversationNotFound(ConversationId),
-    #[error("{0} not yet implemented")]
-    NotYetImplemented(&'static str),
     #[error("batch write failed: {failures:?}")]
     BatchWriteFailed {
         failures: Vec<zk_app::BatchWriteFailure>,

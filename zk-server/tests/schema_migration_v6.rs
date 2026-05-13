@@ -4,10 +4,11 @@
 use rusqlite::Connection;
 use zk_server::migration::ensure_schema;
 
-const CURRENT_SCHEMA_VERSION: i64 = 8;
-const MESSAGES_TABLE: &str = "messages";
-const REQUEST_ID_COLUMN: &str = "request_id";
-const REQUEST_ID_INDEX: &str = "idx_messages_request";
+const CURRENT_SCHEMA_VERSION: i64 = 9;
+const EXPECTED_V5_INDEXES: &[(&str, &str)] = &[
+    ("notes", "idx_notes_revision"),
+    ("assets", "idx_assets_revision"),
+];
 
 fn query_schema_version(connection: &Connection) -> i64 {
     connection
@@ -17,19 +18,6 @@ fn query_schema_version(connection: &Connection) -> i64 {
             |row| row.get(0),
         )
         .expect("schema version query should succeed")
-}
-
-fn column_names(connection: &Connection, table_name: &str) -> Vec<String> {
-    let query = format!("PRAGMA table_info('{table_name}')");
-    let mut statement = connection
-        .prepare(&query)
-        .expect("table info should prepare");
-    let rows = statement
-        .query_map([], |row| row.get::<_, String>(1))
-        .expect("table info should execute");
-
-    rows.collect::<Result<Vec<_>, _>>()
-        .expect("column names should decode")
 }
 
 fn index_names(connection: &Connection, table_name: &str) -> Vec<String> {
@@ -45,30 +33,7 @@ fn index_names(connection: &Connection, table_name: &str) -> Vec<String> {
         .expect("index names should decode")
 }
 
-fn create_v5_messages_fixture(connection: &Connection) {
-    connection
-        .execute(
-            "CREATE TABLE server_schema_version (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                version INTEGER NOT NULL
-            )",
-            [],
-        )
-        .expect("schema version table should be created");
-    connection
-        .execute(
-            "CREATE TABLE messages (
-                message_id TEXT PRIMARY KEY,
-                conversation_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                token_count INTEGER,
-                created_at TEXT NOT NULL,
-                server_revision INTEGER
-            )",
-            [],
-        )
-        .expect("messages table should be created");
+fn create_auth_tables(connection: &Connection) {
     connection
         .execute(
             "CREATE TABLE devices (
@@ -111,6 +76,73 @@ fn create_v5_messages_fixture(connection: &Connection) {
             [],
         )
         .expect("users table should be created");
+}
+
+fn create_v5_revision_fixture(connection: &Connection) {
+    connection
+        .execute(
+            "CREATE TABLE server_schema_version (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                version INTEGER NOT NULL
+            )",
+            [],
+        )
+        .expect("schema version table should be created");
+    connection
+        .execute(
+            "CREATE TABLE notes (
+                note_id TEXT PRIMARY KEY,
+                current_path TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                body_markdown TEXT NOT NULL,
+                frontmatter_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                trashed_at TEXT,
+                deleted_at TEXT,
+                is_trashed INTEGER NOT NULL DEFAULT 0,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                last_editor_device_id TEXT,
+                server_revision INTEGER NOT NULL
+            )",
+            [],
+        )
+        .expect("notes table should be created");
+    create_auth_tables(connection);
+    connection
+        .execute(
+            "CREATE TABLE assets (
+                asset_id TEXT PRIMARY KEY,
+                current_path TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                mime_type TEXT,
+                size_bytes INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                trashed_at TEXT,
+                deleted_at TEXT,
+                is_trashed INTEGER NOT NULL DEFAULT 0,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                server_revision INTEGER NOT NULL
+            )",
+            [],
+        )
+        .expect("assets table should be created");
+    connection
+        .execute(
+            "CREATE TABLE messages (
+                message_id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                token_count INTEGER,
+                created_at TEXT NOT NULL,
+                server_revision INTEGER
+            )",
+            [],
+        )
+        .expect("messages table should be created");
     connection
         .execute(
             "INSERT INTO server_schema_version (id, version) VALUES (1, 5)",
@@ -120,23 +152,19 @@ fn create_v5_messages_fixture(connection: &Connection) {
 }
 
 #[test]
-fn migrating_from_v5_adds_message_request_id_lookup() {
+fn migrating_from_v5_creates_revision_indexes() {
     let connection = Connection::open_in_memory().expect("in-memory database should open");
-    create_v5_messages_fixture(&connection);
+    create_v5_revision_fixture(&connection);
 
     ensure_schema(&connection).expect("schema migration should succeed");
 
     assert_eq!(query_schema_version(&connection), CURRENT_SCHEMA_VERSION);
-    assert!(
-        column_names(&connection, MESSAGES_TABLE)
-            .iter()
-            .any(|column| column == REQUEST_ID_COLUMN),
-        "expected messages.request_id to exist",
-    );
-    assert!(
-        index_names(&connection, MESSAGES_TABLE)
-            .iter()
-            .any(|index| index == REQUEST_ID_INDEX),
-        "expected messages request-id lookup index to exist",
-    );
+    for (table_name, index_name) in EXPECTED_V5_INDEXES {
+        let indexes = index_names(&connection, table_name);
+
+        assert!(
+            indexes.iter().any(|name| name == index_name),
+            "expected {table_name} to include index {index_name}; found {indexes:?}",
+        );
+    }
 }
