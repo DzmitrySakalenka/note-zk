@@ -10,7 +10,7 @@ use zk_domain::AuthScope;
 
 use crate::{
     ServerError, ServerResult,
-    ai::worker::{AiWorkerDeps, spawn_ai_job_worker},
+    ai::worker::{AiWorkerDeps, app_config_from_vault_root, spawn_ai_job_worker},
     auth::{require_auth_layer, require_scope_layer},
     http::{
         ApiError, admin_routes, ai_chat_routes, auth_routes, health::health, search_routes,
@@ -132,6 +132,8 @@ fn spawn_configured_ai_worker(
             selector,
             config,
             vault_root: state.config().vault_path.clone(),
+            app_config: app_config_from_vault_root(&state.config().vault_path),
+            worker_device_id: zk_domain::id::DeviceId::new("server-ai-worker"),
         },
         shutdown,
     ))

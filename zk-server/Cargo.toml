@@ -37,6 +37,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 ulid = "1.2.1"
 zk-ai = { version = "0.1.0", path = "../zk-ai", features = ["provider-http", "provider-local"] }
+zk-app = { version = "0.1.0", path = "../zk-app" }
 zk-auth = { version = "0.1.0", path = "../zk-auth" }
 zk-backup = { version = "0.1.0", path = "../zk-backup" }
 zk-domain = { path = "../zk-domain" }

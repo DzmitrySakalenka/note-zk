@@ -24,7 +24,7 @@ use zk_ai::{
 };
 use zk_domain::{
     ConversationId, EmbeddingModelId, ExecutionMode, JobId, MessageRecord, MessageRole, ProviderId,
-    ProviderSelectorPolicy, auth::UserId,
+    ProviderSelectorPolicy, auth::UserId, config::EffectiveConfig, id::DeviceId,
 };
 use zk_server::{
     ServerDb,
@@ -232,6 +232,11 @@ impl WorkerChatFixture {
             selector,
             config,
             vault_root: self.vault_root.clone(),
+            app_config: EffectiveConfig {
+                vault_path: self.vault_root.clone(),
+                ..EffectiveConfig::default()
+            },
+            worker_device_id: DeviceId::new("server-ai-worker-test"),
         }
     }
 

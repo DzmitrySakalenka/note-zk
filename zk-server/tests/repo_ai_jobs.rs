@@ -407,7 +407,7 @@ fn enqueue_ingest_source_reuses_active_job() {
 }
 
 #[test]
-fn enqueue_ingest_source_allows_new_job_after_terminal_status() {
+fn enqueue_ingest_source_reuses_terminal_job() {
     let connection = setup_connection();
     let repo = AiJobsRepo::new(&connection);
     let kind = ingest_source_kind();
@@ -420,27 +420,38 @@ fn enqueue_ingest_source_allows_new_job_after_terminal_status() {
     repo.mark_done(&done_job.job_id, parse_timestamp("2026-05-05T10:02:00Z"))
         .expect("done job should mark done");
 
-    let failed_job = repo
+    let done_duplicate = repo
         .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:03:00Z"))
+        .expect("done duplicate enqueue should succeed");
+
+    assert_eq!(done_duplicate.job_id, done_job.job_id);
+    assert_eq!(done_duplicate.status, AiJobStatus::Done);
+
+    let failed_kind = AiJobKind::IngestSource {
+        source_note_id: other_note_id(),
+        request_id: "req-ingest-source-failed".to_string(),
+    };
+    let failed_job = repo
+        .enqueue(failed_kind.clone(), parse_timestamp("2026-05-05T10:04:00Z"))
         .expect("failed job enqueue should succeed");
-    repo.claim_next(1, parse_timestamp("2026-05-05T10:04:00Z"))
+    repo.claim_next(1, parse_timestamp("2026-05-05T10:05:00Z"))
         .expect("failed job claim should succeed")
         .expect("failed job should be claimed");
     repo.mark_failed(
         &failed_job.job_id,
         "failed",
         1,
-        parse_timestamp("2026-05-05T10:05:00Z"),
+        parse_timestamp("2026-05-05T10:06:00Z"),
     )
     .expect("failed job should mark failed");
 
-    let pending_job = repo
-        .enqueue(kind, parse_timestamp("2026-05-05T10:06:00Z"))
-        .expect("pending job enqueue should succeed");
+    let failed_duplicate = repo
+        .enqueue(failed_kind, parse_timestamp("2026-05-05T10:07:00Z"))
+        .expect("failed duplicate enqueue should succeed");
 
     assert_ne!(failed_job.job_id, done_job.job_id);
-    assert_ne!(pending_job.job_id, failed_job.job_id);
-    assert_eq!(pending_job.status, AiJobStatus::Pending);
+    assert_eq!(failed_duplicate.job_id, failed_job.job_id);
+    assert_eq!(failed_duplicate.status, AiJobStatus::Failed);
 }
 
 #[test]

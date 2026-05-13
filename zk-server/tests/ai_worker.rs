@@ -23,7 +23,8 @@ use zk_ai::{
 };
 use zk_domain::{
     EmbeddingModelId, EmbeddingVector, ExecutionMode, JobId, ProviderId, ProviderSelectorPolicy,
-    id::{ContentHash, NoteId},
+    config::EffectiveConfig,
+    id::{ContentHash, DeviceId, NoteId},
 };
 use zk_server::{
     ServerDb,
@@ -206,8 +207,8 @@ async fn recompute_vault_enqueues_note_jobs_and_marks_vault_job_done() {
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn ingest_source_job_fails_with_stub_error() {
-    let fixture = WorkerFixture::new("ai-worker-ingest-source-stub");
+async fn ingest_source_job_fails_without_wiki_config() {
+    let fixture = WorkerFixture::new("ai-worker-ingest-source-no-wiki");
     let source_note_id = note_id("01JAR5A3PJEZ3SKG67PN8N6S71");
     let job = fixture.enqueue(AiJobKind::IngestSource {
         source_note_id,
@@ -231,7 +232,7 @@ async fn ingest_source_job_fails_with_stub_error() {
         failed
             .last_error
             .as_deref()
-            .is_some_and(|error| error.contains("not yet implemented")),
+            .is_some_and(|error| error.contains("wiki config missing")),
         "last_error was {:?}",
         failed.last_error
     );
@@ -260,6 +261,11 @@ impl WorkerFixture {
             selector,
             config,
             vault_root: self.vault_root.clone(),
+            app_config: EffectiveConfig {
+                vault_path: self.vault_root.clone(),
+                ..EffectiveConfig::default()
+            },
+            worker_device_id: DeviceId::new("server-ai-worker-test"),
         }
     }
 

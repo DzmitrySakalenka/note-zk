@@ -33,7 +33,7 @@ SELECT EXISTS (
       AND payload_json = ?1
 )
 ";
-const FIND_ACTIVE_AI_JOB_BY_KIND_AND_PAYLOAD_SQL: &str = r"
+const FIND_AI_JOB_BY_KIND_AND_PAYLOAD_SQL: &str = r"
 SELECT
     job_id,
     kind,
@@ -47,7 +47,6 @@ SELECT
 FROM ai_jobs
 WHERE kind = ?1
   AND payload_json = ?2
-  AND status IN ('pending', 'in_flight')
 ORDER BY enqueued_at ASC, job_id ASC
 LIMIT 1
 ";
@@ -298,7 +297,7 @@ impl<'a> AiJobsRepo<'a> {
         let payload_json = encode_payload_json(&kind)?;
 
         if matches!(&kind, AiJobKind::IngestSource { .. })
-            && let Some(job) = self.find_active_by_kind_and_payload(kind_name, &payload_json)?
+            && let Some(job) = self.find_by_kind_and_payload(kind_name, &payload_json)?
         {
             return Ok(job);
         }
@@ -483,14 +482,14 @@ impl<'a> AiJobsRepo<'a> {
             .map_err(ServerError::Database)
     }
 
-    fn find_active_by_kind_and_payload(
+    fn find_by_kind_and_payload(
         &self,
         kind_name: &str,
         payload_json: &str,
     ) -> ServerResult<Option<AiJob>> {
         let mut statement = self
             .conn
-            .prepare_cached(FIND_ACTIVE_AI_JOB_BY_KIND_AND_PAYLOAD_SQL)
+            .prepare_cached(FIND_AI_JOB_BY_KIND_AND_PAYLOAD_SQL)
             .map_err(ServerError::Database)?;
 
         statement
