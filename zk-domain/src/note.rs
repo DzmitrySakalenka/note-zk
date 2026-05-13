@@ -158,6 +158,12 @@ pub enum RuleId {
     AmbiguousLink,
     /// Outbound asset reference points at a missing or invalid asset.
     BrokenAssetRef,
+    /// Wiki page type starts with `wiki-` but is not a known wiki type.
+    WikiUnknownType,
+    /// Authored wiki page is missing provenance sources.
+    WikiSourceMissing,
+    /// Wiki index/log page is outside the configured wiki root.
+    WikiIndexOutsideWikiRoot,
 }
 
 impl RuleId {
@@ -183,6 +189,9 @@ impl RuleId {
             RuleId::UnresolvedLink => "unresolved note link",
             RuleId::AmbiguousLink => "ambiguous note link",
             RuleId::BrokenAssetRef => "broken asset reference",
+            RuleId::WikiUnknownType => "unknown wiki type",
+            RuleId::WikiSourceMissing => "wiki page missing sources",
+            RuleId::WikiIndexOutsideWikiRoot => "wiki index/log page outside wiki root",
         }
     }
 
@@ -208,6 +217,9 @@ impl RuleId {
             RuleId::UnresolvedLink => "unresolved-link",
             RuleId::AmbiguousLink => "ambiguous-link",
             RuleId::BrokenAssetRef => "broken-asset-ref",
+            RuleId::WikiUnknownType => "wiki-unknown-type",
+            RuleId::WikiSourceMissing => "wiki-source-missing",
+            RuleId::WikiIndexOutsideWikiRoot => "wiki-index-outside-wiki-root",
         }
     }
 }

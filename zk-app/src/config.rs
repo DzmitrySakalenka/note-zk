@@ -8,8 +8,9 @@ use std::{
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 use zk_domain::config::{
-    CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, NormalizationConfig, SyncConfig,
-    VaultConfig, resolve_folder_policy as domain_resolve_folder_policy,
+    CliOverrides, EffectiveConfig, EffectiveWikiConfig, FolderPolicy, GlobalConfig,
+    NormalizationConfig, SyncConfig, VaultConfig, WikiConfig,
+    resolve_folder_policy as domain_resolve_folder_policy,
 };
 use zk_domain::id::RelativePath;
 
@@ -264,6 +265,9 @@ pub fn merge_effective_config(
     if !vault.folders.is_empty() {
         merged.folders.clone_from(&vault.folders);
     }
+    if let Some(wiki) = &vault.wiki {
+        apply_wiki_config(wiki, &mut merged);
+    }
 
     if let Some(vault_path) = &cli.vault_path {
         merged.vault_path.clone_from(vault_path);
@@ -348,6 +352,49 @@ fn apply_sync_config(sync: &SyncConfig, merged: &mut EffectiveConfig) {
     if let Some(device_id) = &sync.device_id {
         merged.sync.device_id = Some(device_id.clone());
     }
+}
+
+fn apply_wiki_config(wiki: &WikiConfig, merged: &mut EffectiveConfig) {
+    let effective_wiki = EffectiveWikiConfig::from(wiki);
+    insert_generated_folder_policy(
+        &mut merged.folders,
+        &effective_wiki.index_path,
+        FolderPolicy {
+            immutable: None,
+            derived: Some(true),
+        },
+    );
+    insert_generated_folder_policy(
+        &mut merged.folders,
+        &effective_wiki.log_path,
+        FolderPolicy {
+            immutable: None,
+            derived: Some(true),
+        },
+    );
+    insert_generated_folder_policy(
+        &mut merged.folders,
+        &effective_wiki.raw_dir,
+        FolderPolicy {
+            immutable: Some(true),
+            derived: None,
+        },
+    );
+    merged.wiki = Some(effective_wiki);
+}
+
+fn insert_generated_folder_policy(
+    folders: &mut BTreeMap<String, FolderPolicy>,
+    path: &RelativePath,
+    policy: FolderPolicy,
+) {
+    if folders
+        .keys()
+        .any(|existing_path| RelativePath::new(existing_path) == *path)
+    {
+        return;
+    }
+    let _ = folders.insert(path.to_string(), policy);
 }
 
 fn validate_note_extensions(extensions: &[String]) -> Result<(), ConfigValidationError> {

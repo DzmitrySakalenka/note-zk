@@ -98,6 +98,9 @@ fn disabled_rules_parse_new_rule_ids() {
         "UnresolvedLink".to_string(),
         "AmbiguousLink".to_string(),
         "BrokenAssetRef".to_string(),
+        "WikiUnknownType".to_string(),
+        "WikiSourceMissing".to_string(),
+        "WikiIndexOutsideWikiRoot".to_string(),
     ];
 
     let rules: Vec<Box<dyn ValidationRule>> = vec![
@@ -126,6 +129,21 @@ fn disabled_rules_parse_new_rule_ids() {
             default_level: DiagnosticLevel::Warning,
             note_message: "broken asset reference",
         }),
+        Box::new(StubNoteRule {
+            id: RuleId::WikiUnknownType,
+            default_level: DiagnosticLevel::Warning,
+            note_message: "unknown wiki type",
+        }),
+        Box::new(StubNoteRule {
+            id: RuleId::WikiSourceMissing,
+            default_level: DiagnosticLevel::Warning,
+            note_message: "wiki page is missing sources",
+        }),
+        Box::new(StubNoteRule {
+            id: RuleId::WikiIndexOutsideWikiRoot,
+            default_level: DiagnosticLevel::Error,
+            note_message: "wiki index/log page outside wiki root",
+        }),
     ];
 
     let scan_result = sample_scan_result();
@@ -150,6 +168,12 @@ fn severity_overrides_parse_new_rule_ids() {
         ("UnresolvedLink".to_string(), "error".to_string()),
         ("AmbiguousLink".to_string(), "error".to_string()),
         ("BrokenAssetRef".to_string(), "error".to_string()),
+        ("WikiUnknownType".to_string(), "info".to_string()),
+        ("WikiSourceMissing".to_string(), "error".to_string()),
+        (
+            "WikiIndexOutsideWikiRoot".to_string(),
+            "warning".to_string(),
+        ),
     ]);
 
     let rules: Vec<Box<dyn ValidationRule>> = vec![
@@ -178,6 +202,21 @@ fn severity_overrides_parse_new_rule_ids() {
             default_level: DiagnosticLevel::Warning,
             note_message: "broken asset reference",
         }),
+        Box::new(StubNoteRule {
+            id: RuleId::WikiUnknownType,
+            default_level: DiagnosticLevel::Warning,
+            note_message: "unknown wiki type",
+        }),
+        Box::new(StubNoteRule {
+            id: RuleId::WikiSourceMissing,
+            default_level: DiagnosticLevel::Warning,
+            note_message: "wiki page is missing sources",
+        }),
+        Box::new(StubNoteRule {
+            id: RuleId::WikiIndexOutsideWikiRoot,
+            default_level: DiagnosticLevel::Error,
+            note_message: "wiki index/log page outside wiki root",
+        }),
     ];
 
     let scan_result = sample_scan_result();
@@ -189,16 +228,26 @@ fn severity_overrides_parse_new_rule_ids() {
         &rules,
     );
 
-    assert_eq!(report.findings.len(), 5);
+    assert_eq!(report.findings.len(), 8);
     assert!(report.findings.iter().any(|finding| {
         finding.rule == RuleId::InvalidFrontmatter && finding.level == DiagnosticLevel::Info
     }));
     assert!(report.findings.iter().any(|finding| {
         finding.rule == RuleId::TrashedUnknownIdentity && finding.level == DiagnosticLevel::Warning
     }));
-    assert_eq!(report.summary.error_count, 3);
-    assert_eq!(report.summary.warning_count, 1);
-    assert_eq!(report.summary.info_count, 1);
+    assert!(report.findings.iter().any(|finding| {
+        finding.rule == RuleId::WikiUnknownType && finding.level == DiagnosticLevel::Info
+    }));
+    assert!(report.findings.iter().any(|finding| {
+        finding.rule == RuleId::WikiSourceMissing && finding.level == DiagnosticLevel::Error
+    }));
+    assert!(report.findings.iter().any(|finding| {
+        finding.rule == RuleId::WikiIndexOutsideWikiRoot
+            && finding.level == DiagnosticLevel::Warning
+    }));
+    assert_eq!(report.summary.error_count, 4);
+    assert_eq!(report.summary.warning_count, 2);
+    assert_eq!(report.summary.info_count, 2);
 }
 
 #[test]
@@ -235,6 +284,21 @@ fn summary_sort_order_places_new_rule_ids_after_id_format_suspicious() {
             default_level: DiagnosticLevel::Warning,
             note_message: "unresolved note link",
         }),
+        Box::new(StubNoteRule {
+            id: RuleId::WikiUnknownType,
+            default_level: DiagnosticLevel::Warning,
+            note_message: "unknown wiki type",
+        }),
+        Box::new(StubNoteRule {
+            id: RuleId::WikiSourceMissing,
+            default_level: DiagnosticLevel::Warning,
+            note_message: "wiki page is missing sources",
+        }),
+        Box::new(StubNoteRule {
+            id: RuleId::WikiIndexOutsideWikiRoot,
+            default_level: DiagnosticLevel::Error,
+            note_message: "wiki index/log page outside wiki root",
+        }),
     ];
 
     let scan_result = sample_scan_result();
@@ -255,6 +319,9 @@ fn summary_sort_order_places_new_rule_ids_after_id_format_suspicious() {
             (RuleId::UnresolvedLink, 1),
             (RuleId::AmbiguousLink, 1),
             (RuleId::BrokenAssetRef, 1),
+            (RuleId::WikiUnknownType, 1),
+            (RuleId::WikiSourceMissing, 1),
+            (RuleId::WikiIndexOutsideWikiRoot, 1),
         ]
     );
 }

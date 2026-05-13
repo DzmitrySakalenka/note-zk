@@ -35,6 +35,8 @@ pub struct VaultConfig {
     pub normalization: Option<NormalizationConfig>,
     /// Optional validation behavior overrides for this vault.
     pub validation: Option<ValidationConfig>,
+    /// Optional wiki layout configuration.
+    pub wiki: Option<WikiConfig>,
     /// Optional sync settings that travel with this vault.
     pub sync: Option<SyncConfig>,
     #[serde(default)]
@@ -51,6 +53,50 @@ pub struct SyncConfig {
     pub bearer_token_env: Option<String>,
     /// Stable local device identifier.
     pub device_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+/// Vault-level wiki layout configuration.
+pub struct WikiConfig {
+    #[serde(default = "default_wiki_root_dir")]
+    /// Vault-relative root for generated wiki pages.
+    pub root_dir: String,
+    #[serde(default = "default_wiki_raw_dir")]
+    /// Vault-relative root for raw source material.
+    pub raw_dir: String,
+    #[serde(default = "default_wiki_index_file")]
+    /// Wiki index filename joined under `root_dir`.
+    pub index_file: String,
+    #[serde(default = "default_wiki_log_file")]
+    /// Wiki log filename joined under `root_dir`.
+    pub log_file: String,
+}
+
+impl Default for WikiConfig {
+    fn default() -> Self {
+        Self {
+            root_dir: default_wiki_root_dir(),
+            raw_dir: default_wiki_raw_dir(),
+            index_file: default_wiki_index_file(),
+            log_file: default_wiki_log_file(),
+        }
+    }
+}
+
+fn default_wiki_root_dir() -> String {
+    "wiki/".to_string()
+}
+
+fn default_wiki_raw_dir() -> String {
+    "raw/".to_string()
+}
+
+fn default_wiki_index_file() -> String {
+    "index.md".to_string()
+}
+
+fn default_wiki_log_file() -> String {
+    "log.md".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
@@ -132,6 +178,31 @@ impl Default for EffectiveSyncConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+/// Effective wiki layout with fully resolved vault-relative paths.
+pub struct EffectiveWikiConfig {
+    /// Effective vault-relative wiki root.
+    pub root_dir: RelativePath,
+    /// Effective vault-relative raw source root.
+    pub raw_dir: RelativePath,
+    /// Effective vault-relative wiki index path.
+    pub index_path: RelativePath,
+    /// Effective vault-relative wiki log path.
+    pub log_path: RelativePath,
+}
+
+impl From<&WikiConfig> for EffectiveWikiConfig {
+    fn from(config: &WikiConfig) -> Self {
+        let root_dir = RelativePath::new(&config.root_dir);
+        Self {
+            root_dir: root_dir.clone(),
+            raw_dir: RelativePath::new(&config.raw_dir),
+            index_path: join_relative_path(&root_dir, &config.index_file),
+            log_path: join_relative_path(&root_dir, &config.log_file),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 /// Fully merged, runtime-ready configuration used across crates.
 pub struct EffectiveConfig {
@@ -153,6 +224,8 @@ pub struct EffectiveConfig {
     pub validation: ValidationConfig,
     /// Effective folder policy map.
     pub folders: BTreeMap<String, FolderPolicy>,
+    /// Effective wiki layout when wiki mode is configured.
+    pub wiki: Option<EffectiveWikiConfig>,
     /// Effective sync client configuration.
     pub sync: EffectiveSyncConfig,
 }
@@ -169,8 +242,23 @@ impl Default for EffectiveConfig {
             allowed_note_extensions: vec!["md".to_string()],
             validation: ValidationConfig::default(),
             folders: BTreeMap::new(),
+            wiki: None,
             sync: EffectiveSyncConfig::default(),
         }
+    }
+}
+
+impl EffectiveConfig {
+    /// Returns the effective wiki index path when wiki mode is configured.
+    #[must_use]
+    pub fn wiki_index_path(&self) -> Option<RelativePath> {
+        self.wiki.as_ref().map(|wiki| wiki.index_path.clone())
+    }
+
+    /// Returns the effective wiki log path when wiki mode is configured.
+    #[must_use]
+    pub fn wiki_log_path(&self) -> Option<RelativePath> {
+        self.wiki.as_ref().map(|wiki| wiki.log_path.clone())
     }
 }
 
@@ -212,4 +300,15 @@ fn path_has_prefix(path: &str, prefix: &str) -> bool {
         || path
             .strip_prefix(prefix)
             .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn join_relative_path(parent: &RelativePath, child: &str) -> RelativePath {
+    let child_path = RelativePath::new(child);
+    if parent.as_str().is_empty() {
+        return child_path;
+    }
+    if child_path.as_str().is_empty() {
+        return parent.clone();
+    }
+    RelativePath::new(&format!("{}/{}", parent.as_str(), child_path.as_str()))
 }

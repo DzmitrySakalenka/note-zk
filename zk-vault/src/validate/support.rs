@@ -8,6 +8,29 @@ use crate::NormalizationResult;
 
 use super::ValidationContext;
 
+pub(super) fn is_known_wiki_type(note_type: &str) -> bool {
+    matches!(
+        note_type,
+        "wiki-entity" | "wiki-synthesis" | "wiki-index" | "wiki-log"
+    )
+}
+
+pub(super) fn is_authored_wiki_type(note_type: &str) -> bool {
+    matches!(note_type, "wiki-entity" | "wiki-synthesis")
+}
+
+pub(super) fn is_wiki_meta_type(note_type: &str) -> bool {
+    matches!(note_type, "wiki-index" | "wiki-log")
+}
+
+pub(super) fn path_has_prefix(path: &RelativePath, prefix: &RelativePath) -> bool {
+    path == prefix
+        || path
+            .as_str()
+            .strip_prefix(prefix.as_str())
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
 pub(super) fn new_finding(
     rule: RuleId,
     level: DiagnosticLevel,
