@@ -628,6 +628,7 @@ fn note_input(note_id: &str, path: &str, is_trashed: bool, trashed_at: Option<&s
         updated_at: "2026-04-20T09:00:00Z".to_string(),
         tags: Vec::new(),
         aliases: Vec::new(),
+        sources: Vec::new(),
         note_links: Vec::new(),
         external_links: Vec::new(),
         asset_references: Vec::new(),

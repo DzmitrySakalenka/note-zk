@@ -122,6 +122,10 @@ Composite unique:
 
 - `(note_id, source_note_id)`
 
+V1 intentionally does not add a reverse `source_note_id` index. Wiki pages are
+expected to reference a small number of sources, so reverse provenance lookups
+scan this compact derived table unless measurements show otherwise.
+
 ### `assets_index`
 
 Local cache of asset state.

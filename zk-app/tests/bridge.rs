@@ -166,6 +166,10 @@ fn build_note_inputs_populates_links_and_roundtrips_frontmatter() {
         note_input.aliases,
         vec!["Bridge Alias".to_string(), "Bridge Alt".to_string()]
     );
+    assert_eq!(
+        note_input.sources,
+        vec![NoteId::new("01SOURCENOTEID000000000000")]
+    );
     assert_eq!(note_input.note_links.len(), 2);
     assert_eq!(note_input.external_links.len(), 1);
     assert_eq!(note_input.asset_references.len(), 1);
