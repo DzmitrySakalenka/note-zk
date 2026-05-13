@@ -156,6 +156,7 @@ impl ChatFixture {
                         role,
                         content: content.to_string(),
                         token_count: None,
+                        request_id: None,
                         now: parse_timestamp(timestamp),
                     },
                 )

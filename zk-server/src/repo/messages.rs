@@ -15,9 +15,10 @@ INSERT INTO messages (
     content,
     token_count,
     created_at,
-    server_revision
+    server_revision,
+    request_id
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, NULL
+    ?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7
 )
 ";
 const GET_MESSAGE_SQL: &str = r"
@@ -31,6 +32,22 @@ SELECT
     server_revision
 FROM messages
 WHERE message_id = ?1
+LIMIT 1
+";
+const FIND_MESSAGE_BY_REQUEST_SQL: &str = r"
+SELECT
+    message_id,
+    conversation_id,
+    role,
+    content,
+    token_count,
+    created_at,
+    server_revision
+FROM messages
+WHERE conversation_id = ?1
+  AND request_id = ?2
+  AND role = ?3
+ORDER BY created_at ASC, message_id ASC
 LIMIT 1
 ";
 const LIST_MESSAGES_SQL: &str = r"
@@ -90,6 +107,8 @@ pub struct AppendMessageParams {
     pub content: String,
     /// Optional provider-reported token count.
     pub token_count: Option<u32>,
+    /// Stable request id for retry idempotency.
+    pub request_id: Option<String>,
     /// Message creation timestamp.
     pub now: DateTime<Utc>,
 }
@@ -137,6 +156,7 @@ impl MessagesRepo {
                 &params.content,
                 params.token_count,
                 created_at,
+                params.request_id.as_deref(),
             ],
         )
         .map_err(ServerError::Database)?;
@@ -164,6 +184,30 @@ impl MessagesRepo {
 
         statement
             .query_row([message_id.as_str()], decode_message_row)
+            .optional()
+            .map_err(ServerError::Database)
+    }
+
+    /// Finds one message previously appended for a request id and role.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ServerError`] when the query fails or row decoding is invalid.
+    pub fn find_by_request(
+        conn: &Connection,
+        conversation_id: &ConversationId,
+        request_id: &str,
+        role: MessageRole,
+    ) -> ServerResult<Option<MessageRecord>> {
+        let mut statement = conn
+            .prepare_cached(FIND_MESSAGE_BY_REQUEST_SQL)
+            .map_err(ServerError::Database)?;
+
+        statement
+            .query_row(
+                rusqlite::params![conversation_id.as_str(), request_id, role.as_str()],
+                decode_message_row,
+            )
             .optional()
             .map_err(ServerError::Database)
     }

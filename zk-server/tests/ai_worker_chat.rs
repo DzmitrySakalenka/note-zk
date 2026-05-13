@@ -1,11 +1,17 @@
 // Integration tests are separate crates; each uses only a subset of package dependencies.
 #![allow(unused_crate_dependencies)]
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use futures::stream::BoxStream;
+use futures::stream::{self, BoxStream};
 use tokio::time::{advance, timeout};
 use tokio_util::sync::CancellationToken;
 use zk_ai::{
@@ -83,7 +89,7 @@ async fn chat_turn_provider_error_marks_failed_without_prompt_leak() {
     let handle = spawn_ai_job_worker(
         fixture.deps(
             selector_with_chat(Arc::new(FailingChatProvider)),
-            ai_config(1),
+            ai_config_with_chat_attempts(1, 1),
         ),
         shutdown.clone(),
     );
@@ -104,6 +110,76 @@ async fn chat_turn_provider_error_marks_failed_without_prompt_leak() {
         !last_error.contains(user_query),
         "last_error leaked user query: {last_error}"
     );
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn retried_chat_turn_reuses_user_message_and_finishes_done() {
+    let fixture = WorkerChatFixture::new("ai-worker-chat-retry-dedup");
+    let user_id = user_id("worker-chat-retry-dedup");
+    let conversation_id = fixture.create_conversation(&user_id);
+    let job = fixture.enqueue(AiJobKind::ChatTurn {
+        conversation_id: conversation_id.clone(),
+        request_id: "req-chat-retry-dedup".to_string(),
+        user_query: "Retry without duplicating me".to_string(),
+    });
+    let shutdown = CancellationToken::new();
+    let handle = spawn_ai_job_worker(
+        fixture.deps(
+            selector_with_chat(Arc::new(FailOnceChatProvider::new())),
+            ai_config_with_chat_attempts(2, 2),
+        ),
+        shutdown.clone(),
+    );
+
+    let done = wait_for_status(&fixture.db, &job.job_id, AiJobStatus::Done).await;
+    shutdown.cancel();
+    timeout(Duration::from_secs(1), handle)
+        .await
+        .expect("worker should join after shutdown")
+        .expect("worker task should not panic");
+
+    let messages = fixture.messages(&conversation_id);
+    assert_eq!(done.attempts, 1);
+    assert_eq!(
+        messages.last().map(|message| message.role),
+        Some(MessageRole::Assistant)
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| message.role == MessageRole::User)
+            .count(),
+        1
+    );
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn chat_turn_uses_chat_specific_retry_budget() {
+    let fixture = WorkerChatFixture::new("ai-worker-chat-specific-retry");
+    let user_id = user_id("worker-chat-specific-retry");
+    let conversation_id = fixture.create_conversation(&user_id);
+    let job = fixture.enqueue(AiJobKind::ChatTurn {
+        conversation_id,
+        request_id: "req-chat-specific-retry".to_string(),
+        user_query: "Use chat retry budget".to_string(),
+    });
+    let shutdown = CancellationToken::new();
+    let handle = spawn_ai_job_worker(
+        fixture.deps(
+            selector_with_chat(Arc::new(FailOnceChatProvider::new())),
+            ai_config_with_chat_attempts(1, 2),
+        ),
+        shutdown.clone(),
+    );
+
+    let done = wait_for_status(&fixture.db, &job.job_id, AiJobStatus::Done).await;
+    shutdown.cancel();
+    timeout(Duration::from_secs(1), handle)
+        .await
+        .expect("worker should join after shutdown")
+        .expect("worker task should not panic");
+
+    assert_eq!(done.attempts, 1);
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
@@ -231,6 +307,54 @@ impl ChatProvider for FailingChatProvider {
     }
 }
 
+struct FailOnceChatProvider {
+    calls: AtomicUsize,
+}
+
+impl FailOnceChatProvider {
+    fn new() -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl ChatProvider for FailOnceChatProvider {
+    async fn complete(
+        &self,
+        _request: ChatRequest,
+    ) -> AiResult<BoxStream<'static, AiResult<ChatChunk>>> {
+        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Err(AiError::ProviderRequest(
+                "transient chat provider failure".to_string(),
+            ));
+        }
+
+        Ok(Box::pin(stream::iter([
+            Ok(ChatChunk::Delta {
+                text: "assistant after retry".to_string(),
+            }),
+            Ok(ChatChunk::Done {
+                finish_reason: zk_ai::provider::FinishReason::Stop,
+                usage: zk_ai::provider::ChatUsage {
+                    input_tokens: 10,
+                    output_tokens: 3,
+                },
+            }),
+        ])))
+    }
+
+    fn capability(&self) -> ChatCapability {
+        ChatCapability {
+            model: chat_model_id(),
+            max_input_tokens: 8192,
+            max_output_tokens: 1024,
+            supports_streaming: true,
+        }
+    }
+}
+
 async fn wait_for_status(db: &Arc<ServerDb>, job_id: &JobId, status: AiJobStatus) -> AiJob {
     for _ in 0..100 {
         let job = job_by_id(db, job_id);
@@ -290,6 +414,16 @@ fn ai_config(max_attempts: u32) -> AiConfig {
         recompute_concurrency: 1,
         max_attempts,
     }
+}
+
+fn ai_config_with_chat_attempts(max_attempts: u32, chat_max_attempts: u8) -> AiConfig {
+    let mut config = ai_config(max_attempts);
+    config
+        .chat
+        .as_mut()
+        .expect("chat config fixture should exist")
+        .max_attempts = chat_max_attempts;
+    config
 }
 
 fn provider_id() -> ProviderId {

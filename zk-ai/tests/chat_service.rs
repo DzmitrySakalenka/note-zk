@@ -152,6 +152,144 @@ async fn provider_error_mid_stream_keeps_user_message_only() {
 }
 
 #[tokio::test]
+async fn retry_with_same_request_id_reuses_user_message() {
+    let user_id = user_id(1);
+    let conversation_id = conversation_id();
+    let conversations = MemoryConversations::new(conversation(&conversation_id, &user_id));
+    let messages = Arc::new(MemoryMessages::default());
+    let citations = Arc::new(MemoryCitations::default());
+
+    run_failed_retry_attempt(
+        Arc::clone(&conversations),
+        Arc::clone(&messages),
+        Arc::clone(&citations),
+        &conversation_id,
+        &user_id,
+    )
+    .await;
+    assert_eq!(
+        messages
+            .records()
+            .iter()
+            .filter(|message| message.role == MessageRole::User)
+            .count(),
+        1
+    );
+
+    let successful_provider = successful_retry_provider();
+    let successful_service = chat_service(
+        conversations,
+        Arc::clone(&messages),
+        citations,
+        Arc::new(StaticProviderResolver::new(successful_provider.clone())),
+    );
+
+    let chunks = successful_service
+        .turn(ChatTurnRequest {
+            conversation_id: conversation_id.clone(),
+            user_id,
+            user_query: "Retry this turn.".to_string(),
+            top_k: 2,
+            request_id: "request-retry".to_string(),
+        })
+        .await
+        .expect("retry chat turn should start")
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<AiResult<Vec<_>>>()
+        .expect("retry chat stream should complete");
+
+    assert_eq!(
+        chunks
+            .iter()
+            .filter(|chunk| matches!(chunk, ChatChunk::Done { .. }))
+            .count(),
+        1
+    );
+    let persisted = messages.records();
+    assert_eq!(
+        persisted
+            .iter()
+            .map(|message| (message.role, message.content.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (MessageRole::User, "Retry this turn."),
+            (MessageRole::Assistant, "retry answer"),
+        ]
+    );
+    let retry_request = successful_provider.requests();
+    assert_eq!(
+        retry_request[0]
+            .messages
+            .iter()
+            .filter(|message| {
+                message.role == MessageRole::User && message.content == "Retry this turn."
+            })
+            .count(),
+        1
+    );
+}
+
+async fn run_failed_retry_attempt(
+    conversations: Arc<MemoryConversations>,
+    messages: Arc<MemoryMessages>,
+    citations: Arc<MemoryCitations>,
+    conversation_id: &ConversationId,
+    user_id: &UserId,
+) {
+    let failed_provider = Arc::new(ScriptedChatProvider::new(vec![
+        ProviderStep::ProviderError("provider failed once"),
+    ]));
+    let failed_service = chat_service(
+        conversations,
+        messages,
+        citations,
+        Arc::new(StaticProviderResolver::new(failed_provider)),
+    );
+
+    let mut failed_stream = failed_service
+        .turn(ChatTurnRequest {
+            conversation_id: conversation_id.clone(),
+            user_id: user_id.clone(),
+            user_query: "Retry this turn.".to_string(),
+            top_k: 2,
+            request_id: "request-retry".to_string(),
+        })
+        .await
+        .expect("failed chat turn should start");
+    let error = failed_stream
+        .next()
+        .await
+        .expect("provider error should be emitted")
+        .expect_err("provider error should propagate");
+
+    assert!(matches!(
+        error,
+        AiError::ProviderRequest(message) if message == "provider failed once"
+    ));
+    assert!(failed_stream.next().await.is_none());
+}
+
+fn successful_retry_provider() -> Arc<ScriptedChatProvider> {
+    Arc::new(ScriptedChatProvider::new(vec![
+        ProviderStep::Chunk(ChatChunk::Delta {
+            text: "retry ".to_string(),
+        }),
+        ProviderStep::Chunk(ChatChunk::Delta {
+            text: "answer".to_string(),
+        }),
+        ProviderStep::Chunk(ChatChunk::Done {
+            finish_reason: FinishReason::Stop,
+            usage: ChatUsage {
+                input_tokens: 22,
+                output_tokens: 2,
+            },
+        }),
+    ]))
+}
+
+#[tokio::test]
 async fn unauthorized_conversation_owner_returns_error_without_writes() {
     let conversation_id = conversation_id();
     let conversations = MemoryConversations::new(conversation(&conversation_id, &user_id(2)));
@@ -526,15 +664,29 @@ impl ChatConversationsRepo for MemoryConversations {
     }
 }
 
+#[derive(Clone)]
+struct StoredMessage {
+    record: MessageRecord,
+    request_id: Option<String>,
+}
+
 #[derive(Clone, Default)]
 struct MemoryMessages {
-    records: Arc<Mutex<Vec<MessageRecord>>>,
+    records: Arc<Mutex<Vec<StoredMessage>>>,
 }
 
 impl MemoryMessages {
     fn new(records: Vec<MessageRecord>) -> Arc<Self> {
         Arc::new(Self {
-            records: Arc::new(Mutex::new(records)),
+            records: Arc::new(Mutex::new(
+                records
+                    .into_iter()
+                    .map(|record| StoredMessage {
+                        record,
+                        request_id: None,
+                    })
+                    .collect(),
+            )),
         })
     }
 
@@ -542,7 +694,9 @@ impl MemoryMessages {
         self.records
             .lock()
             .expect("messages lock should not be poisoned")
-            .clone()
+            .iter()
+            .map(|stored| stored.record.clone())
+            .collect()
     }
 }
 
@@ -556,9 +710,29 @@ impl ChatMessagesRepo for MemoryMessages {
             .lock()
             .expect("messages lock should not be poisoned")
             .iter()
-            .filter(|message| &message.conversation_id == conversation_id)
+            .filter(|stored| &stored.record.conversation_id == conversation_id)
             .cloned()
+            .map(|stored| stored.record)
             .collect())
+    }
+
+    fn find_by_request(
+        &self,
+        conversation_id: &ConversationId,
+        request_id: &str,
+        role: MessageRole,
+    ) -> AiResult<Option<MessageRecord>> {
+        Ok(self
+            .records
+            .lock()
+            .expect("messages lock should not be poisoned")
+            .iter()
+            .find(|stored| {
+                stored.record.conversation_id == *conversation_id
+                    && stored.record.role == role
+                    && stored.request_id.as_deref() == Some(request_id)
+            })
+            .map(|stored| stored.record.clone()))
     }
 
     fn append(&self, params: AppendChatMessageParams) -> AiResult<MessageRecord> {
@@ -575,7 +749,10 @@ impl ChatMessagesRepo for MemoryMessages {
             created_at: params.now,
             server_revision: None,
         };
-        records.push(message.clone());
+        records.push(StoredMessage {
+            record: message.clone(),
+            request_id: params.request_id,
+        });
 
         Ok(message)
     }

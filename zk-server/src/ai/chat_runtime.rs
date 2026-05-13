@@ -188,11 +188,25 @@ impl ChatMessagesRepo for ServerChatMessagesRepo {
                         role: params.role,
                         content: params.content,
                         token_count: params.token_count,
+                        request_id: params.request_id,
                         now: params.now,
                     },
                 )
             })
             .map_err(|error| server_to_ai_error("append server chat message", &error))
+    }
+
+    fn find_by_request(
+        &self,
+        conversation_id: &ConversationId,
+        request_id: &str,
+        role: zk_domain::MessageRole,
+    ) -> AiResult<Option<MessageRecord>> {
+        self.db
+            .with_conn(|connection| {
+                MessagesRepo::find_by_request(connection, conversation_id, request_id, role)
+            })
+            .map_err(|error| server_to_ai_error("find server chat message by request", &error))
     }
 }
 

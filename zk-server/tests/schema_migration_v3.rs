@@ -4,7 +4,7 @@
 use rusqlite::Connection;
 use zk_server::migration::ensure_schema;
 
-const CURRENT_SCHEMA_VERSION: i64 = 5;
+const CURRENT_SCHEMA_VERSION: i64 = 6;
 
 const EXPECTED_V3_TABLES: &[&str] = &[
     "note_chunks",

@@ -161,6 +161,7 @@ const CREATE_TABLE_MESSAGES: &str = r"CREATE TABLE messages (
   created_at TEXT NOT NULL,
   server_revision INTEGER
 )";
+const ALTER_TABLE_MESSAGES_ADD_REQUEST_ID: &str = "ALTER TABLE messages ADD COLUMN request_id TEXT";
 
 const CREATE_TABLE_MESSAGE_CITATIONS: &str = r"CREATE TABLE message_citations (
   message_id TEXT NOT NULL REFERENCES messages(message_id) ON DELETE CASCADE,
@@ -209,6 +210,9 @@ const CREATE_INDEX_CONVERSATIONS_USER_RECENT: &str = r"CREATE INDEX idx_conversa
   WHERE archived_at IS NULL";
 const CREATE_INDEX_MESSAGES_CONVERSATION_CREATED: &str =
     "CREATE INDEX idx_messages_conversation_created ON messages(conversation_id, created_at)";
+const CREATE_INDEX_MESSAGES_REQUEST: &str = r"CREATE INDEX IF NOT EXISTS idx_messages_request
+  ON messages(conversation_id, request_id, role)
+  WHERE request_id IS NOT NULL";
 const CREATE_INDEX_MESSAGE_CITATIONS_NOTE: &str =
     "CREATE INDEX idx_message_citations_note ON message_citations(note_id)";
 
@@ -270,3 +274,7 @@ pub(crate) const V5_TABLE_DDL: &[&str] = &[];
 
 pub(crate) const V5_INDEX_DDL: &[&str] =
     &[CREATE_INDEX_NOTES_REVISION, CREATE_INDEX_ASSETS_REVISION];
+
+pub(crate) const V6_TABLE_DDL: &[&str] = &[ALTER_TABLE_MESSAGES_ADD_REQUEST_ID];
+
+pub(crate) const V6_INDEX_DDL: &[&str] = &[CREATE_INDEX_MESSAGES_REQUEST];

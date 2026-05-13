@@ -32,7 +32,7 @@ use zk_vault::parse_note_file;
 use crate::{
     ServerDb, ServerError,
     ai::chat_runtime::{ChatRuntimeError, build_chat_service},
-    config::{AiChatProviderKind, AiConfig, AiProviderKind},
+    config::{AiChatConfig, AiChatProviderKind, AiConfig, AiProviderKind},
     repo::{
         AiJob, AiJobKind, AiJobsRepo, ChunksRepo, ConversationsRepo, EmbeddingsRepo, NotesRepo,
     },
@@ -211,7 +211,8 @@ fn recover_in_flight_jobs(deps: &AiWorkerDeps) {
 
 fn claim_next_job(deps: &AiWorkerDeps) -> Option<AiJob> {
     match deps.db.with_conn(|connection| {
-        AiJobsRepo::new(connection).claim_next(deps.config.max_attempts, Utc::now())
+        // claim_next is kind-agnostic, so claim broadly and enforce per-kind retry caps on failure.
+        AiJobsRepo::new(connection).claim_next(claim_max_attempts(deps), Utc::now())
     }) {
         Ok(job) => job,
         Err(error) => {
@@ -383,7 +384,7 @@ fn mark_job_failed(deps: &AiWorkerDeps, job: &AiJob, error: &AiWorkerError) {
         AiJobsRepo::new(connection).mark_failed(
             &job.job_id,
             &error.to_string(),
-            deps.config.max_attempts,
+            max_attempts_for_job(deps, &job.kind),
             Utc::now(),
         )
     }) {
@@ -394,6 +395,24 @@ fn mark_job_failed(deps: &AiWorkerDeps, job: &AiJob, error: &AiWorkerError) {
             "failed to mark AI job failed"
         );
     }
+}
+
+fn claim_max_attempts(deps: &AiWorkerDeps) -> u32 {
+    deps.config.max_attempts.max(chat_max_attempts(deps))
+}
+
+fn max_attempts_for_job(deps: &AiWorkerDeps, kind: &AiJobKind) -> u32 {
+    match kind {
+        AiJobKind::ChatTurn { .. } => chat_max_attempts(deps),
+        AiJobKind::RecomputeNote { .. } | AiJobKind::RecomputeVault => deps.config.max_attempts,
+    }
+}
+
+fn chat_max_attempts(deps: &AiWorkerDeps) -> u32 {
+    deps.config.chat.as_ref().map_or_else(
+        || u32::from(AiChatConfig::default().max_attempts),
+        |chat| u32::from(chat.max_attempts),
+    )
 }
 
 fn job_kind_label(kind: &AiJobKind) -> &'static str {

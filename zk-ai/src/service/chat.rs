@@ -52,6 +52,8 @@ pub struct AppendChatMessageParams {
     pub content: String,
     /// Optional provider-reported token count.
     pub token_count: Option<u32>,
+    /// Stable request id for retry idempotency.
+    pub request_id: Option<String>,
     /// Message creation timestamp.
     pub now: DateTime<Utc>,
 }
@@ -95,6 +97,18 @@ pub trait ChatMessagesRepo: Send + Sync + 'static {
     ///
     /// Returns [`AiError`] when the backing store cannot append the message.
     fn append(&self, params: AppendChatMessageParams) -> AiResult<MessageRecord>;
+
+    /// Finds one message already persisted for the request id and role.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AiError`] when the backing store cannot read messages.
+    fn find_by_request(
+        &self,
+        conversation_id: &ConversationId,
+        request_id: &str,
+        role: MessageRole,
+    ) -> AiResult<Option<MessageRecord>>;
 }
 
 /// Citation persistence boundary used by [`ChatService`].
@@ -189,17 +203,28 @@ impl ChatService {
             return Err(AiError::ProviderRequest(UNAUTHORIZED_MESSAGE.to_string()));
         }
 
-        let history = self
+        let request_id = request.request_id.clone();
+        let existing_user_message = self.repos.messages.find_by_request(
+            &request.conversation_id,
+            &request_id,
+            MessageRole::User,
+        )?;
+        let mut history = self
             .repos
             .messages
             .list_for_conversation(&request.conversation_id)?;
-        self.repos.messages.append(AppendChatMessageParams {
-            conversation_id: request.conversation_id.clone(),
-            role: MessageRole::User,
-            content: request.user_query.clone(),
-            token_count: None,
-            now: Utc::now(),
-        })?;
+        if let Some(user_message) = &existing_user_message {
+            history.retain(|message| message.message_id != user_message.message_id);
+        } else {
+            self.repos.messages.append(AppendChatMessageParams {
+                conversation_id: request.conversation_id.clone(),
+                role: MessageRole::User,
+                content: request.user_query.clone(),
+                token_count: None,
+                request_id: Some(request_id.clone()),
+                now: Utc::now(),
+            })?;
+        }
 
         let provider = self.provider_resolver.select_chat()?;
         let capability = provider.capability();
@@ -221,7 +246,7 @@ impl ChatService {
                 max_output_tokens: Some(capability.max_output_tokens),
                 temperature: None,
                 stream: true,
-                request_id: request.request_id,
+                request_id,
             })
             .await?;
 
@@ -339,6 +364,7 @@ impl ChatStreamState {
             role: MessageRole::Assistant,
             content: self.assistant_content.clone(),
             token_count: Some(usage.output_tokens),
+            request_id: None,
             now: Utc::now(),
         })?;
         self.conversations

@@ -4,7 +4,7 @@
 use rusqlite::Connection;
 use zk_server::migration::ensure_schema;
 
-const CURRENT_SCHEMA_VERSION: i64 = 5;
+const CURRENT_SCHEMA_VERSION: i64 = 6;
 const EXPECTED_V5_INDEXES: &[(&str, &str)] = &[
     ("notes", "idx_notes_revision"),
     ("assets", "idx_assets_revision"),
@@ -83,6 +83,20 @@ fn create_v4_revision_fixture(connection: &Connection) {
             [],
         )
         .expect("assets table should be created");
+    connection
+        .execute(
+            "CREATE TABLE messages (
+                message_id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                token_count INTEGER,
+                created_at TEXT NOT NULL,
+                server_revision INTEGER
+            )",
+            [],
+        )
+        .expect("messages table should be created");
     connection
         .execute(
             "INSERT INTO server_schema_version (id, version) VALUES (1, 4)",

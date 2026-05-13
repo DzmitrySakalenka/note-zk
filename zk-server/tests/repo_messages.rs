@@ -58,6 +58,7 @@ fn message_params(
         role,
         content: content.to_string(),
         token_count,
+        request_id: None,
         now: parse_timestamp(timestamp),
     }
 }
@@ -108,6 +109,67 @@ fn append_then_get_round_trips() {
     assert_eq!(loaded.token_count, Some(42));
     assert_eq!(loaded.created_at, parse_timestamp("2026-05-11T10:05:00Z"));
     assert_eq!(loaded.server_revision, None);
+}
+
+#[test]
+fn find_by_request_filters_conversation_and_role() {
+    let connection = setup_connection();
+    let user_id = test_user_id(1);
+    create_user(&connection, &user_id);
+    let conversation_id = create_conversation(&connection, &user_id);
+    let other_conversation_id = create_conversation(&connection, &user_id);
+
+    let mut matching_params = message_params(
+        &conversation_id,
+        MessageRole::User,
+        "retry user",
+        None,
+        "2026-05-11T10:01:00Z",
+    );
+    matching_params.request_id = Some("request-retry".to_string());
+    let matching = append_message(&connection, matching_params);
+
+    let mut wrong_role_params = message_params(
+        &conversation_id,
+        MessageRole::Assistant,
+        "assistant",
+        None,
+        "2026-05-11T10:02:00Z",
+    );
+    wrong_role_params.request_id = Some("request-retry".to_string());
+    append_message(&connection, wrong_role_params);
+
+    let mut wrong_conversation_params = message_params(
+        &other_conversation_id,
+        MessageRole::User,
+        "other",
+        None,
+        "2026-05-11T10:03:00Z",
+    );
+    wrong_conversation_params.request_id = Some("request-retry".to_string());
+    append_message(&connection, wrong_conversation_params);
+
+    let loaded = MessagesRepo::find_by_request(
+        &connection,
+        &conversation_id,
+        "request-retry",
+        MessageRole::User,
+    )
+    .expect("request lookup should work")
+    .expect("matching message should exist");
+
+    assert_eq!(loaded.message_id, matching.message_id);
+    assert_eq!(loaded.role, MessageRole::User);
+    assert!(
+        MessagesRepo::find_by_request(
+            &connection,
+            &conversation_id,
+            "missing-request",
+            MessageRole::User,
+        )
+        .expect("missing request lookup should work")
+        .is_none()
+    );
 }
 
 #[test]

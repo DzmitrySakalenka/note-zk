@@ -58,6 +58,7 @@ fn create_message(connection: &Connection) -> MessageId {
             role: MessageRole::Assistant,
             content: "Answer".to_string(),
             token_count: Some(12),
+            request_id: None,
             now: parse_timestamp("2026-05-11T10:05:00Z"),
         },
     )
@@ -183,6 +184,7 @@ fn list_for_messages_batches_rows_by_message_and_ordinal() {
             role: MessageRole::Assistant,
             content: "Follow-up".to_string(),
             token_count: Some(7),
+            request_id: None,
             now: parse_timestamp("2026-05-11T10:06:00Z"),
         },
     )
