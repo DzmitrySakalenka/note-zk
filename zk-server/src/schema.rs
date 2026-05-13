@@ -174,8 +174,6 @@ const CREATE_TABLE_MESSAGE_CITATIONS: &str = r"CREATE TABLE message_citations (
   PRIMARY KEY (message_id, ordinal)
 )";
 
-const CREATE_INDEX_SYNC_EVENTS_SEQ: &str =
-    "CREATE INDEX idx_sync_events_seq ON sync_events(event_seq)";
 const CREATE_INDEX_SYNC_EVENTS_ITEM: &str =
     "CREATE INDEX idx_sync_events_item ON sync_events(item_id, item_type)";
 const CREATE_INDEX_NOTES_PATH: &str =
@@ -188,10 +186,6 @@ const CREATE_INDEX_ASSETS_REVISION: &str =
     "CREATE INDEX IF NOT EXISTS idx_assets_revision ON assets(server_revision)";
 const CREATE_INDEX_DELETE_RECORDS_RETENTION: &str =
     "CREATE INDEX idx_delete_records_retention ON delete_records(retention_until)";
-const CREATE_INDEX_DEVICE_TOKENS_HASH: &str =
-    "CREATE INDEX idx_device_tokens_hash ON device_tokens(token_sha256_hex)";
-const CREATE_INDEX_USERS_USERNAME: &str =
-    "CREATE UNIQUE INDEX idx_users_username ON users(username)";
 const CREATE_INDEX_WEB_SESSIONS_USER: &str =
     "CREATE INDEX idx_web_sessions_user ON web_sessions(user_id) WHERE revoked_at IS NULL";
 const CREATE_INDEX_WEB_SESSIONS_EXPIRES: &str =
@@ -216,6 +210,9 @@ const CREATE_INDEX_MESSAGES_REQUEST: &str = r"CREATE INDEX IF NOT EXISTS idx_mes
   WHERE request_id IS NOT NULL";
 const CREATE_INDEX_MESSAGE_CITATIONS_NOTE: &str =
     "CREATE INDEX idx_message_citations_note ON message_citations(note_id)";
+const DROP_INDEX_SYNC_EVENTS_SEQ: &str = "DROP INDEX IF EXISTS idx_sync_events_seq";
+const DROP_INDEX_DEVICE_TOKENS_HASH: &str = "DROP INDEX IF EXISTS idx_device_tokens_hash";
+const DROP_INDEX_USERS_USERNAME: &str = "DROP INDEX IF EXISTS idx_users_username";
 
 pub(crate) const V1_TABLE_DDL: &[&str] = &[
     CREATE_TABLE_DEVICES,
@@ -228,18 +225,15 @@ pub(crate) const V1_TABLE_DDL: &[&str] = &[
 ];
 
 pub(crate) const V1_INDEX_DDL: &[&str] = &[
-    CREATE_INDEX_SYNC_EVENTS_SEQ,
     CREATE_INDEX_SYNC_EVENTS_ITEM,
     CREATE_INDEX_NOTES_PATH,
     CREATE_INDEX_ASSETS_PATH,
     CREATE_INDEX_DELETE_RECORDS_RETENTION,
-    CREATE_INDEX_DEVICE_TOKENS_HASH,
 ];
 
 pub(crate) const V2_TABLE_DDL: &[&str] = &[CREATE_TABLE_USERS, CREATE_TABLE_WEB_SESSIONS];
 
 pub(crate) const V2_INDEX_DDL: &[&str] = &[
-    CREATE_INDEX_USERS_USERNAME,
     CREATE_INDEX_WEB_SESSIONS_USER,
     CREATE_INDEX_WEB_SESSIONS_EXPIRES,
     CREATE_INDEX_DEVICE_TOKENS_DEVICE,
@@ -283,3 +277,11 @@ pub(crate) const V6_INDEX_DDL: &[&str] = &[CREATE_INDEX_MESSAGES_REQUEST];
 pub(crate) const V7_TABLE_DDL: &[&str] = &[ALTER_TABLE_DEVICE_TOKENS_ADD_USER_ID];
 
 pub(crate) const V7_INDEX_DDL: &[&str] = &[];
+
+pub(crate) const V8_TABLE_DDL: &[&str] = &[];
+
+pub(crate) const V8_INDEX_DDL: &[&str] = &[
+    DROP_INDEX_SYNC_EVENTS_SEQ,
+    DROP_INDEX_DEVICE_TOKENS_HASH,
+    DROP_INDEX_USERS_USERNAME,
+];

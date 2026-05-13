@@ -4,7 +4,7 @@
 use rusqlite::Connection;
 use zk_server::{ServerError, migration::ensure_schema};
 
-const CURRENT_SCHEMA_VERSION: i64 = 7;
+const CURRENT_SCHEMA_VERSION: i64 = 8;
 
 const EXPECTED_V1_TABLES: &[&str] = &[
     "devices",
@@ -17,18 +17,15 @@ const EXPECTED_V1_TABLES: &[&str] = &[
 ];
 
 const EXPECTED_V1_INDEXES: &[&str] = &[
-    "idx_sync_events_seq",
     "idx_sync_events_item",
     "idx_notes_path",
     "idx_assets_path",
     "idx_delete_records_retention",
-    "idx_device_tokens_hash",
 ];
 
 const EXPECTED_V2_TABLES: &[&str] = &["users", "web_sessions"];
 
 const EXPECTED_V2_INDEXES: &[&str] = &[
-    "idx_users_username",
     "idx_web_sessions_user",
     "idx_web_sessions_expires",
     "idx_device_tokens_device",
@@ -500,7 +497,7 @@ fn ensure_schema_rejects_future_server_schema_versions() {
         .expect("schema version table should be created");
     connection
         .execute(
-            "INSERT INTO server_schema_version (id, version) VALUES (1, 8)",
+            "INSERT INTO server_schema_version (id, version) VALUES (1, 9)",
             [],
         )
         .expect("future schema version should be inserted");

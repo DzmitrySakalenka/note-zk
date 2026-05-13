@@ -388,10 +388,11 @@ store.
 
 Indexes:
 
-- `idx_device_tokens_hash` on `token_sha256_hex`
 - `idx_device_tokens_device` on `device_id` where `revoked_at IS NULL`
 
-Last verified against `zk-server/src/schema.rs:71-81,113-122` on 2026-04-30.
+The `token_sha256_hex` `UNIQUE` constraint creates SQLite's lookup autoindex.
+
+Last verified against `zk-server/src/schema.rs` on 2026-05-13.
 
 ### `users`
 
@@ -444,10 +445,12 @@ At minimum:
 - `note_sync_state.sync_status`
 - `asset_sync_state.sync_status`
 - `delete_records.retention_until`
-- `sync_events.cursor`
+- `sync_events.item_id, item_type`
 
-Server `notes.server_revision` and `assets.server_revision` indexes last
-verified against `zk-server/src/schema.rs:181-186,269-274` on 2026-05-13.
+`sync_events.event_seq` uses the table rowid through `INTEGER PRIMARY KEY`, so
+it does not need a secondary cursor index. Server `notes.server_revision` and
+`assets.server_revision` indexes last verified against `zk-server/src/schema.rs`
+on 2026-05-13.
 
 ## Practical Notes
 

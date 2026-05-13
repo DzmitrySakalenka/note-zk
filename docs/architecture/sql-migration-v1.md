@@ -189,14 +189,15 @@ CREATE TABLE devices (
 ## Recommended Initial Indexes
 
 ```sql
-CREATE INDEX idx_notes_index_path ON notes_index(current_path);
 CREATE INDEX idx_note_tags_tag ON note_tags(tag);
 CREATE INDEX idx_note_links_source ON note_links(source_note_id);
-CREATE INDEX idx_assets_index_path ON assets_index(current_path);
 CREATE INDEX idx_delete_records_retention ON delete_records(retention_until);
 CREATE INDEX idx_note_sync_state_status ON note_sync_state(sync_status);
 CREATE INDEX idx_asset_sync_state_status ON asset_sync_state(sync_status);
 ```
+
+`notes_index.current_path` and `assets_index.current_path` are `UNIQUE`, so
+SQLite's implicit unique indexes serve exact path lookups.
 
 ## Notes
 

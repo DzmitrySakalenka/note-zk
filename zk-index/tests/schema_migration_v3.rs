@@ -4,7 +4,7 @@
 use rusqlite::Connection;
 use zk_index::ensure_schema;
 
-const CURRENT_SCHEMA_VERSION: i64 = 3;
+const CURRENT_SCHEMA_VERSION: i64 = 4;
 const EXPECTED_V3_TABLES: &[&str] = &["note_chunks", "chunk_embeddings"];
 const EXPECTED_V3_INDEXES: &[&str] = &["idx_note_chunks_note", "idx_chunk_embeddings_model"];
 const SERVER_ONLY_TABLES: &[&str] = &["semantic_edges", "ai_jobs"];

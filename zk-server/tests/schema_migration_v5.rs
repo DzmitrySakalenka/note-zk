@@ -4,7 +4,7 @@
 use rusqlite::Connection;
 use zk_server::migration::ensure_schema;
 
-const CURRENT_SCHEMA_VERSION: i64 = 7;
+const CURRENT_SCHEMA_VERSION: i64 = 8;
 const EXPECTED_V5_INDEXES: &[(&str, &str)] = &[
     ("notes", "idx_notes_revision"),
     ("assets", "idx_assets_revision"),

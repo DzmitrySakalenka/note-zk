@@ -42,7 +42,7 @@ fn open_in_memory_creates_schema_version_table_with_current_version() {
     assert_eq!(
         db.schema_version()
             .expect("schema version query should succeed"),
-        7
+        8
     );
 }
 
@@ -58,7 +58,7 @@ fn ensure_schema_is_idempotent_when_called_twice() {
     assert_eq!(
         db.schema_version()
             .expect("schema version query should succeed"),
-        7
+        8
     );
     let version_row_count: i64 = db
         .with_conn(|conn: &Connection| {
@@ -87,7 +87,7 @@ fn schema_version_returns_current_schema_version() {
     assert_eq!(
         db.schema_version()
             .expect("schema version query should succeed"),
-        7
+        8
     );
 }
 
@@ -157,7 +157,7 @@ fn reopening_file_backed_database_keeps_current_schema_version() {
         assert_eq!(
             db.schema_version()
                 .expect("first schema version query should succeed"),
-            7
+            8
         );
     }
 
@@ -167,6 +167,6 @@ fn reopening_file_backed_database_keeps_current_schema_version() {
         reopened
             .schema_version()
             .expect("second schema version query should succeed"),
-        7
+        8
     );
 }

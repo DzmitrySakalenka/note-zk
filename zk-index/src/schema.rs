@@ -134,14 +134,10 @@ pub(crate) const CREATE_TABLE_CHUNK_EMBEDDINGS: &str = r"CREATE TABLE chunk_embe
   PRIMARY KEY (chunk_id, embedding_model)
 );";
 
-pub(crate) const CREATE_INDEX_NOTES_INDEX_PATH: &str =
-    "CREATE INDEX idx_notes_index_path ON notes_index(current_path);";
 pub(crate) const CREATE_INDEX_NOTE_TAGS_TAG: &str =
     "CREATE INDEX idx_note_tags_tag ON note_tags(tag);";
 pub(crate) const CREATE_INDEX_NOTE_LINKS_SOURCE: &str =
     "CREATE INDEX idx_note_links_source ON note_links(source_note_id);";
-pub(crate) const CREATE_INDEX_ASSETS_INDEX_PATH: &str =
-    "CREATE INDEX idx_assets_index_path ON assets_index(current_path);";
 pub(crate) const CREATE_INDEX_DELETE_RECORDS_RETENTION: &str =
     "CREATE INDEX idx_delete_records_retention ON delete_records(retention_until);";
 pub(crate) const CREATE_INDEX_NOTE_SYNC_STATE_STATUS: &str =
@@ -152,6 +148,8 @@ pub(crate) const CREATE_INDEX_NOTE_CHUNKS_NOTE: &str =
     "CREATE INDEX idx_note_chunks_note ON note_chunks(note_id, ordinal);";
 pub(crate) const CREATE_INDEX_CHUNK_EMBEDDINGS_MODEL: &str =
     "CREATE INDEX idx_chunk_embeddings_model ON chunk_embeddings(embedding_model);";
+pub(crate) const DROP_INDEX_NOTES_INDEX_PATH: &str = "DROP INDEX IF EXISTS idx_notes_index_path";
+pub(crate) const DROP_INDEX_ASSETS_INDEX_PATH: &str = "DROP INDEX IF EXISTS idx_assets_index_path";
 
 pub(crate) const V1_TABLE_DDL: &[&str] = &[
     CREATE_TABLE_NOTES_INDEX,
@@ -169,10 +167,8 @@ pub(crate) const V1_TABLE_DDL: &[&str] = &[
 ];
 
 pub(crate) const V1_INDEX_DDL: &[&str] = &[
-    CREATE_INDEX_NOTES_INDEX_PATH,
     CREATE_INDEX_NOTE_TAGS_TAG,
     CREATE_INDEX_NOTE_LINKS_SOURCE,
-    CREATE_INDEX_ASSETS_INDEX_PATH,
     CREATE_INDEX_DELETE_RECORDS_RETENTION,
     CREATE_INDEX_NOTE_SYNC_STATE_STATUS,
     CREATE_INDEX_ASSET_SYNC_STATE_STATUS,
@@ -184,3 +180,6 @@ pub(crate) const V3_INDEX_DDL: &[&str] = &[
     CREATE_INDEX_NOTE_CHUNKS_NOTE,
     CREATE_INDEX_CHUNK_EMBEDDINGS_MODEL,
 ];
+
+pub(crate) const V4_INDEX_DDL: &[&str] =
+    &[DROP_INDEX_NOTES_INDEX_PATH, DROP_INDEX_ASSETS_INDEX_PATH];
