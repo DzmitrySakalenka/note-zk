@@ -1,7 +1,11 @@
 use axum::{Json, extract::State};
 use chrono::{DateTime, Utc};
 
-use crate::{ServerError, http::ApiError, state::ServerState};
+use crate::{
+    ServerError,
+    http::{ApiError, run_blocking},
+    state::ServerState,
+};
 
 /// Response payload returned by the `/health` endpoint.
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -25,20 +29,31 @@ pub struct HealthResponse {
 /// Returns [`ApiError`] when the server cannot read its schema version.
 pub async fn health(State(state): State<ServerState>) -> Result<Json<HealthResponse>, ApiError> {
     let now = Utc::now();
-    // Deliberately inline: health only performs one-row readiness/schema probes.
-    let db_ok = match state.db().with_conn(|connection| {
-        connection
-            .query_row("SELECT 1", [], |_| Ok(()))
-            .map_err(ServerError::Database)
-    }) {
-        Ok(()) => true,
-        Err(error) => {
-            tracing::error!(error = %error, "health database probe failed");
-            false
-        }
-    };
+    let blocking_state = state.clone();
+    let (db_ok, schema_version) = run_blocking("health probe", move || {
+        blocking_state.db().with_conn(|connection| {
+            let db_ok = match connection
+                .query_row("SELECT 1", [], |_| Ok(()))
+                .map_err(ServerError::Database)
+            {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::error!(error = %error, "health database probe failed");
+                    false
+                }
+            };
+            let schema_version = connection
+                .query_row(
+                    "SELECT version FROM server_schema_version WHERE id = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(ServerError::Database)?;
 
-    let schema_version = state.db().schema_version().map_err(ApiError::from)?;
+            Ok((db_ok, schema_version))
+        })
+    })
+    .await?;
     let uptime_seconds = (now - state.started_at()).num_seconds().max(0);
 
     Ok(Json(HealthResponse {
