@@ -5624,11 +5624,23 @@ dependencies = [
  "wiremock",
  "zk-ai",
  "zk-app",
+ "zk-cli-core",
  "zk-domain",
  "zk-index",
  "zk-server",
  "zk-sync",
  "zk-vault",
+]
+
+[[package]]
+name = "zk-cli-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rusqlite",
+ "tempfile",
+ "url",
+ "zk-app",
 ]
 
 [[package]]

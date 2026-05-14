@@ -24,6 +24,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 url = "2"
 zk-ai = { version = "0.1.0", path = "../zk-ai", optional = true }
 zk-app = { path = "../zk-app" }
+zk-cli-core = { version = "0.1.0", path = "../zk-cli-core" }
 zk-domain = { version = "0.1.0", path = "../zk-domain" }
 zk-index = { version = "0.1.0", path = "../zk-index", optional = true }
 zk-sync = { version = "0.1.0", path = "../zk-sync" }

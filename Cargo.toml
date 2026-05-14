@@ -8,6 +8,7 @@ members = [
     "zk-backup",
     "zk-ai",
     "zk-app",
+    "zk-cli-core",
     "zk-server",
     "zk-cli",
 ]

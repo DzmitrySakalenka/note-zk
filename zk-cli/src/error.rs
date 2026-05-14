@@ -44,6 +44,16 @@ pub enum CliError {
     Internal(anyhow::Error),
 }
 
+impl From<zk_cli_core::BootstrapError> for CliError {
+    fn from(error: zk_cli_core::BootstrapError) -> Self {
+        match error {
+            zk_cli_core::BootstrapError::Argument(message) => Self::Argument(message),
+            zk_cli_core::BootstrapError::Bootstrap(source) => Self::Bootstrap(source),
+            zk_cli_core::BootstrapError::Issue(message) => Self::Issue(message),
+        }
+    }
+}
+
 impl fmt::Display for CliError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
