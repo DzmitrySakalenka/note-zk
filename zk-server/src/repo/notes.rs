@@ -1,13 +1,12 @@
 use std::io::{self, ErrorKind};
+use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, Row, types::Type};
 
 use crate::{ServerError, ServerResult};
 
-const CREATE_NOTE_SQL: &str = r"
-INSERT INTO notes (
-    note_id,
+const SERVER_NOTE_COLUMNS: &str = r"    note_id,
     current_path,
     title,
     content_hash,
@@ -20,11 +19,18 @@ INSERT INTO notes (
     is_trashed,
     is_deleted,
     last_editor_device_id,
-    server_revision
+    server_revision";
+static CREATE_NOTE_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
+INSERT INTO notes (
+{SERVER_NOTE_COLUMNS}
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
 )
-";
+"
+    )
+});
 const UPDATE_NOTE_SQL: &str = r"
 UPDATE notes
 SET
@@ -43,84 +49,48 @@ SET
     server_revision = ?14
 WHERE note_id = ?1
 ";
-const GET_NOTE_SQL: &str = r"
+static GET_NOTE_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
 SELECT
-    note_id,
-    current_path,
-    title,
-    content_hash,
-    body_markdown,
-    frontmatter_json,
-    created_at,
-    updated_at,
-    trashed_at,
-    deleted_at,
-    is_trashed,
-    is_deleted,
-    last_editor_device_id,
-    server_revision
+{SERVER_NOTE_COLUMNS}
 FROM notes
 WHERE note_id = ?1
-";
-const GET_NOTE_BY_PATH_SQL: &str = r"
+"
+    )
+});
+static GET_NOTE_BY_PATH_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
 SELECT
-    note_id,
-    current_path,
-    title,
-    content_hash,
-    body_markdown,
-    frontmatter_json,
-    created_at,
-    updated_at,
-    trashed_at,
-    deleted_at,
-    is_trashed,
-    is_deleted,
-    last_editor_device_id,
-    server_revision
+{SERVER_NOTE_COLUMNS}
 FROM notes
 WHERE current_path = ?1 AND is_deleted = 0
 LIMIT 1
-";
-const LIST_ALL_NOTES_SQL: &str = r"
+"
+    )
+});
+static LIST_ALL_NOTES_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
 SELECT
-    note_id,
-    current_path,
-    title,
-    content_hash,
-    body_markdown,
-    frontmatter_json,
-    created_at,
-    updated_at,
-    trashed_at,
-    deleted_at,
-    is_trashed,
-    is_deleted,
-    last_editor_device_id,
-    server_revision
+{SERVER_NOTE_COLUMNS}
 FROM notes
 ORDER BY server_revision ASC, note_id ASC
-";
-const LIST_NOTES_SINCE_REVISION_SQL: &str = r"
+"
+    )
+});
+static LIST_NOTES_SINCE_REVISION_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
 SELECT
-    note_id,
-    current_path,
-    title,
-    content_hash,
-    body_markdown,
-    frontmatter_json,
-    created_at,
-    updated_at,
-    trashed_at,
-    deleted_at,
-    is_trashed,
-    is_deleted,
-    last_editor_device_id,
-    server_revision
+{SERVER_NOTE_COLUMNS}
 FROM notes
 WHERE server_revision > ?1
 ORDER BY server_revision ASC, note_id ASC
-";
+"
+    )
+});
 const DELETE_NOTE_HARD_SQL: &str = "DELETE FROM notes WHERE note_id = ?1";
 const EXISTS_NOTE_SQL: &str = "SELECT 1 FROM notes WHERE note_id = ?1 LIMIT 1";
 
@@ -177,7 +147,7 @@ impl NotesRepo {
         let deleted_at = encode_optional_timestamp(row.deleted_at);
 
         conn.execute(
-            CREATE_NOTE_SQL,
+            CREATE_NOTE_SQL.as_str(),
             rusqlite::params![
                 &row.note_id,
                 &row.current_path,
@@ -240,7 +210,7 @@ impl NotesRepo {
     /// Returns [`ServerError`] if the query fails or row decoding is invalid.
     pub fn get(conn: &Connection, note_id: &str) -> ServerResult<Option<NoteRow>> {
         let mut statement = conn
-            .prepare_cached(GET_NOTE_SQL)
+            .prepare_cached(GET_NOTE_SQL.as_str())
             .map_err(ServerError::Database)?;
 
         statement
@@ -259,7 +229,7 @@ impl NotesRepo {
     /// Returns [`ServerError`] if the query fails or row decoding is invalid.
     pub fn get_by_path(conn: &Connection, path: &str) -> ServerResult<Option<NoteRow>> {
         let mut statement = conn
-            .prepare_cached(GET_NOTE_BY_PATH_SQL)
+            .prepare_cached(GET_NOTE_BY_PATH_SQL.as_str())
             .map_err(ServerError::Database)?;
 
         statement
@@ -274,7 +244,7 @@ impl NotesRepo {
     ///
     /// Returns [`ServerError`] if the query fails or row decoding is invalid.
     pub fn list_all(conn: &Connection) -> ServerResult<Vec<NoteRow>> {
-        list_notes(conn, LIST_ALL_NOTES_SQL, None)
+        list_notes(conn, LIST_ALL_NOTES_SQL.as_str(), None)
     }
 
     /// Lists note rows whose `server_revision` is greater than `min_rev`.
@@ -286,7 +256,7 @@ impl NotesRepo {
     ///
     /// Returns [`ServerError`] if the query fails or row decoding is invalid.
     pub fn list_since_revision(conn: &Connection, min_rev: i64) -> ServerResult<Vec<NoteRow>> {
-        list_notes(conn, LIST_NOTES_SINCE_REVISION_SQL, Some(min_rev))
+        list_notes(conn, LIST_NOTES_SINCE_REVISION_SQL.as_str(), Some(min_rev))
     }
 
     /// Permanently deletes one note row.
