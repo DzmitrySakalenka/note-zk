@@ -50,6 +50,9 @@ fn rule_sort_key(rule: RuleId) -> u8 {
         RuleId::UnresolvedLink => 15,
         RuleId::AmbiguousLink => 16,
         RuleId::BrokenAssetRef => 17,
+        RuleId::WikiUnknownType => 18,
+        RuleId::WikiSourceMissing => 19,
+        RuleId::WikiIndexOutsideWikiRoot => 20,
         _ => u8::MAX,
     }
 }

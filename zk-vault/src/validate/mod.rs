@@ -16,6 +16,8 @@ mod support;
 
 pub(crate) struct ValidationContext<'a> {
     pub(crate) scan_result: &'a VaultScanResult,
+    /// Effective configuration re-introduced for TG17b-005 wiki rules.
+    pub(crate) config: &'a EffectiveConfig,
     parsed_indexes_by_note_id: HashMap<NoteId, &'a ParsedNoteIndex>,
     asset_paths: HashSet<RelativePath>,
 }
@@ -92,6 +94,7 @@ fn validate_vault_with_rule_refs_and_parsed_indexes(
 ) -> ValidationReport {
     let context = ValidationContext {
         scan_result,
+        config,
         parsed_indexes_by_note_id: parsed_indexes
             .iter()
             .map(|parsed_index| (parsed_index.note_id.clone(), parsed_index))

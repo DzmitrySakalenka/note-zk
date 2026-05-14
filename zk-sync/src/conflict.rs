@@ -60,6 +60,15 @@ pub struct ConflictCopyInput<'a> {
     pub clock: &'a dyn Clock,
 }
 
+/// Pull conflict policy selected from the resolved folder policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DerivedFolderPolicy {
+    /// Preserve both sides by writing a remote conflict copy.
+    ConflictCopy,
+    /// Apply the remote revision because the local path is derived content.
+    RemoteWins,
+}
+
 /// Returns whether the local file still matches the last synced hash.
 #[must_use]
 pub fn local_unchanged_since_sync(snapshot: &SyncStateSnapshot) -> bool {

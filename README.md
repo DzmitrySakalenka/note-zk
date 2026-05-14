@@ -301,6 +301,80 @@ zk-cli chat conversations list
 `zk-cli chat` requires a user-bound device token issued with the `chat`
 scope: `zk-cli auth issue-token --scope chat`.
 
+## LLM Wiki
+
+LLM Wiki workflows maintain generated wiki pages from raw source notes
+while keeping markdown files as the system of record. Enable the vault
+layout in `.zk/config.toml`:
+
+```toml
+[wiki]
+root_dir = "wiki/"
+raw_dir = "raw/"
+index_file = "index.md"
+log_file = "log.md"
+```
+
+Defaults are `wiki/` for generated wiki pages, `raw/` for source
+material, and `wiki/index.md` plus `wiki/log.md` for the generated
+meta-files. When `[wiki]` is present, the config merge also derives
+folder policies for the standard layout:
+
+| Path | Policy | Behavior |
+|------|--------|----------|
+| `raw/` | `immutable = true` | readable source material; system writes are rejected |
+| `wiki/index.md`, `wiki/log.md` | `derived = true` | regenerable meta-files; sync pull conflicts use last-write-wins |
+| other wiki pages | neither | normal user-owned pages with conflict copies |
+
+You can set the same policies explicitly for custom folders:
+
+```toml
+[folders."raw"]
+immutable = true
+
+[folders."wiki/index.md"]
+derived = true
+
+[folders."wiki/log.md"]
+derived = true
+```
+
+Ingest a raw source note through the server worker with an admin-scoped
+token:
+
+```bash
+ZK_DEVICE_TOKEN=<admin-token> \
+  zk-cli --vault <path> --server-url https://zk.example.com \
+  wiki ingest raw/article.md --wait
+```
+
+Lint the wiki and inspect findings:
+
+```bash
+ZK_DEVICE_TOKEN=<admin-token> \
+  zk-cli --vault <path> --server-url https://zk.example.com \
+  wiki lint --scope vault --wait
+ZK_DEVICE_TOKEN=<admin-token> \
+  zk-cli --server-url https://zk.example.com \
+  wiki lint show <job-id>
+```
+
+Save a chat answer back into the wiki. Citations from the assistant
+message are written to the page `sources` frontmatter and projected into
+the local `note_sources` index on rebuild:
+
+```bash
+ZK_DEVICE_TOKEN=<chat-token> \
+  zk-cli --vault <path> --server-url https://zk.example.com \
+  chat conversations save-as-wiki \
+  --conversation-id <conversation-id> \
+  --title "Research Summary"
+```
+
+See `docs/architecture/llm-wiki.md` for the workflow design and
+`docs/decisions/0016-llm-wiki-protocol.md` for the provenance, folder
+policy, job, and write-back protocol decisions.
+
 ## Backup and Restore
 
 Enable built-in server backups in `server.toml`:
@@ -351,6 +425,7 @@ pairs off-host with `rsync`, `scp`, or a mounted NAS.
 - `trash`, `restore`, `purge`: manage the trash lifecycle.
 - `sync`: run register/bootstrap, push, and pull against the server.
 - `chat`: send a server-backed AI chat message or manage conversations.
+- `wiki`: ingest raw sources, lint wiki pages, and inspect wiki jobs.
 - `resolve-conflict`: explicitly keep the local or remote side for one conflict.
 
 ```bash
@@ -374,7 +449,7 @@ Add `--json` to any subcommand for machine-readable output on stdout.
 Detailed design documents live under `docs/`:
 
 - `docs/architecture/` -- stable system design documents
-- `docs/decisions/` -- ADR-style decision records (0001-0015)
+- `docs/decisions/` -- ADR-style decision records (0001-0016)
 - `docs/plans/` -- phased implementation plans and roadmaps
 
 ## High-Level Shape

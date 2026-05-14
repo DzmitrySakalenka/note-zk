@@ -1,7 +1,7 @@
 // Integration benchmarks inherit dev-dependencies used by tests in this crate.
 #![allow(unused_crate_dependencies)]
 
-use std::{fs, path::Path};
+use std::{collections::BTreeMap, fs, path::Path};
 
 use chrono::{DateTime, TimeZone, Utc};
 use divan::{AllocProfiler, Bencher, black_box, black_box_drop, counter::ItemsCount};
@@ -84,11 +84,13 @@ fn apply_pull_response_10k_notes(bencher: Bencher) {
                 clock,
                 trash_dir,
             } = fixture;
+            let folders = BTreeMap::new();
             let ctx = PullApplyContext {
                 vault: vault.path(),
                 device_id,
                 clock,
                 trash_dir,
+                folders: &folders,
             };
             let outcome = apply_pull_response(conn, &ctx, black_box(&response))
                 .expect("pull response benchmark fixture should apply");

@@ -1,6 +1,6 @@
 //! Argument parser definitions for the `zk-cli` binary.
 
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use clap::{ArgGroup, Args, Parser, Subcommand, builder::BoolishValueParser};
 use url::Url;
@@ -48,6 +48,8 @@ pub enum Command {
     Search(SearchArgs),
     /// Send AI chat messages and manage conversations.
     Chat(ChatArgs),
+    /// Run AI-backed wiki workflows.
+    Wiki(WikiArgs),
     /// Resolve one server-side sync conflict explicitly.
     ResolveConflict(ResolveConflictArgs),
 }
@@ -508,6 +510,112 @@ pub struct ChatArgs {
     pub json: bool,
 }
 
+/// Arguments for the `wiki` subcommand group.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct WikiArgs {
+    /// Wiki workflow command to run.
+    #[command(subcommand)]
+    pub command: WikiCommand,
+}
+
+/// Nested command set under `wiki`.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum WikiCommand {
+    /// Enqueue ingest for one raw source note.
+    Ingest(WikiIngestArgs),
+    /// Enqueue or inspect wiki lint findings.
+    Lint(WikiLintArgs),
+    /// Show current status for one wiki AI job.
+    Status(WikiStatusArgs),
+}
+
+/// Explicit lint scope accepted by `wiki lint`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WikiLintScopeArg {
+    /// Lint the whole configured wiki.
+    Vault,
+}
+
+/// Public wiki lint finding aliases accepted by `wiki lint show --kind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WikiLintKindArg {
+    /// Authored page is not linked from the wiki index or another page.
+    OrphanPage,
+    /// Source note is newer than a page that cites it.
+    StaleClaim,
+    /// Page body mentions another page title without linking to it.
+    MissingXref,
+    /// Repeated source concept has no matching wiki page.
+    MissingPage,
+}
+
+/// Arguments for `wiki ingest`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct WikiIngestArgs {
+    /// Source note id or vault-relative source path.
+    pub source: String,
+    /// Wait until the ingest job reaches a terminal status.
+    #[arg(long)]
+    pub wait: bool,
+    /// Maximum wait duration. Accepts seconds as `60` or `60s`.
+    #[arg(long, default_value = "60s", value_parser = parse_duration_seconds)]
+    pub timeout: Duration,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `wiki status`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct WikiStatusArgs {
+    /// AI job id to inspect.
+    pub job_id: String,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `wiki lint`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("wiki_lint_scope").args(["scope", "folder"]).multiple(false)))]
+pub struct WikiLintArgs {
+    /// Optional lint-findings action.
+    #[command(subcommand)]
+    pub command: Option<WikiLintCommand>,
+    /// Lint scope. Only `vault` is accepted; use `--folder` for folder-scoped lint.
+    #[arg(long, value_parser = parse_wiki_lint_scope)]
+    pub scope: Option<WikiLintScopeArg>,
+    /// Vault-relative wiki folder to lint.
+    #[arg(long)]
+    pub folder: Option<String>,
+    /// Wait until the lint job reaches a terminal status and print findings.
+    #[arg(long)]
+    pub wait: bool,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Nested command set under `wiki lint`.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum WikiLintCommand {
+    /// Show findings for one wiki lint job.
+    Show(WikiLintShowArgs),
+}
+
+/// Arguments for `wiki lint show`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct WikiLintShowArgs {
+    /// AI job id whose lint findings should be fetched.
+    pub job_id: String,
+    /// Client-side finding kind filter.
+    #[arg(long, value_parser = parse_wiki_lint_kind)]
+    pub kind: Option<WikiLintKindArg>,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
 impl ChatArgs {
     /// Returns whether the command should request and render streaming output.
     #[must_use]
@@ -538,6 +646,8 @@ pub enum ChatConversationCommand {
     List(ChatConversationsListArgs),
     /// Show one conversation and its recent messages.
     Show(ChatConversationsShowArgs),
+    /// Save the latest assistant response as a local wiki page.
+    SaveAsWiki(ChatSaveAsWikiArgs),
     /// Delete one conversation permanently.
     Delete(ChatConversationsDeleteArgs),
     /// Rename one conversation.
@@ -570,6 +680,46 @@ pub struct ChatConversationsListArgs {
 pub struct ChatConversationsShowArgs {
     /// Conversation id to show.
     pub conversation_id: String,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Supported wiki page types for chat write-back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatSaveAsWikiTypeArg {
+    /// A synthesized wiki page.
+    WikiSynthesis,
+    /// An entity wiki page.
+    WikiEntity,
+}
+
+impl ChatSaveAsWikiTypeArg {
+    /// Returns the frontmatter `type` value.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::WikiSynthesis => "wiki-synthesis",
+            Self::WikiEntity => "wiki-entity",
+        }
+    }
+}
+
+/// Arguments for `chat conversations save-as-wiki`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct ChatSaveAsWikiArgs {
+    /// Conversation id whose latest assistant response should be saved.
+    #[arg(long = "conversation-id")]
+    pub conversation_id: String,
+    /// Title for the created wiki page.
+    #[arg(long)]
+    pub title: String,
+    /// Wiki page frontmatter type.
+    #[arg(long = "type", default_value = "wiki-synthesis", value_parser = parse_chat_save_as_wiki_type)]
+    pub note_type: ChatSaveAsWikiTypeArg,
+    /// Optional vault-relative target path.
+    #[arg(long)]
+    pub path: Option<String>,
     /// Render compact JSON to stdout.
     #[arg(long)]
     pub json: bool,
@@ -660,6 +810,16 @@ fn parse_top_k(value: &str) -> Result<usize, String> {
     Ok(parsed)
 }
 
+fn parse_duration_seconds(value: &str) -> Result<Duration, String> {
+    let value = value.trim();
+    let seconds = value.strip_suffix('s').unwrap_or(value);
+    let seconds = seconds
+        .parse::<u64>()
+        .map_err(|error| format!("timeout must be seconds: {error}"))?;
+
+    Ok(Duration::from_secs(seconds))
+}
+
 fn parse_admin_ai_recompute_scope(value: &str) -> Result<AdminAiRecomputeScope, String> {
     match value {
         "vault" => Ok(AdminAiRecomputeScope::Vault),
@@ -671,5 +831,30 @@ fn parse_admin_ai_status(value: &str) -> Result<String, String> {
     match value {
         "pending" | "in-flight" | "done" | "failed" => Ok(value.to_string()),
         other => Err(format!("unknown AI job status: {other}")),
+    }
+}
+
+fn parse_wiki_lint_scope(value: &str) -> Result<WikiLintScopeArg, String> {
+    match value {
+        "vault" => Ok(WikiLintScopeArg::Vault),
+        other => Err(format!("unknown wiki lint scope: {other}")),
+    }
+}
+
+fn parse_wiki_lint_kind(value: &str) -> Result<WikiLintKindArg, String> {
+    match value {
+        "orphan_page" => Ok(WikiLintKindArg::OrphanPage),
+        "stale_claim" => Ok(WikiLintKindArg::StaleClaim),
+        "missing_xref" => Ok(WikiLintKindArg::MissingXref),
+        "missing_page" => Ok(WikiLintKindArg::MissingPage),
+        other => Err(format!("unknown wiki lint kind: {other}")),
+    }
+}
+
+fn parse_chat_save_as_wiki_type(value: &str) -> Result<ChatSaveAsWikiTypeArg, String> {
+    match value {
+        "wiki-synthesis" => Ok(ChatSaveAsWikiTypeArg::WikiSynthesis),
+        "wiki-entity" => Ok(ChatSaveAsWikiTypeArg::WikiEntity),
+        other => Err(format!("unknown chat save-as-wiki type: {other}")),
     }
 }

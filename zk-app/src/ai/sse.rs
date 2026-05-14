@@ -64,7 +64,7 @@ pub(super) fn chat_sse_stream(
 
                 match state.body.next().await {
                     Some(Ok(bytes)) => read_bytes(&mut state, bytes),
-                    Some(Err(error)) => push_failure(&mut state, sync_to_network_error(error)),
+                    Some(Err(error)) => push_failure(&mut state, sync_to_network_error(&error)),
                     None => finish_eof(&mut state),
                 }
             }
@@ -194,7 +194,7 @@ fn invalid_sse_error(message: String) -> AppError {
     }
 }
 
-fn sync_to_network_error(error: SyncError) -> AppError {
+fn sync_to_network_error(error: &SyncError) -> AppError {
     AppError::Network {
         message: error.to_string(),
     }

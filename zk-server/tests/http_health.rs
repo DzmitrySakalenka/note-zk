@@ -120,7 +120,7 @@ async fn health_endpoint_returns_expected_body_after_bootstrap() {
     assert_eq!(content_type, "application/json");
     assert_eq!(health_response.status, "ok");
     assert!(health_response.db_ok);
-    assert_eq!(health_response.schema_version, 8);
+    assert_eq!(health_response.schema_version, 9);
     assert!(health_response.uptime_seconds >= 0);
 }
 
@@ -157,7 +157,7 @@ async fn concurrent_health_requests_complete_successfully() {
     for json_body in [&first_json, &second_json] {
         assert_eq!(json_body["status"], "ok");
         assert_eq!(json_body["db_ok"], true);
-        assert_eq!(json_body["schema_version"], 8);
+        assert_eq!(json_body["schema_version"], 9);
     }
 }
 

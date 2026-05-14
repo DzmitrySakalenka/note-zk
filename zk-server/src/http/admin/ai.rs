@@ -94,6 +94,25 @@ pub(super) async fn jobs(
     Ok(Json(jobs.into_iter().map(listed_job).collect()))
 }
 
+pub(super) async fn job(
+    State(state): State<ServerState>,
+    _admin: AuthenticatedAdmin,
+    Path(job_id): Path<String>,
+) -> Result<Json<ListedJob>, ApiError> {
+    ensure_ai_enabled(&state)?;
+    let job_id = parse_job_id(&job_id)?;
+    let blocking_state = state.clone();
+    let job = run_blocking("get AI job", move || {
+        blocking_state
+            .db()
+            .with_conn(|connection| AiJobsRepo::new(connection).get(&job_id))
+    })
+    .await?
+    .ok_or_else(|| ServerError::NotFound("AI job not found".to_string()))?;
+
+    Ok(Json(listed_job(job)))
+}
+
 pub(super) async fn cancel(
     State(state): State<ServerState>,
     _admin: AuthenticatedAdmin,
@@ -176,6 +195,8 @@ fn listed_job(job: AiJob) -> ListedJob {
         AiJobKind::RecomputeNote { note_id } => ("recompute_note", Some(note_id.to_string())),
         AiJobKind::RecomputeVault => ("recompute_vault", None),
         AiJobKind::ChatTurn { .. } => ("chat_turn", None),
+        AiJobKind::IngestSource { .. } => ("ingest_source", None),
+        AiJobKind::LintWiki { .. } => ("lint_wiki", None),
     };
 
     ListedJob {

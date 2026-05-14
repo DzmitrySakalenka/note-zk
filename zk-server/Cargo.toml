@@ -37,9 +37,11 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 ulid = "1.2.1"
 zk-ai = { version = "0.1.0", path = "../zk-ai", features = ["provider-http", "provider-local"] }
+zk-app = { version = "0.1.0", path = "../zk-app" }
 zk-auth = { version = "0.1.0", path = "../zk-auth" }
 zk-backup = { version = "0.1.0", path = "../zk-backup" }
 zk-domain = { path = "../zk-domain" }
+zk-index = { version = "0.1.0", path = "../zk-index" }
 zk-vault = { version = "0.1.0", path = "../zk-vault" }
 
 [dev-dependencies]
@@ -47,6 +49,7 @@ age = "0.11.3"
 assert_cmd = "2.2.1"
 async-trait = "0.1.89"
 hex = "0.4.3"
+insta = { version = "1.47.2", features = ["yaml"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 secrecy = "0.10.3"
 sha2 = "0.11.0"

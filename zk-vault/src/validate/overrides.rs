@@ -48,6 +48,9 @@ fn parse_rule_id(name: &str) -> Option<RuleId> {
         "UnresolvedLink" => Some(RuleId::UnresolvedLink),
         "AmbiguousLink" => Some(RuleId::AmbiguousLink),
         "BrokenAssetRef" => Some(RuleId::BrokenAssetRef),
+        "WikiUnknownType" => Some(RuleId::WikiUnknownType),
+        "WikiSourceMissing" => Some(RuleId::WikiSourceMissing),
+        "WikiIndexOutsideWikiRoot" => Some(RuleId::WikiIndexOutsideWikiRoot),
         _ => None,
     }
 }

@@ -260,6 +260,7 @@ fn multi_file_vault_regression_scan_and_apply() {
             "raw".to_string(),
             FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         )]),
         ..EffectiveConfig::default()

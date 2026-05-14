@@ -7,6 +7,9 @@ Date: 2026-04-07
 
 Stable `asset_id` for binary files (images, PDFs, etc.) exists only in the SQLite index, not in the files themselves. This is an accepted limitation of the filesystem-first architecture.
 
+For the LLM Wiki workflow application of this decision, see
+[ADR 0016](0016-llm-wiki-protocol.md).
+
 When the index is lost, asset identity is reconstructed using a best-effort heuristic: path + content hash matching.
 
 ## Why

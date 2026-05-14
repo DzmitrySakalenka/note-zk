@@ -22,7 +22,7 @@ use zk_domain::{
     RestoreRequest, SyncChange, SyncPullRequest, SyncPullResponse, SyncPushRequest,
     SyncPushResponse, TargetSelector, TrashRequest, WireEventType, WireItemType, WireOperation,
     asset::AssetRecord,
-    config::EffectiveConfig,
+    config::{EffectiveConfig, FolderPolicy},
     id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath},
     note::{NoteFrontmatter, NoteRecord},
     sync_state::{DeleteRecord, DeleteRecordTarget, NoteSyncState},
@@ -496,6 +496,16 @@ impl ClientFixture {
         block_on(pull_and_apply(transport, self.sync_context()))
     }
 
+    pub fn mark_folder_derived(&mut self, prefix: &str) {
+        self.config.folders.insert(
+            prefix.to_string(),
+            FolderPolicy {
+                immutable: None,
+                derived: Some(true),
+            },
+        );
+    }
+
     pub fn make_note(&mut self, path: &str, body: &str) -> NoteId {
         let note_id = self.next_note_id();
         create_note(
@@ -694,6 +704,7 @@ impl ClientFixture {
             device_id: &self.device_id,
             clock: &self.clock,
             trash_dir: &self.trash_dir,
+            folders: &self.config.folders,
         }
     }
 }

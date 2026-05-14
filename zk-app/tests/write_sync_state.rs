@@ -216,6 +216,7 @@ fn batch_write_updates_only_successful_items() {
             "raw".to_string(),
             zk_domain::config::FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         )]),
         ..EffectiveConfig::default()

@@ -31,6 +31,9 @@ pub mod status;
 pub mod sync;
 /// Handles the `trash` subcommand.
 pub mod trash;
+/// Handles the `wiki` subcommand.
+#[cfg(feature = "ai")]
+pub mod wiki;
 
 fn infer_target_selector(target: &str) -> TargetSelector {
     if target.contains('/') || target.contains('\\') || Path::new(target).extension().is_some() {

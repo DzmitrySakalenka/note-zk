@@ -191,6 +191,7 @@ fn batch_write_immutable_middle_create_records_failure_and_keeps_earlier_success
             "raw".to_string(),
             FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         )]),
         ..EffectiveConfig::default()

@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf};
 use url::Url;
 
+use crate::id::RelativePath;
+
 /// Default environment variable name used to read the sync bearer token.
 pub const DEFAULT_BEARER_TOKEN_ENV: &str = "ZK_DEVICE_TOKEN";
 
@@ -33,6 +35,8 @@ pub struct VaultConfig {
     pub normalization: Option<NormalizationConfig>,
     /// Optional validation behavior overrides for this vault.
     pub validation: Option<ValidationConfig>,
+    /// Optional wiki layout configuration.
+    pub wiki: Option<WikiConfig>,
     /// Optional sync settings that travel with this vault.
     pub sync: Option<SyncConfig>,
     #[serde(default)]
@@ -51,11 +55,61 @@ pub struct SyncConfig {
     pub device_id: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+/// Vault-level wiki layout configuration.
+pub struct WikiConfig {
+    #[serde(default = "default_wiki_root_dir")]
+    /// Vault-relative root for generated wiki pages.
+    pub root_dir: String,
+    #[serde(default = "default_wiki_raw_dir")]
+    /// Vault-relative root for raw source material.
+    pub raw_dir: String,
+    #[serde(default = "default_wiki_index_file")]
+    /// Wiki index filename joined under `root_dir`.
+    pub index_file: String,
+    #[serde(default = "default_wiki_log_file")]
+    /// Wiki log filename joined under `root_dir`.
+    pub log_file: String,
+}
+
+impl Default for WikiConfig {
+    fn default() -> Self {
+        Self {
+            root_dir: default_wiki_root_dir(),
+            raw_dir: default_wiki_raw_dir(),
+            index_file: default_wiki_index_file(),
+            log_file: default_wiki_log_file(),
+        }
+    }
+}
+
+fn default_wiki_root_dir() -> String {
+    "wiki/".to_string()
+}
+
+fn default_wiki_raw_dir() -> String {
+    "raw/".to_string()
+}
+
+fn default_wiki_index_file() -> String {
+    "index.md".to_string()
+}
+
+fn default_wiki_log_file() -> String {
+    "log.md".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
 /// Per-folder policy flags that tune scan and write behavior.
 pub struct FolderPolicy {
+    #[serde(default)]
     /// Marks folder content as readable but immutable for normalization writes.
     pub immutable: Option<bool>,
+    #[serde(default)]
+    /// Marks system-derived content whose future sync conflicts use last-write-wins.
+    ///
+    /// ADR 0016 will define the conflict-policy implications.
+    pub derived: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
@@ -124,6 +178,31 @@ impl Default for EffectiveSyncConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+/// Effective wiki layout with fully resolved vault-relative paths.
+pub struct EffectiveWikiConfig {
+    /// Effective vault-relative wiki root.
+    pub root_dir: RelativePath,
+    /// Effective vault-relative raw source root.
+    pub raw_dir: RelativePath,
+    /// Effective vault-relative wiki index path.
+    pub index_path: RelativePath,
+    /// Effective vault-relative wiki log path.
+    pub log_path: RelativePath,
+}
+
+impl From<&WikiConfig> for EffectiveWikiConfig {
+    fn from(config: &WikiConfig) -> Self {
+        let root_dir = RelativePath::new(&config.root_dir);
+        Self {
+            root_dir: root_dir.clone(),
+            raw_dir: RelativePath::new(&config.raw_dir),
+            index_path: join_relative_path(&root_dir, &config.index_file),
+            log_path: join_relative_path(&root_dir, &config.log_file),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 /// Fully merged, runtime-ready configuration used across crates.
 pub struct EffectiveConfig {
@@ -145,6 +224,8 @@ pub struct EffectiveConfig {
     pub validation: ValidationConfig,
     /// Effective folder policy map.
     pub folders: BTreeMap<String, FolderPolicy>,
+    /// Effective wiki layout when wiki mode is configured.
+    pub wiki: Option<EffectiveWikiConfig>,
     /// Effective sync client configuration.
     pub sync: EffectiveSyncConfig,
 }
@@ -161,7 +242,73 @@ impl Default for EffectiveConfig {
             allowed_note_extensions: vec!["md".to_string()],
             validation: ValidationConfig::default(),
             folders: BTreeMap::new(),
+            wiki: None,
             sync: EffectiveSyncConfig::default(),
         }
     }
+}
+
+impl EffectiveConfig {
+    /// Returns the effective wiki index path when wiki mode is configured.
+    #[must_use]
+    pub fn wiki_index_path(&self) -> Option<RelativePath> {
+        self.wiki.as_ref().map(|wiki| wiki.index_path.clone())
+    }
+
+    /// Returns the effective wiki log path when wiki mode is configured.
+    #[must_use]
+    pub fn wiki_log_path(&self) -> Option<RelativePath> {
+        self.wiki.as_ref().map(|wiki| wiki.log_path.clone())
+    }
+}
+
+/// Resolves a folder policy for a vault-relative path by longest matching prefix.
+#[must_use]
+pub fn resolve_folder_policy(
+    relative_path: &RelativePath,
+    folders: &BTreeMap<String, FolderPolicy>,
+) -> Option<FolderPolicy> {
+    let normalized_path = relative_path.to_string();
+    let mut best_match: Option<(usize, &FolderPolicy)> = None;
+
+    for (raw_prefix, policy) in folders {
+        let normalized_prefix = RelativePath::new(raw_prefix).to_string();
+        if !path_has_prefix(&normalized_path, &normalized_prefix) {
+            continue;
+        }
+
+        match best_match {
+            Some((best_prefix_len, _)) if normalized_prefix.len() <= best_prefix_len => {}
+            _ => best_match = Some((normalized_prefix.len(), policy)),
+        }
+    }
+
+    best_match.map(|(_, policy)| policy.clone())
+}
+
+/// Returns whether a vault-relative path is marked as system-derived content.
+#[must_use]
+pub fn is_path_derived(
+    relative_path: &RelativePath,
+    folders: &BTreeMap<String, FolderPolicy>,
+) -> bool {
+    resolve_folder_policy(relative_path, folders).is_some_and(|policy| policy.derived == Some(true))
+}
+
+fn path_has_prefix(path: &str, prefix: &str) -> bool {
+    path == prefix
+        || path
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn join_relative_path(parent: &RelativePath, child: &str) -> RelativePath {
+    let child_path = RelativePath::new(child);
+    if parent.as_str().is_empty() {
+        return child_path;
+    }
+    if child_path.as_str().is_empty() {
+        return parent.clone();
+    }
+    RelativePath::new(&format!("{}/{}", parent.as_str(), child_path.as_str()))
 }

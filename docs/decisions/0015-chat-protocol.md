@@ -17,6 +17,9 @@ HTTP streaming, and app offline policy. These protocol choices need one
 place to record the V1 behavior and the alternatives TG17 intentionally
 left for post-V1 work.
 
+For the LLM Wiki workflow application of chat citations and write-back,
+see [ADR 0016](0016-llm-wiki-protocol.md).
+
 ## Decision
 
 ### Server-canonical conversations

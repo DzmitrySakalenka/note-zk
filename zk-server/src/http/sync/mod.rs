@@ -1,7 +1,4 @@
 //! HTTP handlers for sync endpoints.
-//!
-//! This module is scaffolded before TG13-006 mounts the routes with auth.
-#![allow(dead_code)]
 
 mod devices;
 mod dto;

@@ -29,6 +29,8 @@ pub struct NoteInput {
     pub tags: Vec<String>,
     /// Effective note aliases.
     pub aliases: Vec<String>,
+    /// Source note identifiers that contributed to this note.
+    pub sources: Vec<NoteId>,
     /// Outbound resolved or unresolved note links.
     pub note_links: Vec<ResolvedNoteLink>,
     /// Outbound external URL links.

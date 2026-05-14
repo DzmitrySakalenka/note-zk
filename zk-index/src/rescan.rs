@@ -6,12 +6,14 @@ use zk_domain::{
 };
 
 use crate::{
-    AssetInput, AssetRepo, LinkRepo, NoteInput, NoteRepo, UpsertNoteParams, error::IndexError,
+    AssetInput, AssetRepo, LinkRepo, NoteInput, NoteRepo, SourcesRepo, UpsertNoteParams,
+    error::IndexError,
 };
 
 const CLEAR_DERIVED_TABLES_SQL: &str = r"
 DELETE FROM note_tags;
 DELETE FROM note_aliases;
+DELETE FROM note_sources;
 DELETE FROM note_links;
 DELETE FROM external_links;
 DELETE FROM asset_references;
@@ -34,6 +36,8 @@ pub struct RebuildStats {
     pub external_links_inserted: usize,
     /// Number of outbound asset references inserted from input.
     pub asset_references_inserted: usize,
+    /// Number of source-note provenance rows inserted from input.
+    pub note_sources_inserted: usize,
 }
 
 /// Atomically rebuilds the local index from vault-independent note and asset input.
@@ -87,6 +91,7 @@ fn build_rebuild_stats(notes: &[NoteInput], assets: &[AssetInput]) -> RebuildSta
         note_links_inserted: notes.iter().map(|note| note.note_links.len()).sum(),
         external_links_inserted: notes.iter().map(|note| note.external_links.len()).sum(),
         asset_references_inserted: notes.iter().map(|note| note.asset_references.len()).sum(),
+        note_sources_inserted: notes.iter().map(|note| note.sources.len()).sum(),
     }
 }
 
@@ -117,6 +122,7 @@ fn rebuild_notes(transaction: &Transaction<'_>, notes: &[NoteInput]) -> Result<(
         )?;
         NoteRepo::replace_tags(transaction, &note.note_id, &note.tags)?;
         NoteRepo::replace_aliases(transaction, &note.note_id, &note.aliases)?;
+        SourcesRepo::replace_for_note(transaction, &note.note_id, &note.sources)?;
         LinkRepo::replace_note_links(transaction, &note.note_id, &note.note_links)?;
         LinkRepo::replace_external_links(transaction, &note.note_id, &note.external_links)?;
         AssetRepo::replace_asset_references(transaction, &note.note_id, &note.asset_references)?;

@@ -3,7 +3,7 @@
 
 use zk_ai::{
     AiError,
-    chunker::{Chunker, ChunkerOptions, ParagraphChunker},
+    chunker::{ChunkerOptions, ParagraphChunker},
 };
 use zk_domain::id::{ContentHash, NoteId};
 

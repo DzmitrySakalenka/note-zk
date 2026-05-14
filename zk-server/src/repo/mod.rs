@@ -16,8 +16,11 @@ mod sessions;
 mod timestamps;
 mod tokens;
 mod users;
+mod wiki_lint_findings;
 
-pub use ai_jobs::{AiJob, AiJobFilter, AiJobKind, AiJobKindFilter, AiJobStatus, AiJobsRepo};
+pub use ai_jobs::{
+    AiJob, AiJobFilter, AiJobKind, AiJobKindFilter, AiJobStatus, AiJobsRepo, WikiLintScope,
+};
 pub use assets::{AssetRow, AssetsRepo};
 pub use chunks::ChunksRepo;
 pub use conversations::{ConversationsRepo, ListConversationsParams};
@@ -32,4 +35,5 @@ pub use notes::{NoteRow, NotesRepo};
 pub use sessions::{WebSessionInsert, WebSessionRepo, WebSessionRow};
 pub use tokens::{DeviceTokenInsert, DeviceTokenRepo, DeviceTokenRow};
 pub use users::{UserPasswordRow, UserRepo, UserRow};
+pub use wiki_lint_findings::{WikiLintFindingRow, WikiLintFindingsRepo};
 pub use zk_domain::{decode_vector, encode_vector};

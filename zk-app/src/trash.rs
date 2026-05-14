@@ -197,6 +197,7 @@ fn build_note_input(
         updated_at: resolved.note.updated_at.clone(),
         tags: Vec::new(),
         aliases: Vec::new(),
+        sources: Vec::new(),
         note_links: Vec::new(),
         external_links: Vec::new(),
         asset_references: Vec::new(),

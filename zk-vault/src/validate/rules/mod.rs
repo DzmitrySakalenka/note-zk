@@ -16,6 +16,9 @@ pub(crate) mod title_derived_from_h1;
 pub(crate) mod title_h1_mismatch;
 pub(crate) mod trashed_unknown_identity;
 pub(crate) mod unresolved_link;
+pub(crate) mod wiki_index_outside_root;
+pub(crate) mod wiki_source_missing;
+pub(crate) mod wiki_unknown_type;
 
 use super::ValidationRule;
 
@@ -37,6 +40,9 @@ static ID_INJECTED: id_injected::Rule = id_injected::Rule;
 static DEFAULT_UNTAGGED_TAG: default_untagged_tag::Rule = default_untagged_tag::Rule;
 static FRONTMATTER_INSERTED: frontmatter_inserted::Rule = frontmatter_inserted::Rule;
 static MERMAID_BLOCK_DETECTED: mermaid_block_detected::Rule = mermaid_block_detected::Rule;
+static WIKI_UNKNOWN_TYPE: wiki_unknown_type::Rule = wiki_unknown_type::Rule;
+static WIKI_SOURCE_MISSING: wiki_source_missing::Rule = wiki_source_missing::Rule;
+static WIKI_INDEX_OUTSIDE_ROOT: wiki_index_outside_root::Rule = wiki_index_outside_root::Rule;
 
 pub(crate) static ALL: &[&dyn ValidationRule] = &[
     &INVALID_FRONTMATTER,
@@ -56,4 +62,7 @@ pub(crate) static ALL: &[&dyn ValidationRule] = &[
     &DEFAULT_UNTAGGED_TAG,
     &FRONTMATTER_INSERTED,
     &MERMAID_BLOCK_DETECTED,
+    &WIKI_UNKNOWN_TYPE,
+    &WIKI_SOURCE_MISSING,
+    &WIKI_INDEX_OUTSIDE_ROOT,
 ];

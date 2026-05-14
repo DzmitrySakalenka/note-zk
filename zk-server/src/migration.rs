@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension};
 use crate::schema::{
     V1_INDEX_DDL, V1_TABLE_DDL, V2_INDEX_DDL, V2_TABLE_DDL, V3_INDEX_DDL, V3_TABLE_DDL,
     V4_INDEX_DDL, V4_TABLE_DDL, V5_INDEX_DDL, V5_TABLE_DDL, V6_INDEX_DDL, V6_TABLE_DDL,
-    V7_INDEX_DDL, V7_TABLE_DDL, V8_INDEX_DDL, V8_TABLE_DDL,
+    V7_INDEX_DDL, V7_TABLE_DDL, V8_INDEX_DDL, V8_TABLE_DDL, V9_INDEX_DDL, V9_TABLE_DDL,
 };
 use crate::{ServerError, ServerResult};
 
@@ -17,7 +17,7 @@ const SELECT_SERVER_SCHEMA_VERSION: &str = "SELECT version FROM server_schema_ve
 const DELETE_SERVER_SCHEMA_VERSION_ROWS: &str = "DELETE FROM server_schema_version";
 const INSERT_SERVER_SCHEMA_VERSION: &str =
     "INSERT INTO server_schema_version (id, version) VALUES (1, ?1)";
-const CURRENT_VERSION: i64 = 8;
+const CURRENT_VERSION: i64 = 9;
 
 struct Migration {
     target_version: i64,
@@ -65,6 +65,11 @@ const MIGRATIONS: &[Migration] = &[
         target_version: 8,
         tables: V8_TABLE_DDL,
         indexes: V8_INDEX_DDL,
+    },
+    Migration {
+        target_version: 9,
+        tables: V9_TABLE_DDL,
+        indexes: V9_INDEX_DDL,
     },
 ];
 

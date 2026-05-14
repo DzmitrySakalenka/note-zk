@@ -23,7 +23,11 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
-use zk_domain::{AuthScope, ExecutionMode, id::ContentHash};
+use zk_domain::{
+    AuthScope, ExecutionMode,
+    config::EffectiveConfig,
+    id::{ContentHash, DeviceId},
+};
 use zk_server::{
     ServerDb,
     ai::{
@@ -251,6 +255,11 @@ fn spawn_worker(
             selector,
             config: config.clone(),
             vault_root: state.config().vault_path.clone(),
+            app_config: EffectiveConfig {
+                vault_path: state.config().vault_path.clone(),
+                ..EffectiveConfig::default()
+            },
+            worker_device_id: DeviceId::new("server-ai-worker-test"),
         },
         shutdown,
     )

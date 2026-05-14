@@ -1,13 +1,12 @@
 use std::io::{self, ErrorKind};
+use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, Row, types::Type};
 
 use crate::{ServerError, ServerResult};
 
-const CREATE_ASSET_SQL: &str = r"
-INSERT INTO assets (
-    asset_id,
+const SERVER_ASSET_COLUMNS: &str = r"    asset_id,
     current_path,
     content_hash,
     mime_type,
@@ -18,11 +17,18 @@ INSERT INTO assets (
     deleted_at,
     is_trashed,
     is_deleted,
-    server_revision
+    server_revision";
+static CREATE_ASSET_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
+INSERT INTO assets (
+{SERVER_ASSET_COLUMNS}
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
 )
-";
+"
+    )
+});
 const UPDATE_ASSET_SQL: &str = r"
 UPDATE assets
 SET
@@ -39,76 +45,48 @@ SET
     server_revision = ?12
 WHERE asset_id = ?1
 ";
-const GET_ASSET_SQL: &str = r"
+static GET_ASSET_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
 SELECT
-    asset_id,
-    current_path,
-    content_hash,
-    mime_type,
-    size_bytes,
-    created_at,
-    updated_at,
-    trashed_at,
-    deleted_at,
-    is_trashed,
-    is_deleted,
-    server_revision
+{SERVER_ASSET_COLUMNS}
 FROM assets
 WHERE asset_id = ?1
-";
-const GET_ASSET_BY_PATH_SQL: &str = r"
+"
+    )
+});
+static GET_ASSET_BY_PATH_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
 SELECT
-    asset_id,
-    current_path,
-    content_hash,
-    mime_type,
-    size_bytes,
-    created_at,
-    updated_at,
-    trashed_at,
-    deleted_at,
-    is_trashed,
-    is_deleted,
-    server_revision
+{SERVER_ASSET_COLUMNS}
 FROM assets
 WHERE current_path = ?1 AND is_deleted = 0
 LIMIT 1
-";
-const LIST_ALL_ASSETS_SQL: &str = r"
+"
+    )
+});
+static LIST_ALL_ASSETS_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
 SELECT
-    asset_id,
-    current_path,
-    content_hash,
-    mime_type,
-    size_bytes,
-    created_at,
-    updated_at,
-    trashed_at,
-    deleted_at,
-    is_trashed,
-    is_deleted,
-    server_revision
+{SERVER_ASSET_COLUMNS}
 FROM assets
 ORDER BY server_revision ASC, asset_id ASC
-";
-const LIST_ASSETS_SINCE_REVISION_SQL: &str = r"
+"
+    )
+});
+static LIST_ASSETS_SINCE_REVISION_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
 SELECT
-    asset_id,
-    current_path,
-    content_hash,
-    mime_type,
-    size_bytes,
-    created_at,
-    updated_at,
-    trashed_at,
-    deleted_at,
-    is_trashed,
-    is_deleted,
-    server_revision
+{SERVER_ASSET_COLUMNS}
 FROM assets
 WHERE server_revision > ?1
 ORDER BY server_revision ASC, asset_id ASC
-";
+"
+    )
+});
 const DELETE_ASSET_HARD_SQL: &str = "DELETE FROM assets WHERE asset_id = ?1";
 const EXISTS_ASSET_SQL: &str = "SELECT 1 FROM assets WHERE asset_id = ?1 LIMIT 1";
 
@@ -161,7 +139,7 @@ impl AssetsRepo {
         let deleted_at = encode_optional_timestamp(row.deleted_at);
 
         conn.execute(
-            CREATE_ASSET_SQL,
+            CREATE_ASSET_SQL.as_str(),
             rusqlite::params![
                 &row.asset_id,
                 &row.current_path,
@@ -220,7 +198,7 @@ impl AssetsRepo {
     /// Returns [`ServerError`] if the query fails or row decoding is invalid.
     pub fn get(conn: &Connection, asset_id: &str) -> ServerResult<Option<AssetRow>> {
         let mut statement = conn
-            .prepare_cached(GET_ASSET_SQL)
+            .prepare_cached(GET_ASSET_SQL.as_str())
             .map_err(ServerError::Database)?;
 
         statement
@@ -239,7 +217,7 @@ impl AssetsRepo {
     /// Returns [`ServerError`] if the query fails or row decoding is invalid.
     pub fn get_by_path(conn: &Connection, path: &str) -> ServerResult<Option<AssetRow>> {
         let mut statement = conn
-            .prepare_cached(GET_ASSET_BY_PATH_SQL)
+            .prepare_cached(GET_ASSET_BY_PATH_SQL.as_str())
             .map_err(ServerError::Database)?;
 
         statement
@@ -254,7 +232,7 @@ impl AssetsRepo {
     ///
     /// Returns [`ServerError`] if the query fails or row decoding is invalid.
     pub fn list_all(conn: &Connection) -> ServerResult<Vec<AssetRow>> {
-        list_assets(conn, LIST_ALL_ASSETS_SQL, None)
+        list_assets(conn, LIST_ALL_ASSETS_SQL.as_str(), None)
     }
 
     /// Lists asset rows whose `server_revision` is greater than `min_rev`.
@@ -266,7 +244,7 @@ impl AssetsRepo {
     ///
     /// Returns [`ServerError`] if the query fails or row decoding is invalid.
     pub fn list_since_revision(conn: &Connection, min_rev: i64) -> ServerResult<Vec<AssetRow>> {
-        list_assets(conn, LIST_ASSETS_SINCE_REVISION_SQL, Some(min_rev))
+        list_assets(conn, LIST_ASSETS_SINCE_REVISION_SQL.as_str(), Some(min_rev))
     }
 
     /// Permanently deletes one asset row.

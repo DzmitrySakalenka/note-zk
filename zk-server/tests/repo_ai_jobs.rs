@@ -3,10 +3,13 @@
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
-use zk_domain::{ConversationId, JobId, id::NoteId};
+use zk_domain::{
+    ConversationId, JobId,
+    id::{NoteId, RelativePath},
+};
 use zk_server::{
     migration::ensure_schema,
-    repo::{AiJobFilter, AiJobKind, AiJobKindFilter, AiJobStatus, AiJobsRepo},
+    repo::{AiJobFilter, AiJobKind, AiJobKindFilter, AiJobStatus, AiJobsRepo, WikiLintScope},
 };
 
 fn setup_connection() -> Connection {
@@ -37,6 +40,29 @@ fn chat_turn_kind() -> AiJobKind {
         conversation_id: conversation_id(),
         request_id: "req-chat-job".to_string(),
         user_query: "Summarize my filesystem notes".to_string(),
+    }
+}
+
+fn ingest_source_kind() -> AiJobKind {
+    AiJobKind::IngestSource {
+        source_note_id: note_id(),
+        request_id: "req-ingest-source".to_string(),
+    }
+}
+
+fn lint_wiki_vault_kind() -> AiJobKind {
+    AiJobKind::LintWiki {
+        scope: WikiLintScope::Vault,
+        request_id: "req-lint-wiki-vault".to_string(),
+    }
+}
+
+fn lint_wiki_folder_kind() -> AiJobKind {
+    AiJobKind::LintWiki {
+        scope: WikiLintScope::Folder {
+            path: RelativePath::new("wiki/projects"),
+        },
+        request_id: "req-lint-wiki-folder".to_string(),
     }
 }
 
@@ -113,6 +139,30 @@ fn enqueue_then_claim_next_returns_same_job_once() {
 }
 
 #[test]
+fn get_returns_job_by_id_and_none_for_missing_job() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let enqueued = repo
+        .enqueue(
+            recompute_note_kind(),
+            parse_timestamp("2026-05-05T10:00:00Z"),
+        )
+        .expect("job enqueue should succeed");
+    let missing = JobId::generate();
+
+    let loaded = repo
+        .get(&enqueued.job_id)
+        .expect("job lookup should succeed")
+        .expect("job should exist");
+
+    assert_eq!(loaded, enqueued);
+    assert_eq!(
+        repo.get(&missing).expect("missing lookup should succeed"),
+        None
+    );
+}
+
+#[test]
 fn chat_turn_payload_round_trips_through_queue() {
     let connection = setup_connection();
     let repo = AiJobsRepo::new(&connection);
@@ -125,6 +175,63 @@ fn chat_turn_payload_round_trips_through_queue() {
         .claim_next(3, parse_timestamp("2026-05-05T10:01:00Z"))
         .expect("chat job claim should succeed")
         .expect("chat job should be claimed");
+
+    assert_eq!(enqueued.kind, kind);
+    assert_eq!(claimed.kind, kind);
+    assert_eq!(claimed.status, AiJobStatus::InFlight);
+}
+
+#[test]
+fn ingest_source_payload_round_trips_through_queue() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let kind = ingest_source_kind();
+    let enqueued = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:00:00Z"))
+        .expect("ingest-source job enqueue should succeed");
+
+    let claimed = repo
+        .claim_next(3, parse_timestamp("2026-05-05T10:01:00Z"))
+        .expect("ingest-source job claim should succeed")
+        .expect("ingest-source job should be claimed");
+
+    assert_eq!(enqueued.kind, kind);
+    assert_eq!(claimed.kind, kind);
+    assert_eq!(claimed.status, AiJobStatus::InFlight);
+}
+
+#[test]
+fn lint_wiki_vault_payload_round_trips_through_queue() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let kind = lint_wiki_vault_kind();
+    let enqueued = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:00:00Z"))
+        .expect("lint-wiki vault job enqueue should succeed");
+
+    let claimed = repo
+        .claim_next(3, parse_timestamp("2026-05-05T10:01:00Z"))
+        .expect("lint-wiki vault job claim should succeed")
+        .expect("lint-wiki vault job should be claimed");
+
+    assert_eq!(enqueued.kind, kind);
+    assert_eq!(claimed.kind, kind);
+    assert_eq!(claimed.status, AiJobStatus::InFlight);
+}
+
+#[test]
+fn lint_wiki_folder_payload_round_trips_through_queue() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let kind = lint_wiki_folder_kind();
+    let enqueued = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:00:00Z"))
+        .expect("lint-wiki folder job enqueue should succeed");
+
+    let claimed = repo
+        .claim_next(3, parse_timestamp("2026-05-05T10:01:00Z"))
+        .expect("lint-wiki folder job claim should succeed")
+        .expect("lint-wiki folder job should be claimed");
 
     assert_eq!(enqueued.kind, kind);
     assert_eq!(claimed.kind, kind);
@@ -283,6 +390,18 @@ fn list_filters_by_status_and_kind() {
     let chat_job = repo
         .enqueue(chat_turn_kind(), parse_timestamp("2026-05-05T10:02:00Z"))
         .expect("chat job enqueue should succeed");
+    let ingest_job = repo
+        .enqueue(
+            ingest_source_kind(),
+            parse_timestamp("2026-05-05T10:03:00Z"),
+        )
+        .expect("ingest-source job enqueue should succeed");
+    let lint_job = repo
+        .enqueue(
+            lint_wiki_vault_kind(),
+            parse_timestamp("2026-05-05T10:04:00Z"),
+        )
+        .expect("lint-wiki job enqueue should succeed");
 
     let pending = repo
         .list(AiJobFilter {
@@ -312,10 +431,30 @@ fn list_filters_by_status_and_kind() {
             limit: None,
         })
         .expect("chat list should succeed");
+    let ingest_jobs = repo
+        .list(AiJobFilter {
+            status: None,
+            kind: Some(AiJobKindFilter::IngestSource),
+            limit: None,
+        })
+        .expect("ingest-source list should succeed");
+    let lint_jobs = repo
+        .list(AiJobFilter {
+            status: None,
+            kind: Some(AiJobKindFilter::LintWiki),
+            limit: None,
+        })
+        .expect("lint-wiki list should succeed");
 
     assert_eq!(
         pending.iter().map(|job| &job.job_id).collect::<Vec<_>>(),
-        vec![&chat_job.job_id, &vault_job.job_id, &note_job.job_id]
+        vec![
+            &lint_job.job_id,
+            &ingest_job.job_id,
+            &chat_job.job_id,
+            &vault_job.job_id,
+            &note_job.job_id
+        ]
     );
     assert_eq!(vault_jobs.len(), 1);
     assert_eq!(vault_jobs[0].job_id, vault_job.job_id);
@@ -323,6 +462,144 @@ fn list_filters_by_status_and_kind() {
     assert_eq!(pending_note_jobs[0].job_id, note_job.job_id);
     assert_eq!(chat_jobs.len(), 1);
     assert_eq!(chat_jobs[0].job_id, chat_job.job_id);
+    assert_eq!(ingest_jobs.len(), 1);
+    assert_eq!(ingest_jobs[0].job_id, ingest_job.job_id);
+    assert_eq!(lint_jobs.len(), 1);
+    assert_eq!(lint_jobs[0].job_id, lint_job.job_id);
+}
+
+#[test]
+fn enqueue_ingest_source_reuses_active_job() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let kind = ingest_source_kind();
+    let first = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:00:00Z"))
+        .expect("first ingest-source job enqueue should succeed");
+
+    let pending_duplicate = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:01:00Z"))
+        .expect("pending duplicate enqueue should succeed");
+    let claimed = repo
+        .claim_next(3, parse_timestamp("2026-05-05T10:02:00Z"))
+        .expect("ingest-source job claim should succeed")
+        .expect("ingest-source job should be claimed");
+    let in_flight_duplicate = repo
+        .enqueue(kind, parse_timestamp("2026-05-05T10:03:00Z"))
+        .expect("in-flight duplicate enqueue should succeed");
+    let ingest_jobs = repo
+        .list(AiJobFilter {
+            status: None,
+            kind: Some(AiJobKindFilter::IngestSource),
+            limit: None,
+        })
+        .expect("ingest-source list should succeed");
+
+    assert_eq!(pending_duplicate.job_id, first.job_id);
+    assert_eq!(pending_duplicate.status, AiJobStatus::Pending);
+    assert_eq!(claimed.job_id, first.job_id);
+    assert_eq!(in_flight_duplicate.job_id, first.job_id);
+    assert_eq!(in_flight_duplicate.status, AiJobStatus::InFlight);
+    assert_eq!(ingest_jobs.len(), 1);
+}
+
+#[test]
+fn enqueue_ingest_source_reuses_terminal_job() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let kind = ingest_source_kind();
+    let done_job = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:00:00Z"))
+        .expect("done job enqueue should succeed");
+    repo.claim_next(3, parse_timestamp("2026-05-05T10:01:00Z"))
+        .expect("done job claim should succeed")
+        .expect("done job should be claimed");
+    repo.mark_done(&done_job.job_id, parse_timestamp("2026-05-05T10:02:00Z"))
+        .expect("done job should mark done");
+
+    let done_duplicate = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:03:00Z"))
+        .expect("done duplicate enqueue should succeed");
+
+    assert_eq!(done_duplicate.job_id, done_job.job_id);
+    assert_eq!(done_duplicate.status, AiJobStatus::Done);
+
+    let failed_kind = AiJobKind::IngestSource {
+        source_note_id: other_note_id(),
+        request_id: "req-ingest-source-failed".to_string(),
+    };
+    let failed_job = repo
+        .enqueue(failed_kind.clone(), parse_timestamp("2026-05-05T10:04:00Z"))
+        .expect("failed job enqueue should succeed");
+    repo.claim_next(1, parse_timestamp("2026-05-05T10:05:00Z"))
+        .expect("failed job claim should succeed")
+        .expect("failed job should be claimed");
+    repo.mark_failed(
+        &failed_job.job_id,
+        "failed",
+        1,
+        parse_timestamp("2026-05-05T10:06:00Z"),
+    )
+    .expect("failed job should mark failed");
+
+    let failed_duplicate = repo
+        .enqueue(failed_kind, parse_timestamp("2026-05-05T10:07:00Z"))
+        .expect("failed duplicate enqueue should succeed");
+
+    assert_ne!(failed_job.job_id, done_job.job_id);
+    assert_eq!(failed_duplicate.job_id, failed_job.job_id);
+    assert_eq!(failed_duplicate.status, AiJobStatus::Failed);
+}
+
+#[test]
+fn enqueue_lint_wiki_reuses_only_active_job() {
+    let connection = setup_connection();
+    let repo = AiJobsRepo::new(&connection);
+    let kind = lint_wiki_vault_kind();
+    let first = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:00:00Z"))
+        .expect("first lint-wiki job enqueue should succeed");
+
+    let pending_duplicate = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:01:00Z"))
+        .expect("pending duplicate enqueue should succeed");
+    let claimed = repo
+        .claim_next(3, parse_timestamp("2026-05-05T10:02:00Z"))
+        .expect("lint-wiki job claim should succeed")
+        .expect("lint-wiki job should be claimed");
+    let in_flight_duplicate = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:03:00Z"))
+        .expect("in-flight duplicate enqueue should succeed");
+    repo.mark_done(&first.job_id, parse_timestamp("2026-05-05T10:04:00Z"))
+        .expect("lint-wiki job should mark done");
+    let after_done = repo
+        .enqueue(kind.clone(), parse_timestamp("2026-05-05T10:05:00Z"))
+        .expect("done duplicate enqueue should create new job");
+
+    assert_eq!(pending_duplicate.job_id, first.job_id);
+    assert_eq!(pending_duplicate.status, AiJobStatus::Pending);
+    assert_eq!(claimed.job_id, first.job_id);
+    assert_eq!(in_flight_duplicate.job_id, first.job_id);
+    assert_eq!(in_flight_duplicate.status, AiJobStatus::InFlight);
+    assert_ne!(after_done.job_id, first.job_id);
+    assert_eq!(after_done.status, AiJobStatus::Pending);
+
+    repo.claim_next(1, parse_timestamp("2026-05-05T10:06:00Z"))
+        .expect("second lint-wiki job claim should succeed")
+        .expect("second lint-wiki job should be claimed");
+    repo.mark_failed(
+        &after_done.job_id,
+        "failed",
+        1,
+        parse_timestamp("2026-05-05T10:07:00Z"),
+    )
+    .expect("second lint-wiki job should fail");
+    let after_failed = repo
+        .enqueue(kind, parse_timestamp("2026-05-05T10:08:00Z"))
+        .expect("failed duplicate enqueue should create new job");
+
+    assert_ne!(after_failed.job_id, after_done.job_id);
+    assert_eq!(after_failed.status, AiJobStatus::Pending);
 }
 
 #[test]

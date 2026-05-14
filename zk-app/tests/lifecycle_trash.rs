@@ -499,6 +499,7 @@ fn immutable_config(vault_root: &Path, immutable_prefix: &str) -> EffectiveConfi
         immutable_prefix.to_string(),
         FolderPolicy {
             immutable: Some(true),
+            derived: None,
         },
     )]);
     config

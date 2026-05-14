@@ -6,10 +6,7 @@ use zk_domain::{
     id::{ContentHash, NoteId},
 };
 
-use crate::{
-    AiError, AiResult,
-    chunker::{Chunker, ChunkerOptions},
-};
+use crate::{AiError, AiResult, chunker::ChunkerOptions};
 
 /// Paragraph and heading-aware chunker for V1 embedding recomputation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,16 +21,14 @@ impl ParagraphChunker {
     pub fn new(opts: ChunkerOptions) -> Self {
         Self { opts }
     }
-}
 
-impl Default for ParagraphChunker {
-    fn default() -> Self {
-        Self::new(ChunkerOptions::default())
-    }
-}
-
-impl Chunker for ParagraphChunker {
-    fn chunk(&self, note_id: &NoteId, body: &str) -> AiResult<Vec<ChunkRecord>> {
+    /// Splits a note body into deterministic chunk text and metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::AiError`] when chunker configuration is invalid or
+    /// when the implementation cannot make progress.
+    pub fn chunk(&self, note_id: &NoteId, body: &str) -> AiResult<Vec<ChunkRecord>> {
         if self.opts.max_tokens == 0 {
             return Err(AiError::InvalidConfig(
                 "max_tokens must be greater than zero".to_string(),
@@ -56,6 +51,12 @@ impl Chunker for ParagraphChunker {
             .enumerate()
             .map(|(ordinal, text)| build_chunk(note_id, ordinal, text))
             .collect())
+    }
+}
+
+impl Default for ParagraphChunker {
+    fn default() -> Self {
+        Self::new(ChunkerOptions::default())
     }
 }
 

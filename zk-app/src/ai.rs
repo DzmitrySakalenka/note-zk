@@ -134,6 +134,8 @@ pub struct ConversationDto {
 pub struct ConversationDetail {
     /// Conversation metadata.
     pub conversation: ConversationDto,
+    /// Chat model configured on the server when the detail was returned.
+    pub chat_model_id: EmbeddingModelId,
     /// Recent messages in chronological order.
     pub messages: Vec<MessageDto>,
 }
@@ -303,11 +305,11 @@ impl AiFacade {
             top_k: request.top_k,
             stream: request.stream,
         })
-        .expect("chat request should serialize");
+        .map_err(|error| json_serialize_error(&error))?;
         let response = http
             .post_json_stream(CHAT_PATH, &body)
             .await
-            .map_err(sync_to_network_error)?;
+            .map_err(|error| sync_to_network_error(&error))?;
 
         if response.status >= 400 {
             let body = collect_stream_body(response.body).await?;
@@ -361,7 +363,7 @@ impl AiFacade {
     pub async fn create_conversation(&self, title: Option<String>) -> AppResult<ConversationDto> {
         self.require_chat_connected().await?;
         let body = serde_json::to_value(CreateConversationRequest { title })
-            .expect("create conversation request should serialize");
+            .map_err(|error| json_serialize_error(&error))?;
 
         self.post_json(CONVERSATIONS_PATH, &body).await
     }
@@ -381,7 +383,7 @@ impl AiFacade {
             title: Some(title),
             archived: None,
         })
-        .expect("rename conversation request should serialize");
+        .map_err(|error| json_serialize_error(&error))?;
         self.patch_json(&conversation_path(&id), &body).await
     }
 
@@ -400,7 +402,7 @@ impl AiFacade {
             title: None,
             archived: Some(archived),
         })
-        .expect("archive conversation request should serialize");
+        .map_err(|error| json_serialize_error(&error))?;
         self.patch_json(&conversation_path(&id), &body).await
     }
 
@@ -419,7 +421,7 @@ impl AiFacade {
             .http_transport()?
             .delete_text(&conversation_path(&id))
             .await
-            .map_err(sync_to_network_error)?;
+            .map_err(|error| sync_to_network_error(&error))?;
         ensure_success(response).map(|_| ())
     }
 
@@ -552,7 +554,7 @@ impl AiFacade {
             .http_transport()?
             .get_text(path)
             .await
-            .map_err(sync_to_network_error)?;
+            .map_err(|error| sync_to_network_error(&error))?;
 
         decode_success_json(response)
     }
@@ -565,7 +567,7 @@ impl AiFacade {
             .http_transport()?
             .post_json_text(path, body)
             .await
-            .map_err(sync_to_network_error)?;
+            .map_err(|error| sync_to_network_error(&error))?;
 
         decode_success_json(response)
     }
@@ -575,7 +577,7 @@ impl AiFacade {
             .http_transport()?
             .patch_json_text(path, body)
             .await
-            .map_err(sync_to_network_error)?;
+            .map_err(|error| sync_to_network_error(&error))?;
 
         ensure_success(response).map(|_| ())
     }
@@ -827,7 +829,7 @@ async fn collect_stream_body(
     let mut bytes = Vec::new();
 
     while let Some(chunk) = body.next().await {
-        bytes.extend(chunk.map_err(sync_to_network_error)?);
+        bytes.extend(chunk.map_err(|error| sync_to_network_error(&error))?);
     }
 
     String::from_utf8(bytes).map_err(|error| AppError::ApiError {
@@ -858,14 +860,15 @@ fn ensure_success(response: HttpTextResponse) -> AppResult<HttpTextResponse> {
 }
 
 fn map_http_error(status: u16, body: &str) -> AppError {
-    let (code, message) = serde_json::from_str::<ApiErrorEnvelope>(body)
-        .map(|envelope| (envelope.error.code, envelope.error.message))
-        .unwrap_or_else(|_| {
+    let (code, message) = serde_json::from_str::<ApiErrorEnvelope>(body).map_or_else(
+        |_| {
             (
                 "http_error".to_string(),
                 fallback_http_message(status, body),
             )
-        });
+        },
+        |envelope| (envelope.error.code, envelope.error.message),
+    );
 
     match status {
         401 | 403 => AppError::Auth { message },
@@ -887,9 +890,17 @@ fn fallback_http_message(status: u16, body: &str) -> String {
     }
 }
 
-fn sync_to_network_error(error: SyncError) -> AppError {
+fn sync_to_network_error(error: &SyncError) -> AppError {
     AppError::Network {
-        message: error_chain_message(&error),
+        message: error_chain_message(error),
+    }
+}
+
+fn json_serialize_error(error: &serde_json::Error) -> AppError {
+    AppError::ApiError {
+        status: 0,
+        code: "serialize_error".to_string(),
+        message: error.to_string(),
     }
 }
 

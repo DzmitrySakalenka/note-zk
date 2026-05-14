@@ -1,14 +1,16 @@
 // Integration tests are separate crates; each uses only a subset of package dependencies.
 #![allow(unused_crate_dependencies)]
 
-use std::fmt::Debug;
+use std::{collections::BTreeMap, fmt::Debug};
 
 use serde::{Serialize, de::DeserializeOwned};
 use url::Url;
 use zk_domain::config::{
-    CliOverrides, EffectiveConfig, EffectiveSyncConfig, FolderPolicy, GlobalConfig,
-    NormalizationConfig, SyncConfig, ValidationConfig, VaultConfig,
+    CliOverrides, EffectiveConfig, EffectiveSyncConfig, EffectiveWikiConfig, FolderPolicy,
+    GlobalConfig, NormalizationConfig, SyncConfig, ValidationConfig, VaultConfig, WikiConfig,
+    is_path_derived,
 };
+use zk_domain::id::RelativePath;
 
 // ==========================================================================
 // Shared trait contract
@@ -25,11 +27,13 @@ fn config_types_implement_required_common_traits() {
     assert_common_traits::<GlobalConfig>();
     assert_common_traits::<VaultConfig>();
     assert_common_traits::<SyncConfig>();
+    assert_common_traits::<WikiConfig>();
     assert_common_traits::<FolderPolicy>();
     assert_common_traits::<NormalizationConfig>();
     assert_common_traits::<ValidationConfig>();
     assert_common_traits::<CliOverrides>();
     assert_common_traits::<EffectiveSyncConfig>();
+    assert_common_traits::<EffectiveWikiConfig>();
     assert_common_traits::<EffectiveConfig>();
 }
 
@@ -131,6 +135,92 @@ immutable = true
 }
 
 #[test]
+fn vault_config_round_trips_derived_folder_policy() {
+    let input = r#"
+[folders."wiki/"]
+derived = true
+"#;
+
+    let parsed: VaultConfig = toml::from_str(input).expect("parse derived folder policy");
+    let wiki_policy = parsed
+        .folders
+        .get("wiki/")
+        .expect("wiki folder policy should deserialize");
+    assert_eq!(wiki_policy.immutable, None);
+    assert_eq!(wiki_policy.derived, Some(true));
+
+    let serialized = toml::to_string(&parsed).expect("vault config should serialize");
+    assert!(
+        serialized.contains("derived = true"),
+        "serialized config should preserve derived flag: {serialized}"
+    );
+
+    let reparsed: VaultConfig =
+        toml::from_str(&serialized).expect("serialized vault config should parse");
+    assert_eq!(reparsed, parsed);
+}
+
+#[test]
+fn vault_config_deserializes_wiki_block_with_defaults() {
+    let input = r#"
+[wiki]
+root_dir = "knowledge/"
+"#;
+
+    let parsed: VaultConfig = toml::from_str(input).expect("parse wiki config");
+    let wiki = parsed
+        .wiki
+        .as_ref()
+        .expect("wiki config should deserialize");
+
+    assert_eq!(wiki.root_dir, "knowledge/");
+    assert_eq!(wiki.raw_dir, "raw/");
+    assert_eq!(wiki.index_file, "index.md");
+    assert_eq!(wiki.log_file, "log.md");
+
+    let serialized = toml::to_string(&parsed).expect("vault config should serialize");
+    assert!(
+        serialized.contains("[wiki]"),
+        "serialized config should preserve wiki block: {serialized}"
+    );
+    let reparsed: VaultConfig =
+        toml::from_str(&serialized).expect("serialized wiki config should parse");
+    assert_eq!(reparsed, parsed);
+}
+
+#[test]
+fn is_path_derived_uses_longest_matching_folder_policy() {
+    let mut folders = BTreeMap::new();
+    folders.insert(
+        "wiki/".to_string(),
+        FolderPolicy {
+            immutable: None,
+            derived: Some(true),
+        },
+    );
+    folders.insert(
+        "wiki/manual/".to_string(),
+        FolderPolicy {
+            immutable: None,
+            derived: Some(false),
+        },
+    );
+
+    assert!(is_path_derived(
+        &RelativePath::new("wiki/index.md"),
+        &folders
+    ));
+    assert!(!is_path_derived(
+        &RelativePath::new("wiki/manual/page.md"),
+        &folders
+    ));
+    assert!(!is_path_derived(
+        &RelativePath::new("wiki-notes/index.md"),
+        &folders
+    ));
+}
+
+#[test]
 fn vault_config_deserializes_validation_section() {
     let input = r#"
 [validation]
@@ -227,6 +317,9 @@ fn effective_config_default_is_safe_for_phase1() {
     assert_eq!(effective.sync.server_url, None);
     assert_eq!(effective.sync.bearer_token_env, "ZK_DEVICE_TOKEN");
     assert_eq!(effective.sync.device_id, None);
+    assert_eq!(effective.wiki, None);
+    assert_eq!(effective.wiki_index_path(), None);
+    assert_eq!(effective.wiki_log_path(), None);
 }
 
 #[test]
@@ -240,5 +333,27 @@ fn effective_config_default_has_empty_validation_config() {
     assert!(
         effective.validation.severity_overrides.is_empty(),
         "default severity_overrides should be empty"
+    );
+}
+
+#[test]
+fn effective_wiki_config_helpers_return_meta_paths() {
+    let config = EffectiveConfig {
+        wiki: Some(EffectiveWikiConfig {
+            root_dir: RelativePath::new("knowledge/"),
+            raw_dir: RelativePath::new("sources/"),
+            index_path: RelativePath::new("knowledge/home.md"),
+            log_path: RelativePath::new("knowledge/changes.md"),
+        }),
+        ..EffectiveConfig::default()
+    };
+
+    assert_eq!(
+        config.wiki_index_path(),
+        Some(RelativePath::new("knowledge/home.md"))
+    );
+    assert_eq!(
+        config.wiki_log_path(),
+        Some(RelativePath::new("knowledge/changes.md"))
     );
 }

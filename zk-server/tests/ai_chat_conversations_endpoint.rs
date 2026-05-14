@@ -13,8 +13,8 @@ use serde_json::{Value, json};
 use tempfile::NamedTempFile;
 use tower::ServiceExt;
 use zk_domain::{
-    AuthScope, ChunkId, ChunkRecord, Citation, ConversationId, ExecutionMode, MessageId,
-    MessageRecord, MessageRole,
+    AuthScope, ChunkId, ChunkRecord, Citation, ConversationId, EmbeddingModelId, ExecutionMode,
+    MessageId, MessageRecord, MessageRole,
     id::{ContentHash, NoteId},
 };
 use zk_server::{
@@ -37,6 +37,7 @@ use common::auth_fixtures::{
 };
 
 const CONVERSATIONS_PATH: &str = "/ai/chat/conversations";
+const CHAT_MODEL_ID: &str = "test/chat-conversations-model";
 const OTHER_USER_ID: &str = "user-b";
 
 struct ChatFixture {
@@ -62,6 +63,7 @@ struct ConversationDto {
 #[derive(Debug, Deserialize)]
 struct ConversationDetailDto {
     conversation: ConversationDto,
+    chat_model_id: String,
     messages: Vec<MessageDto>,
 }
 
@@ -374,6 +376,7 @@ async fn detail_returns_recent_messages_with_inline_citations() {
         conversation.conversation_id
     );
     assert_eq!(detail.conversation.message_count, 3);
+    assert_eq!(detail.chat_model_id, CHAT_MODEL_ID);
     assert_eq!(detail.messages.len(), 2);
     assert_eq!(detail.messages[0].message_id, second.message_id.to_string());
     assert_eq!(detail.messages[0].role, MessageRole::Assistant);
@@ -620,11 +623,20 @@ fn ai_config() -> AiConfig {
         remote: None,
         local: None,
         stub: Some(StubEmbeddingsConfig { dim: 2 }),
-        chat: Some(AiChatConfig::default()),
+        chat: Some(AiChatConfig {
+            model_id: chat_model_id(),
+            ..AiChatConfig::default()
+        }),
         default_mode: ExecutionMode::Hybrid,
         recompute_concurrency: 1,
         max_attempts: 3,
     }
+}
+
+fn chat_model_id() -> EmbeddingModelId {
+    CHAT_MODEL_ID
+        .parse()
+        .expect("chat model fixture should parse")
 }
 
 fn test_config(database_path: PathBuf, ai: Option<AiConfig>) -> ServerConfig {

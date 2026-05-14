@@ -7,6 +7,9 @@ Date: 2026-04-07
 
 The local SQLite index does not store `body_markdown`. It stores only metadata: frontmatter fields, content hash, path, timestamps, tags, links, and sync state. The note body is always read from the filesystem on demand.
 
+For the LLM Wiki workflow application of this decision, see
+[ADR 0016](0016-llm-wiki-protocol.md).
+
 ## Why
 
 Storing the full body in both the filesystem and SQLite creates ambiguity about which is authoritative. The architecture states "filesystem is source of truth." Duplicating the body in SQLite contradicts this and introduces drift risk with no clear reconciliation strategy.

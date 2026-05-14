@@ -180,6 +180,7 @@ fn immutable_folder_target_yields_immutable_folder_error() {
             "raw".to_string(),
             FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         )]),
         ..EffectiveConfig::default()

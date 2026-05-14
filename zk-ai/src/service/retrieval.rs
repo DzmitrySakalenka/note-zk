@@ -48,6 +48,7 @@ impl RetrievalParams {
 
 /// Retrieves diverse, budgeted chunks for chat prompt assembly.
 #[derive(Clone)]
+// why: this handle is cloned inside one request task; Arc shares ownership without crossing tokio::spawn.
 #[allow(clippy::arc_with_non_send_sync)]
 pub struct RetrievalService {
     reader: Arc<dyn EmbeddingsReader + Send + Sync>,

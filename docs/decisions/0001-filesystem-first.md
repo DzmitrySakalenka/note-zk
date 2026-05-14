@@ -9,6 +9,9 @@ The new project will use markdown files in a vault as the primary source of trut
 
 Indexes, embeddings, graph relationships, wiki articles, chat context caches, and sync metadata will be treated as derived or supporting data.
 
+For the LLM Wiki workflow application of this decision, see
+[ADR 0016](0016-llm-wiki-protocol.md).
+
 ## Why
 
 - the user already works in a file-based note workflow

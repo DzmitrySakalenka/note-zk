@@ -13,7 +13,8 @@ use zk_domain::{
 };
 use zk_index::{
     AssetInput, AssetRepo, DeleteRecordRepo, DeviceRepo, LinkRepo, NoteInput, NoteRepo,
-    RebuildStats, SyncStateRepo, UpsertNoteParams, ensure_schema, open_memory, rebuild_index,
+    RebuildStats, SourcesRepo, SyncStateRepo, UpsertNoteParams, ensure_schema, open_memory,
+    rebuild_index,
 };
 
 fn alpha_note_id() -> NoteId {
@@ -50,6 +51,7 @@ fn sample_note_inputs() -> Vec<NoteInput> {
             updated_at: "2026-04-02T12:00:00Z".to_string(),
             tags: vec!["zettel".to_string(), "alpha".to_string()],
             aliases: vec!["A".to_string()],
+            sources: vec![beta_note_id(), gamma_note_id()],
             note_links: vec![
                 ResolvedNoteLink {
                     source_note_id: alpha_note_id(),
@@ -91,6 +93,7 @@ fn sample_note_inputs() -> Vec<NoteInput> {
             updated_at: "2026-04-03T12:00:00Z".to_string(),
             tags: vec!["zettel".to_string()],
             aliases: vec!["Bee".to_string()],
+            sources: Vec::new(),
             note_links: vec![],
             external_links: vec![],
             asset_references: vec![],
@@ -109,6 +112,7 @@ fn sample_note_inputs() -> Vec<NoteInput> {
             updated_at: "2026-04-04T12:00:00Z".to_string(),
             tags: vec!["reference".to_string()],
             aliases: vec![],
+            sources: Vec::new(),
             note_links: vec![],
             external_links: vec![],
             asset_references: vec![],
@@ -262,12 +266,14 @@ fn assert_stats(
     note_links_inserted: usize,
     external_links_inserted: usize,
     asset_references_inserted: usize,
+    note_sources_inserted: usize,
 ) {
     assert_eq!(stats.notes_upserted, notes_upserted);
     assert_eq!(stats.assets_upserted, assets_upserted);
     assert_eq!(stats.note_links_inserted, note_links_inserted);
     assert_eq!(stats.external_links_inserted, external_links_inserted);
     assert_eq!(stats.asset_references_inserted, asset_references_inserted);
+    assert_eq!(stats.note_sources_inserted, note_sources_inserted);
 }
 
 #[test]
@@ -279,9 +285,10 @@ fn rebuild_populates_notes_links_assets_and_references() {
 
     let stats = rebuild_index(&mut connection, &notes, &assets).expect("rebuild should succeed");
 
-    assert_stats(&stats, 3, 2, 2, 1, 1);
+    assert_stats(&stats, 3, 2, 2, 1, 1, 2);
     assert_eq!(table_count(&connection, "note_tags"), 4);
     assert_eq!(table_count(&connection, "note_aliases"), 2);
+    assert_eq!(table_count(&connection, "note_sources"), 2);
     assert_eq!(table_count(&connection, "note_links"), 2);
     assert_eq!(table_count(&connection, "external_links"), 1);
     assert_eq!(table_count(&connection, "asset_references"), 1);
@@ -297,6 +304,16 @@ fn rebuild_populates_notes_links_assets_and_references() {
     assert_eq!(
         NoteRepo::get_aliases(&connection, &alpha_note_id()).expect("alias query should succeed"),
         vec!["A".to_string()]
+    );
+    assert_eq!(
+        SourcesRepo::list_sources_for_note(&connection, &alpha_note_id())
+            .expect("note source query should succeed"),
+        vec![beta_note_id(), gamma_note_id()]
+    );
+    assert_eq!(
+        SourcesRepo::list_pages_using_source(&connection, &beta_note_id())
+            .expect("source reverse query should succeed"),
+        vec![alpha_note_id()]
     );
 
     let outbound_links =
@@ -343,6 +360,7 @@ fn rebuild_persists_trash_fields_for_notes_and_assets() {
         updated_at: "2026-04-02T12:00:00Z".to_string(),
         tags: vec!["zettel".to_string()],
         aliases: Vec::new(),
+        sources: Vec::new(),
         note_links: Vec::new(),
         external_links: Vec::new(),
         asset_references: Vec::new(),
@@ -397,6 +415,7 @@ fn rebuild_clears_previously_trashed_rows_when_inputs_return_live() {
         updated_at: "2026-04-02T12:00:00Z".to_string(),
         tags: vec!["zettel".to_string()],
         aliases: Vec::new(),
+        sources: vec![beta_note_id()],
         note_links: Vec::new(),
         external_links: Vec::new(),
         asset_references: Vec::new(),
@@ -415,6 +434,7 @@ fn rebuild_clears_previously_trashed_rows_when_inputs_return_live() {
         updated_at: "2026-04-02T12:00:00Z".to_string(),
         tags: vec!["zettel".to_string()],
         aliases: Vec::new(),
+        sources: Vec::new(),
         note_links: Vec::new(),
         external_links: Vec::new(),
         asset_references: Vec::new(),
@@ -455,6 +475,11 @@ fn rebuild_clears_previously_trashed_rows_when_inputs_return_live() {
 
     assert!(!note.is_trashed);
     assert_eq!(note.trashed_at, None);
+    assert!(
+        SourcesRepo::list_sources_for_note(&connection, &alpha_note_id())
+            .expect("sources should query successfully")
+            .is_empty()
+    );
     assert!(!asset.is_trashed);
     assert_eq!(asset.trashed_at, None);
 }
@@ -523,6 +548,7 @@ fn rebuild_preserves_delete_columns_while_updating_trash_columns() {
         updated_at: "2026-04-20T08:00:00Z".to_string(),
         tags: Vec::new(),
         aliases: Vec::new(),
+        sources: Vec::new(),
         note_links: Vec::new(),
         external_links: Vec::new(),
         asset_references: Vec::new(),

@@ -89,6 +89,7 @@ pub fn build_note_inputs(
             updated_at: document.frontmatter.updated.clone().unwrap_or_default(),
             tags: document.frontmatter.tags.clone(),
             aliases: document.frontmatter.aliases.clone(),
+            sources: document.frontmatter.sources.clone(),
             note_links: parsed_index.map_or_else(Vec::new, |parsed_index| {
                 parsed_index.outbound_note_links.clone()
             }),

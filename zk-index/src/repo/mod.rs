@@ -5,6 +5,7 @@ mod devices;
 mod embeddings;
 mod links;
 mod notes;
+mod sources;
 mod sync_state;
 
 pub use assets::AssetRepo;
@@ -15,4 +16,5 @@ pub use devices::DeviceRepo;
 pub use embeddings::{EmbeddingsRepo, TopHit};
 pub use links::LinkRepo;
 pub use notes::{NoteIndexedMetadata, NoteRepo, UpsertNoteParams};
+pub use sources::SourcesRepo;
 pub use sync_state::{SyncStateRepo, SyncedAssetStateInput, SyncedNoteStateInput};

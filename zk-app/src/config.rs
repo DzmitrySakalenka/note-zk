@@ -8,8 +8,9 @@ use std::{
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 use zk_domain::config::{
-    CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, NormalizationConfig, SyncConfig,
-    VaultConfig,
+    CliOverrides, EffectiveConfig, EffectiveWikiConfig, FolderPolicy, GlobalConfig,
+    NormalizationConfig, SyncConfig, VaultConfig, WikiConfig,
+    resolve_folder_policy as domain_resolve_folder_policy,
 };
 use zk_domain::id::RelativePath;
 
@@ -104,6 +105,14 @@ pub enum ConfigValidationError {
         /// Folder prefix that failed validation.
         prefix: String,
         /// Reason describing why the prefix was rejected.
+        reason: String,
+    },
+    /// A folder policy flag combination was invalid.
+    #[error("invalid folder policy for '{prefix}': {reason}")]
+    InvalidFolderPolicy {
+        /// Folder prefix whose policy failed validation.
+        prefix: String,
+        /// Reason describing why the policy was rejected.
         reason: String,
     },
     /// The configured trash directory path was invalid.
@@ -256,6 +265,9 @@ pub fn merge_effective_config(
     if !vault.folders.is_empty() {
         merged.folders.clone_from(&vault.folders);
     }
+    if let Some(wiki) = &vault.wiki {
+        apply_wiki_config(wiki, &mut merged);
+    }
 
     if let Some(vault_path) = &cli.vault_path {
         merged.vault_path.clone_from(vault_path);
@@ -315,22 +327,7 @@ pub fn resolve_folder_policy(
     vault_relative_path: &str,
     folders: &BTreeMap<String, FolderPolicy>,
 ) -> Option<FolderPolicy> {
-    let normalized_path = RelativePath::new(vault_relative_path).to_string();
-    let mut best_match: Option<(usize, &FolderPolicy)> = None;
-
-    for (raw_prefix, policy) in folders {
-        let normalized_prefix = RelativePath::new(raw_prefix).to_string();
-        if !path_has_prefix(&normalized_path, &normalized_prefix) {
-            continue;
-        }
-
-        match best_match {
-            Some((best_prefix_len, _)) if normalized_prefix.len() <= best_prefix_len => {}
-            _ => best_match = Some((normalized_prefix.len(), policy)),
-        }
-    }
-
-    best_match.map(|(_, policy)| policy.clone())
+    domain_resolve_folder_policy(&RelativePath::new(vault_relative_path), folders)
 }
 
 fn apply_normalization_overrides(
@@ -357,11 +354,47 @@ fn apply_sync_config(sync: &SyncConfig, merged: &mut EffectiveConfig) {
     }
 }
 
-fn path_has_prefix(path: &str, prefix: &str) -> bool {
-    path == prefix
-        || path
-            .strip_prefix(prefix)
-            .is_some_and(|rest| rest.starts_with('/'))
+fn apply_wiki_config(wiki: &WikiConfig, merged: &mut EffectiveConfig) {
+    let effective_wiki = EffectiveWikiConfig::from(wiki);
+    insert_generated_folder_policy(
+        &mut merged.folders,
+        &effective_wiki.index_path,
+        FolderPolicy {
+            immutable: None,
+            derived: Some(true),
+        },
+    );
+    insert_generated_folder_policy(
+        &mut merged.folders,
+        &effective_wiki.log_path,
+        FolderPolicy {
+            immutable: None,
+            derived: Some(true),
+        },
+    );
+    insert_generated_folder_policy(
+        &mut merged.folders,
+        &effective_wiki.raw_dir,
+        FolderPolicy {
+            immutable: Some(true),
+            derived: None,
+        },
+    );
+    merged.wiki = Some(effective_wiki);
+}
+
+fn insert_generated_folder_policy(
+    folders: &mut BTreeMap<String, FolderPolicy>,
+    path: &RelativePath,
+    policy: FolderPolicy,
+) {
+    if folders
+        .keys()
+        .any(|existing_path| RelativePath::new(existing_path) == *path)
+    {
+        return;
+    }
+    let _ = folders.insert(path.to_string(), policy);
 }
 
 fn validate_note_extensions(extensions: &[String]) -> Result<(), ConfigValidationError> {
@@ -407,9 +440,24 @@ fn validate_non_empty_path(field: &'static str, path: &Path) -> Result<(), Confi
 fn validate_folder_prefixes(
     folders: &BTreeMap<String, FolderPolicy>,
 ) -> Result<(), ConfigValidationError> {
-    for prefix in folders.keys() {
+    for (prefix, policy) in folders {
         validate_folder_prefix(prefix)?;
+        validate_folder_policy(prefix, policy)?;
     }
+    Ok(())
+}
+
+fn validate_folder_policy(
+    prefix: &str,
+    policy: &FolderPolicy,
+) -> Result<(), ConfigValidationError> {
+    if policy.immutable == Some(true) && policy.derived == Some(true) {
+        return Err(ConfigValidationError::InvalidFolderPolicy {
+            prefix: prefix.to_string(),
+            reason: "folder cannot set both immutable = true and derived = true".to_string(),
+        });
+    }
+
     Ok(())
 }
 

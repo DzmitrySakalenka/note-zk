@@ -12,10 +12,14 @@ use serde::Deserialize;
 use serde_json::json;
 use tempfile::NamedTempFile;
 use tower::ServiceExt;
-use zk_domain::{AuthScope, ExecutionMode, JobId};
+use zk_domain::{
+    AuthScope, ExecutionMode, JobId,
+    id::{NoteId, RelativePath},
+};
 use zk_server::{
     config::{AiConfig, AiProviderKind, ServerConfig},
     http::build_router,
+    repo::{AiJobKind, AiJobsRepo, WikiLintScope},
     service::{self, IssueTokenSpec},
     state::{ServerState, bootstrap_with_config},
 };
@@ -79,6 +83,40 @@ impl AiAdminFixture {
             })
             .expect("device token fixture should be issued")
             .plaintext
+    }
+
+    fn enqueue_ingest_source(&self, source_note_id: NoteId, request_id: &str) -> JobId {
+        self.state
+            .db()
+            .with_conn(|connection| {
+                AiJobsRepo::new(connection).enqueue(
+                    AiJobKind::IngestSource {
+                        source_note_id,
+                        request_id: request_id.to_string(),
+                    },
+                    Utc::now(),
+                )
+            })
+            .expect("ingest-source job fixture should enqueue")
+            .job_id
+    }
+
+    fn enqueue_lint_wiki(&self, request_id: &str) -> JobId {
+        self.state
+            .db()
+            .with_conn(|connection| {
+                AiJobsRepo::new(connection).enqueue(
+                    AiJobKind::LintWiki {
+                        scope: WikiLintScope::Folder {
+                            path: RelativePath::new("wiki"),
+                        },
+                        request_id: request_id.to_string(),
+                    },
+                    Utc::now(),
+                )
+            })
+            .expect("lint-wiki job fixture should enqueue")
+            .job_id
     }
 
     fn new(ai: Option<AiConfig>) -> Self {
@@ -236,6 +274,38 @@ async fn post_recompute_note_returns_pending_note_job() {
 }
 
 #[tokio::test]
+async fn get_jobs_lists_ingest_source_job() {
+    let fixture = AiAdminFixture::enabled();
+    let admin_token = fixture.issue_token(vec![AuthScope::Admin]);
+    let job_id = fixture.enqueue_ingest_source(NoteId::new(NOTE_ID), "req-ingest-source-admin");
+    let app = build_router(fixture.state.clone());
+
+    let jobs = get_jobs(&app, &admin_token, JOBS_PATH).await;
+
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].job_id, job_id.to_string());
+    assert_eq!(jobs[0].kind, "ingest_source");
+    assert_eq!(jobs[0].note_id, None);
+    assert_eq!(jobs[0].status, "pending");
+}
+
+#[tokio::test]
+async fn get_jobs_lists_lint_wiki_job() {
+    let fixture = AiAdminFixture::enabled();
+    let admin_token = fixture.issue_token(vec![AuthScope::Admin]);
+    let job_id = fixture.enqueue_lint_wiki("req-lint-wiki-admin");
+    let app = build_router(fixture.state.clone());
+
+    let jobs = get_jobs(&app, &admin_token, JOBS_PATH).await;
+
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].job_id, job_id.to_string());
+    assert_eq!(jobs[0].kind, "lint_wiki");
+    assert_eq!(jobs[0].note_id, None);
+    assert_eq!(jobs[0].status, "pending");
+}
+
+#[tokio::test]
 async fn post_cancel_transitions_pending_job_to_failed() {
     let fixture = AiAdminFixture::enabled();
     let admin_token = fixture.issue_token(vec![AuthScope::Admin]);
@@ -311,6 +381,55 @@ async fn get_jobs_filters_by_status_and_limit() {
     assert_eq!(failed.len(), 1);
     assert_eq!(failed[0].job_id, cancelled.job_id);
     assert_eq!(failed[0].status, "failed");
+}
+
+#[tokio::test]
+async fn get_job_returns_exact_job_by_id() {
+    let fixture = AiAdminFixture::enabled();
+    let admin_token = fixture.issue_token(vec![AuthScope::Admin]);
+    let app = build_router(fixture.state.clone());
+    let cancelled = post_recompute(&app, &admin_token, json!({ "scope": "vault" })).await;
+    app.clone()
+        .oneshot(admin_json_request(
+            Method::POST,
+            &format!("/admin/ai/cancel/{}", cancelled.job_id),
+            &admin_token,
+            &json!({}),
+        ))
+        .await
+        .expect("admin AI cancel request should complete");
+
+    let job = get_job(&app, &admin_token, &cancelled.job_id).await;
+
+    assert_eq!(job.job_id, cancelled.job_id);
+    assert_eq!(job.status, "failed");
+    assert_eq!(job.last_error.as_deref(), Some("cancelled"));
+}
+
+#[tokio::test]
+async fn get_job_returns_not_found_for_missing_job() {
+    let fixture = AiAdminFixture::enabled();
+    let admin_token = fixture.issue_token(vec![AuthScope::Admin]);
+    let app = build_router(fixture.state.clone());
+    let missing_job_id = JobId::generate();
+
+    let reply = app
+        .oneshot(admin_json_request(
+            Method::GET,
+            &format!("/admin/ai/jobs/{missing_job_id}"),
+            &admin_token,
+            &json!({}),
+        ))
+        .await
+        .expect("admin AI job request should complete");
+
+    assert_json_error(
+        reply,
+        StatusCode::NOT_FOUND,
+        "not_found",
+        "AI job not found",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -404,6 +523,22 @@ async fn get_jobs(app: &axum::Router, admin_token: &str, path: &str) -> Vec<List
         ))
         .await
         .expect("admin AI jobs request should complete");
+
+    assert_eq!(reply.status(), StatusCode::OK);
+    response_body(reply).await
+}
+
+async fn get_job(app: &axum::Router, admin_token: &str, job_id: &str) -> ListedJob {
+    let reply = app
+        .clone()
+        .oneshot(admin_json_request(
+            Method::GET,
+            &format!("/admin/ai/jobs/{job_id}"),
+            admin_token,
+            &json!({}),
+        ))
+        .await
+        .expect("admin AI job request should complete");
 
     assert_eq!(reply.status(), StatusCode::OK);
     response_body(reply).await

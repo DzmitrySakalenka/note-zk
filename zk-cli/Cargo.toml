@@ -27,21 +27,23 @@ zk-app = { path = "../zk-app" }
 zk-domain = { version = "0.1.0", path = "../zk-domain" }
 zk-index = { version = "0.1.0", path = "../zk-index", optional = true }
 zk-sync = { version = "0.1.0", path = "../zk-sync" }
+zk-vault = { version = "0.1.0", path = "../zk-vault", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2.2.1"
 axum = "0.8.9"
 hex = "0.4.3"
-insta = "1.47.2"
+insta = { version = "1.47.2", features = ["yaml"] }
 predicates = "3.1.4"
 sha2 = "0.11.0"
 tempfile = "3.27.0"
+tokio-util = "0.7.18"
 wiremock = "0.6"
 zk-index = { version = "0.1.0", path = "../zk-index" }
 zk-server = { path = "../zk-server" }
 zk-vault = { version = "0.1.0", path = "../zk-vault" }
 
 [features]
-ai = ["dep:futures", "dep:toml", "dep:zk-ai", "dep:zk-index", "zk-ai/provider-local", "zk-app/ai"]
+ai = ["dep:futures", "dep:toml", "dep:zk-ai", "dep:zk-index", "dep:zk-vault", "zk-ai/provider-local", "zk-app/ai"]
 ai-local = ["ai"]
 test-stub-ai = ["ai"]

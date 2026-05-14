@@ -93,12 +93,54 @@ immutable = true
         BTreeMap::from([(
             "raw".to_string(),
             FolderPolicy {
-                immutable: Some(true)
+                immutable: Some(true),
+                derived: None,
             },
         )])
     );
 
     validate_effective_config(&merged).expect("merged config should validate");
+}
+
+#[test]
+fn pipeline_wiki_block_generates_default_layout_policies() {
+    let root = unique_test_dir("pipeline-wiki-config");
+    let vault_path = root.join(".zk").join("config.toml");
+
+    write_text(
+        &vault_path,
+        r#"
+[wiki]
+root_dir = "knowledge/"
+raw_dir = "sources/"
+index_file = "home.md"
+log_file = "changes.md"
+"#,
+    );
+
+    let global = load_global_config(&root.join("global-missing.toml")).expect("missing global");
+    let vault = load_vault_config(&vault_path).expect("vault should load");
+    let merged = merge_effective_config(&global, &vault, &CliOverrides::default());
+
+    assert_eq!(
+        merged.wiki_index_path(),
+        Some(zk_domain::id::RelativePath::new("knowledge/home.md"))
+    );
+    assert_eq!(
+        merged.folders.get("knowledge/home.md"),
+        Some(&FolderPolicy {
+            immutable: None,
+            derived: Some(true),
+        })
+    );
+    assert_eq!(
+        merged.folders.get("sources"),
+        Some(&FolderPolicy {
+            immutable: Some(true),
+            derived: None,
+        })
+    );
+    validate_effective_config(&merged).expect("wiki config should validate");
 }
 
 #[test]

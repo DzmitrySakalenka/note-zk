@@ -24,6 +24,7 @@ mod scan;
 mod status;
 mod trash;
 mod trash_path;
+mod wiki;
 mod write;
 mod write_policy;
 
@@ -92,6 +93,14 @@ pub use sync::{
     BootstrapOutcome, DeviceSyncStatus, PullApplyOutcome, PushApplyOutcome, SyncContext, bootstrap,
     get_device_sync_status, plan_and_push, pull_and_apply, register_device,
 };
+#[rustfmt::skip]
+pub use wiki::{list_pages_using_source, list_sources_for_note};
+#[cfg(feature = "ai")]
+#[rustfmt::skip]
+pub use wiki::{
+    AiJobStatus, LocalWikiIndexHandle, WikiFacade, WikiFacadeDeps, WikiJobStatus, WikiLintFinding,
+    WikiLintFindingKind, WikiLintScope, WikiLintSeverity,
+};
 #[cfg(feature = "ai")]
 #[rustfmt::skip]
 pub use ai::{
@@ -99,4 +108,4 @@ pub use ai::{
     ListConversationsParams, LocalEmbeddingsRepoHandle, MessageDto, RecomputeLocalSummary,
     SemanticSearchRequest,
 };
-pub use write_policy::{ensure_writable, is_path_immutable};
+pub use write_policy::{ensure_writable, is_path_derived, is_path_immutable};

@@ -4,6 +4,7 @@ mod conversations;
 
 use std::{
     io::{self, Read, Write},
+    path::PathBuf,
     str::FromStr,
     sync::Arc,
 };
@@ -15,7 +16,7 @@ use zk_ai::{
     AiError,
     provider::{ChatUsage, FinishReason},
 };
-use zk_app::{AiFacade, AiFacadeDeps, AppError, ChatChunk, ChatRequest};
+use zk_app::{AiFacade, AiFacadeDeps, AppError, ChatChunk, ChatRequest, EffectiveConfig};
 use zk_domain::{Citation, ConversationId, ExecutionMode};
 use zk_index::NoteRepo;
 use zk_sync::HttpTransport;
@@ -29,6 +30,8 @@ use crate::{
 struct ChatRuntime {
     facade: AiFacade,
     connection: rusqlite::Connection,
+    config: EffectiveConfig,
+    vault_root: PathBuf,
     runtime: tokio::runtime::Runtime,
 }
 
@@ -90,6 +93,8 @@ fn build_chat_runtime(shared: &SharedFlags, mode: ExecutionMode) -> Result<ChatR
     Ok(ChatRuntime {
         facade,
         connection,
+        config,
+        vault_root,
         runtime,
     })
 }
@@ -237,9 +242,10 @@ fn source_for_citation(
         .map(|value| value.title)
         .filter(|title| !title.trim().is_empty())
         .unwrap_or_else(|| citation.note_id.to_string());
-    let path = note
-        .map(|value| value.current_path.to_string())
-        .unwrap_or_else(|| "path unavailable".to_string());
+    let path = note.map_or_else(
+        || "path unavailable".to_string(),
+        |value| value.current_path.to_string(),
+    );
 
     Ok(CitationSource { title, path })
 }

@@ -21,7 +21,7 @@ use zk_domain::{
     sync_state::NoteSyncState,
     write::{BatchWriteRequest, CreateNoteRequest, UpdateNoteRequest},
 };
-use zk_index::{IndexError, NoteRepo, SyncStateRepo, UpsertNoteParams};
+use zk_index::{IndexError, NoteRepo, SourcesRepo, SyncStateRepo, UpsertNoteParams};
 
 use crate::{
     AppError, Result, config::validate_effective_config, ensure_writable, is_path_immutable,
@@ -284,6 +284,7 @@ fn persist_written_note(
             is_trashed,
         },
     )?;
+    SourcesRepo::replace_for_note(&transaction, &frontmatter.id, &frontmatter.sources)?;
     upsert_note_local_hash(
         &transaction,
         write_ctx.device_id,

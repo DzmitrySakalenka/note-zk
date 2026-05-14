@@ -148,7 +148,7 @@ async fn conversation_methods_use_expected_http_routes() {
         .get_conversation(ConversationId::new(CONVERSATION_ID))
         .await
         .expect("conversation detail should load");
-    assert_conversation_detail(detail);
+    assert_conversation_detail(&detail);
 
     facade
         .rename_conversation(ConversationId::new(CONVERSATION_ID), "Renamed".to_string())
@@ -225,6 +225,7 @@ fn conversation_json(title: Option<&str>, message_count: u32) -> serde_json::Val
 fn conversation_detail_json() -> serde_json::Value {
     json!({
         "conversation": conversation_json(Some("Renamed"), 1),
+        "chat_model_id": "test/chat-model",
         "messages": [
             {
                 "message_id": MESSAGE_ID,
@@ -248,12 +249,13 @@ fn conversation_detail_json() -> serde_json::Value {
     })
 }
 
-fn assert_conversation_detail(detail: ConversationDetail) {
+fn assert_conversation_detail(detail: &ConversationDetail) {
     assert_eq!(
         detail.conversation.conversation_id.as_str(),
         CONVERSATION_ID
     );
     assert_eq!(detail.messages.len(), 1);
+    assert_eq!(detail.chat_model_id.as_str(), "test/chat-model");
     assert_eq!(detail.messages[0].message_id.as_str(), MESSAGE_ID);
     assert_eq!(detail.messages[0].citations.len(), 1);
     assert_eq!(detail.messages[0].citations[0].snippet, "source text");

@@ -6,8 +6,9 @@ use std::{collections::BTreeMap, path::PathBuf};
 use zk_app::config::{merge_effective_config, resolve_folder_policy};
 use zk_domain::config::{
     CliOverrides, EffectiveConfig, FolderPolicy, GlobalConfig, NormalizationConfig, SyncConfig,
-    ValidationConfig, VaultConfig,
+    ValidationConfig, VaultConfig, WikiConfig,
 };
+use zk_domain::id::RelativePath;
 
 // ==========================================================================
 // Merge precedence
@@ -48,18 +49,21 @@ fn merge_uses_vault_for_vault_scoped_fields_when_cli_missing() {
             derive_title_from_h1: Some(false),
         }),
         validation: None,
+        wiki: None,
         sync: None,
         folders: BTreeMap::from([
             (
                 "raw".to_string(),
                 FolderPolicy {
                     immutable: Some(true),
+                    derived: None,
                 },
             ),
             (
                 "wiki/meta".to_string(),
                 FolderPolicy {
                     immutable: Some(false),
+                    derived: None,
                 },
             ),
         ]),
@@ -94,11 +98,13 @@ fn merge_cli_overrides_vault_and_global() {
             derive_title_from_h1: Some(true),
         }),
         validation: None,
+        wiki: None,
         sync: None,
         folders: BTreeMap::from([(
             "raw".to_string(),
             FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         )]),
     };
@@ -144,11 +150,13 @@ fn merge_is_deterministic_for_identical_inputs() {
             derive_title_from_h1: Some(true),
         }),
         validation: None,
+        wiki: None,
         sync: None,
         folders: BTreeMap::from([(
             "raw".to_string(),
             FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         )]),
     };
@@ -200,6 +208,105 @@ fn merge_uses_vault_validation_config_when_present() {
             .get("MermaidBlockDetected"),
         Some(&"warning".to_string())
     );
+}
+
+#[test]
+fn merge_populates_wiki_config_and_generated_folder_policies() {
+    let vault = VaultConfig {
+        wiki: Some(WikiConfig {
+            root_dir: "knowledge/".to_string(),
+            raw_dir: "sources/".to_string(),
+            index_file: "home.md".to_string(),
+            log_file: "changes.md".to_string(),
+        }),
+        ..VaultConfig::default()
+    };
+
+    let merged = merge_effective_config(&GlobalConfig::default(), &vault, &CliOverrides::default());
+    let wiki = merged.wiki.as_ref().expect("wiki config should merge");
+
+    assert_eq!(wiki.root_dir.to_string(), "knowledge");
+    assert_eq!(wiki.raw_dir.to_string(), "sources");
+    assert_eq!(
+        merged.wiki_index_path(),
+        Some(RelativePath::new("knowledge/home.md"))
+    );
+    assert_eq!(
+        merged.wiki_log_path(),
+        Some(RelativePath::new("knowledge/changes.md"))
+    );
+    assert_eq!(
+        merged.folders.get("knowledge/home.md"),
+        Some(&FolderPolicy {
+            immutable: None,
+            derived: Some(true),
+        })
+    );
+    assert_eq!(
+        merged.folders.get("knowledge/changes.md"),
+        Some(&FolderPolicy {
+            immutable: None,
+            derived: Some(true),
+        })
+    );
+    assert_eq!(
+        merged.folders.get("sources"),
+        Some(&FolderPolicy {
+            immutable: Some(true),
+            derived: None,
+        })
+    );
+    assert!(
+        !merged.folders.contains_key("knowledge"),
+        "wiki root should not be marked derived"
+    );
+}
+
+#[test]
+fn merge_preserves_explicit_wiki_folder_policy_overrides() {
+    let vault = VaultConfig {
+        wiki: Some(WikiConfig::default()),
+        folders: BTreeMap::from([
+            (
+                "wiki/index.md".to_string(),
+                FolderPolicy {
+                    immutable: None,
+                    derived: Some(false),
+                },
+            ),
+            (
+                "wiki/log.md".to_string(),
+                FolderPolicy {
+                    immutable: None,
+                    derived: Some(false),
+                },
+            ),
+            (
+                "raw".to_string(),
+                FolderPolicy {
+                    immutable: Some(false),
+                    derived: None,
+                },
+            ),
+        ]),
+        ..VaultConfig::default()
+    };
+
+    let merged = merge_effective_config(&GlobalConfig::default(), &vault, &CliOverrides::default());
+
+    assert_eq!(merged.folders, vault.folders);
+}
+
+#[test]
+fn merge_does_not_generate_wiki_folder_policies_without_wiki_config() {
+    let merged = merge_effective_config(
+        &GlobalConfig::default(),
+        &VaultConfig::default(),
+        &CliOverrides::default(),
+    );
+
+    assert_eq!(merged.wiki, None);
+    assert!(merged.folders.is_empty());
 }
 
 #[test]
@@ -303,12 +410,14 @@ fn folder_policy_resolution_prefers_most_specific_prefix() {
             "raw".to_string(),
             FolderPolicy {
                 immutable: Some(true),
+                derived: None,
             },
         ),
         (
             "raw/drafts".to_string(),
             FolderPolicy {
                 immutable: Some(false),
+                derived: None,
             },
         ),
     ]);
@@ -324,6 +433,7 @@ fn folder_policy_resolution_uses_less_specific_prefix_when_needed() {
         "raw".to_string(),
         FolderPolicy {
             immutable: Some(true),
+            derived: None,
         },
     )]);
 
@@ -338,6 +448,7 @@ fn folder_policy_resolution_returns_none_without_matching_prefix() {
         "raw".to_string(),
         FolderPolicy {
             immutable: Some(true),
+            derived: None,
         },
     )]);
 

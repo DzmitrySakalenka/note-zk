@@ -86,6 +86,19 @@ pub fn run(cli: Cli) -> Result<i32, CliError> {
                 ))
             }
         }
+        Command::Wiki(args) => {
+            #[cfg(feature = "ai")]
+            {
+                commands::wiki::run(&args, &shared)
+            }
+            #[cfg(not(feature = "ai"))]
+            {
+                let _ = args;
+                Err(CliError::Argument(
+                    "wiki commands require zk-cli built with the ai feature".to_string(),
+                ))
+            }
+        }
         Command::ResolveConflict(args) => commands::resolve_conflict::run(&args, &shared),
     }
 }

@@ -2,6 +2,7 @@
 #![allow(unused_crate_dependencies)]
 
 use std::{
+    fmt::Write as _,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -21,17 +22,20 @@ use zk_ai::{
     provider::{EmbeddingsCapability, EmbeddingsProvider, EmbeddingsRequest, EmbeddingsResponse},
     selector::{ProviderRegistry, ProviderSelector},
 };
+use zk_app::{RebuildOptions, bootstrap_index_connection, rebuild_index};
 use zk_domain::{
     EmbeddingModelId, EmbeddingVector, ExecutionMode, JobId, ProviderId, ProviderSelectorPolicy,
-    id::{ContentHash, NoteId},
+    config::{EffectiveConfig, EffectiveWikiConfig},
+    id::{ContentHash, DeviceId, NoteId, RelativePath},
 };
 use zk_server::{
     ServerDb,
+    ai::lint_wiki::{WikiLintFindingKind, WikiLintSeverity},
     ai::worker::{AiWorkerDeps, spawn_ai_job_worker},
     config::{AiConfig, AiProviderKind},
     repo::{
         AiJob, AiJobFilter, AiJobKind, AiJobKindFilter, AiJobStatus, AiJobsRepo, ChunksRepo,
-        EmbeddingsRepo, NoteRow, NotesRepo,
+        EmbeddingsRepo, NoteRow, NotesRepo, WikiLintFindingsRepo, WikiLintScope,
     },
 };
 
@@ -205,6 +209,113 @@ async fn recompute_vault_enqueues_note_jobs_and_marks_vault_job_done() {
     assert_eq!(note_jobs.len(), 2);
 }
 
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn ingest_source_job_fails_without_wiki_config() {
+    let fixture = WorkerFixture::new("ai-worker-ingest-source-no-wiki");
+    let source_note_id = note_id("01JAR5A3PJEZ3SKG67PN8N6S71");
+    let job = fixture.enqueue(AiJobKind::IngestSource {
+        source_note_id,
+        request_id: "req-ingest-source-worker".to_string(),
+    });
+    let shutdown = CancellationToken::new();
+    let handle = spawn_ai_job_worker(
+        fixture.deps(empty_selector(), ai_config(1)),
+        shutdown.clone(),
+    );
+
+    let failed = wait_for_status(&fixture.db, &job.job_id, AiJobStatus::Failed).await;
+    shutdown.cancel();
+    timeout(Duration::from_secs(1), handle)
+        .await
+        .expect("worker should join after shutdown")
+        .expect("worker task should not panic");
+
+    assert_eq!(failed.attempts, 1);
+    assert!(
+        failed
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("wiki config missing")),
+        "last_error was {:?}",
+        failed.last_error
+    );
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn lint_wiki_job_persists_findings_and_marks_done() {
+    let fixture = WorkerFixture::new("ai-worker-lint-wiki-success");
+    let app_config = fixture.wiki_app_config();
+    let page_id = note_id("01JAR5A3PJEZ3SKG67PN8N6S72");
+    fixture.insert_note(
+        &page_id,
+        "wiki/orphan.md",
+        &note_file(
+            page_id.as_str(),
+            "Orphan Page",
+            Some("wiki-entity"),
+            "# Orphan Page\n",
+        ),
+    );
+    fixture.rebuild_local_index(&app_config);
+    let job = fixture.enqueue(AiJobKind::LintWiki {
+        scope: WikiLintScope::Vault,
+        request_id: "req-lint-wiki-worker-success".to_string(),
+    });
+    let shutdown = CancellationToken::new();
+    let handle = spawn_ai_job_worker(
+        fixture.deps_with_app_config(empty_selector(), ai_config(1), app_config),
+        shutdown.clone(),
+    );
+
+    let done = wait_for_status(&fixture.db, &job.job_id, AiJobStatus::Done).await;
+    shutdown.cancel();
+    timeout(Duration::from_secs(1), handle)
+        .await
+        .expect("worker should join after shutdown")
+        .expect("worker task should not panic");
+    let findings = fixture.findings_for_job(&job.job_id);
+
+    assert_eq!(done.attempts, 0);
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].kind, WikiLintFindingKind::OrphanPage);
+    assert_eq!(findings[0].page_id, Some(page_id));
+    assert_eq!(findings[0].source_id, None);
+    assert_eq!(findings[0].severity, WikiLintSeverity::Warning);
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn lint_wiki_job_fails_without_wiki_config() {
+    let fixture = WorkerFixture::new("ai-worker-lint-wiki-no-wiki");
+    let job = fixture.enqueue(AiJobKind::LintWiki {
+        scope: WikiLintScope::Folder {
+            path: RelativePath::new("wiki"),
+        },
+        request_id: "req-lint-wiki-worker".to_string(),
+    });
+    let shutdown = CancellationToken::new();
+    let handle = spawn_ai_job_worker(
+        fixture.deps(empty_selector(), ai_config(1)),
+        shutdown.clone(),
+    );
+
+    let failed = wait_for_status(&fixture.db, &job.job_id, AiJobStatus::Failed).await;
+    shutdown.cancel();
+    timeout(Duration::from_secs(1), handle)
+        .await
+        .expect("worker should join after shutdown")
+        .expect("worker task should not panic");
+
+    assert_eq!(failed.attempts, 1);
+    assert!(
+        failed
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("wiki config missing")),
+        "last_error was {:?}",
+        failed.last_error
+    );
+}
+
 struct WorkerFixture {
     db: Arc<ServerDb>,
     vault_root: std::path::PathBuf,
@@ -223,11 +334,43 @@ impl WorkerFixture {
     }
 
     fn deps(&self, selector: Arc<ProviderSelector>, config: AiConfig) -> AiWorkerDeps {
+        self.deps_with_app_config(
+            selector,
+            config,
+            EffectiveConfig {
+                vault_path: self.vault_root.clone(),
+                ..EffectiveConfig::default()
+            },
+        )
+    }
+
+    fn deps_with_app_config(
+        &self,
+        selector: Arc<ProviderSelector>,
+        config: AiConfig,
+        app_config: EffectiveConfig,
+    ) -> AiWorkerDeps {
         AiWorkerDeps {
             db: Arc::clone(&self.db),
             selector,
             config,
             vault_root: self.vault_root.clone(),
+            app_config,
+            worker_device_id: DeviceId::new("server-ai-worker-test"),
+        }
+    }
+
+    fn wiki_app_config(&self) -> EffectiveConfig {
+        EffectiveConfig {
+            vault_path: self.vault_root.clone(),
+            local_db_path: self.vault_root.join(".zk/index.sqlite"),
+            wiki: Some(EffectiveWikiConfig {
+                root_dir: RelativePath::new("wiki"),
+                raw_dir: RelativePath::new("raw"),
+                index_path: RelativePath::new("wiki/index.md"),
+                log_path: RelativePath::new("wiki/log.md"),
+            }),
+            ..EffectiveConfig::default()
         }
     }
 
@@ -259,6 +402,18 @@ impl WorkerFixture {
                 )
             })
             .expect("note row should insert");
+    }
+
+    fn rebuild_local_index(&self, app_config: &EffectiveConfig) {
+        let mut connection =
+            bootstrap_index_connection(app_config).expect("local index should open");
+        rebuild_index(
+            &self.vault_root,
+            app_config,
+            &mut connection,
+            RebuildOptions::default(),
+        )
+        .expect("local index should rebuild");
     }
 
     fn enqueue(&self, kind: AiJobKind) -> AiJob {
@@ -324,6 +479,12 @@ impl WorkerFixture {
                 Ok(count)
             })
             .expect("embeddings should list")
+    }
+
+    fn findings_for_job(&self, job_id: &JobId) -> Vec<zk_server::repo::WikiLintFindingRow> {
+        self.db
+            .with_conn(|connection| WikiLintFindingsRepo::new(connection).list_for_job(job_id))
+            .expect("findings should list")
     }
 }
 
@@ -426,7 +587,11 @@ async fn wait_for_status(db: &Arc<ServerDb>, job_id: &JobId, status: AiJobStatus
         advance(Duration::from_millis(10)).await;
     }
 
-    panic!("job {job_id} did not reach status {status:?}");
+    let job = job_by_id(db, job_id);
+    panic!(
+        "job {job_id} did not reach status {status:?}; final status {:?}, last_error {:?}",
+        job.status, job.last_error
+    );
 }
 
 fn job_by_id(db: &Arc<ServerDb>, job_id: &JobId) -> AiJob {
@@ -520,6 +685,17 @@ fn model_id() -> EmbeddingModelId {
 
 fn note_id(value: &str) -> NoteId {
     NoteId::new(value)
+}
+
+fn note_file(note_id: &str, title: &str, note_type: Option<&str>, body: &str) -> String {
+    let mut yaml = format!(
+        "id: {note_id}\ntitle: {title}\ntags:\n  - wiki\ncreated: 2026-05-05T10:00:00Z\nupdated: 2026-05-05T10:00:00Z\n"
+    );
+    if let Some(note_type) = note_type {
+        let _ = writeln!(yaml, "type: {note_type}");
+    }
+
+    format!("---\n{yaml}---\n\n{body}")
 }
 
 fn parse_timestamp(value: &str) -> DateTime<Utc> {

@@ -1,12 +1,15 @@
 // Integration tests are separate crates; each uses only a subset of package dependencies.
 #![allow(unused_crate_dependencies)]
 
+use std::time::Duration;
+
 use clap::Parser;
 
 use zk_cli::{
     cli::{
         AdminAiCommand, AdminAiRecomputeScope, AiCommand, AuthCommand, ChatConversationCommand,
-        ChatSubcommand, Cli, Command, OutputMode, PurgeScope, ResolveStrategy, SyncMode,
+        ChatSaveAsWikiTypeArg, ChatSubcommand, Cli, Command, OutputMode, PurgeScope,
+        ResolveStrategy, SyncMode, WikiCommand, WikiLintCommand, WikiLintKindArg, WikiLintScopeArg,
     },
     error::{
         CliError, EXIT_AI_DISABLED, EXIT_ISSUES, EXIT_OK, EXIT_PROVIDER_UNAVAILABLE, EXIT_REQUEST,
@@ -271,6 +274,185 @@ fn chat_rejects_new_and_conversation_id_together() {
 }
 
 #[test]
+fn wiki_ingest_parses_source_wait_timeout_and_json_flags() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "wiki",
+        "ingest",
+        "raw/source.md",
+        "--wait",
+        "--timeout",
+        "5s",
+        "--json",
+    ])
+    .expect("wiki ingest arguments should parse");
+
+    match cli.command {
+        Command::Wiki(args) => match args.command {
+            WikiCommand::Ingest(args) => {
+                assert_eq!(args.source, "raw/source.md");
+                assert!(args.wait);
+                assert_eq!(args.timeout, Duration::from_secs(5));
+                assert_eq!(OutputMode::from(args.json), OutputMode::Json);
+            }
+            other => {
+                panic!("expected wiki ingest command, got {other:?}");
+            }
+        },
+        other => panic!("expected wiki command, got {other:?}"),
+    }
+}
+
+#[test]
+fn wiki_ingest_defaults_to_sixty_second_timeout() {
+    let cli = Cli::try_parse_from(["zk-cli", "wiki", "ingest", "01JAR5A3PJEZ3SKG67PN8N6S6S"])
+        .expect("wiki ingest arguments should parse");
+
+    match cli.command {
+        Command::Wiki(args) => match args.command {
+            WikiCommand::Ingest(args) => {
+                assert_eq!(args.timeout, Duration::from_secs(60));
+                assert!(!args.wait);
+                assert!(!args.json);
+            }
+            other => {
+                panic!("expected wiki ingest command, got {other:?}");
+            }
+        },
+        other => panic!("expected wiki command, got {other:?}"),
+    }
+}
+
+#[test]
+fn wiki_status_parses_job_id_and_json_flag() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "wiki",
+        "status",
+        "01JAR5A3PJEZ3SKG67PN8N6S6J",
+        "--json",
+    ])
+    .expect("wiki status arguments should parse");
+
+    match cli.command {
+        Command::Wiki(args) => match args.command {
+            WikiCommand::Status(args) => {
+                assert_eq!(args.job_id, "01JAR5A3PJEZ3SKG67PN8N6S6J");
+                assert_eq!(OutputMode::from(args.json), OutputMode::Json);
+            }
+            other => {
+                panic!("expected wiki status command, got {other:?}");
+            }
+        },
+        other => panic!("expected wiki command, got {other:?}"),
+    }
+}
+
+#[test]
+fn wiki_lint_parses_vault_scope_wait_and_json_flags() {
+    let cli = Cli::try_parse_from([
+        "zk-cli", "wiki", "lint", "--scope", "vault", "--wait", "--json",
+    ])
+    .expect("wiki lint arguments should parse");
+
+    match cli.command {
+        Command::Wiki(args) => match args.command {
+            WikiCommand::Lint(args) => {
+                assert_eq!(args.scope, Some(WikiLintScopeArg::Vault));
+                assert_eq!(args.folder.as_deref(), None);
+                assert!(args.wait);
+                assert_eq!(OutputMode::from(args.json), OutputMode::Json);
+                assert!(args.command.is_none());
+            }
+            other => panic!("expected wiki lint command, got {other:?}"),
+        },
+        other => panic!("expected wiki command, got {other:?}"),
+    }
+}
+
+#[test]
+fn wiki_lint_parses_folder_scope() {
+    let cli = Cli::try_parse_from(["zk-cli", "wiki", "lint", "--folder", "wiki/entities"])
+        .expect("wiki lint folder arguments should parse");
+
+    match cli.command {
+        Command::Wiki(args) => match args.command {
+            WikiCommand::Lint(args) => {
+                assert_eq!(args.scope, None);
+                assert_eq!(args.folder.as_deref(), Some("wiki/entities"));
+                assert!(!args.wait);
+                assert!(!args.json);
+                assert!(args.command.is_none());
+            }
+            other => panic!("expected wiki lint command, got {other:?}"),
+        },
+        other => panic!("expected wiki command, got {other:?}"),
+    }
+}
+
+#[test]
+fn wiki_lint_rejects_scope_and_folder_together() {
+    let error = Cli::try_parse_from([
+        "zk-cli",
+        "wiki",
+        "lint",
+        "--scope",
+        "vault",
+        "--folder",
+        "wiki/entities",
+    ])
+    .expect_err("wiki lint should reject conflicting scope selectors");
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
+fn wiki_lint_show_parses_kind_and_json_flags() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "wiki",
+        "lint",
+        "show",
+        "01JAR5A3PJEZ3SKG67PN8N6S6J",
+        "--kind",
+        "missing_xref",
+        "--json",
+    ])
+    .expect("wiki lint show arguments should parse");
+
+    match cli.command {
+        Command::Wiki(args) => match args.command {
+            WikiCommand::Lint(args) => match args.command {
+                Some(WikiLintCommand::Show(show)) => {
+                    assert_eq!(show.job_id, "01JAR5A3PJEZ3SKG67PN8N6S6J");
+                    assert_eq!(show.kind, Some(WikiLintKindArg::MissingXref));
+                    assert_eq!(OutputMode::from(show.json), OutputMode::Json);
+                }
+                other => panic!("expected wiki lint show command, got {other:?}"),
+            },
+            other => panic!("expected wiki lint command, got {other:?}"),
+        },
+        other => panic!("expected wiki command, got {other:?}"),
+    }
+}
+
+#[test]
+fn wiki_lint_show_rejects_unknown_kind() {
+    let error = Cli::try_parse_from([
+        "zk-cli",
+        "wiki",
+        "lint",
+        "show",
+        "01JAR5A3PJEZ3SKG67PN8N6S6J",
+        "--kind",
+        "missing_cross_reference",
+    ])
+    .expect_err("wiki lint show should reject unknown kind aliases");
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+}
+
+#[test]
 fn chat_conversations_list_parses_filters_and_json() {
     let cli = Cli::try_parse_from([
         "zk-cli",
@@ -328,6 +510,92 @@ fn chat_conversations_show_parses_json() {
         },
         other => panic!("expected chat command, got {other:?}"),
     }
+}
+
+#[test]
+fn chat_conversations_save_as_wiki_parses_defaults_and_json() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "conversations",
+        "save-as-wiki",
+        "--conversation-id",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+        "--title",
+        "Research Summary",
+        "--json",
+    ])
+    .expect("chat conversations save-as-wiki arguments should parse");
+
+    match cli.command {
+        Command::Chat(args) => match args.command {
+            Some(ChatSubcommand::Conversations(conversations)) => match conversations.command {
+                ChatConversationCommand::SaveAsWiki(save) => {
+                    assert_eq!(save.conversation_id, "01JAR5A3PJEZ3SKG67PN8N6S6S");
+                    assert_eq!(save.title, "Research Summary");
+                    assert_eq!(save.note_type, ChatSaveAsWikiTypeArg::WikiSynthesis);
+                    assert_eq!(save.path, None);
+                    assert!(save.json);
+                }
+                other => panic!("expected conversations save-as-wiki command, got {other:?}"),
+            },
+            other => panic!("expected conversations subcommand, got {other:?}"),
+        },
+        other => panic!("expected chat command, got {other:?}"),
+    }
+}
+
+#[test]
+fn chat_conversations_save_as_wiki_parses_entity_type_and_path() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "conversations",
+        "save-as-wiki",
+        "--conversation-id",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+        "--title",
+        "Entity Page",
+        "--type",
+        "wiki-entity",
+        "--path",
+        "wiki/entities/entity-page.md",
+    ])
+    .expect("chat conversations save-as-wiki arguments should parse");
+
+    match cli.command {
+        Command::Chat(args) => match args.command {
+            Some(ChatSubcommand::Conversations(conversations)) => match conversations.command {
+                ChatConversationCommand::SaveAsWiki(save) => {
+                    assert_eq!(save.note_type, ChatSaveAsWikiTypeArg::WikiEntity);
+                    assert_eq!(save.path.as_deref(), Some("wiki/entities/entity-page.md"));
+                    assert!(!save.json);
+                }
+                other => panic!("expected conversations save-as-wiki command, got {other:?}"),
+            },
+            other => panic!("expected conversations subcommand, got {other:?}"),
+        },
+        other => panic!("expected chat command, got {other:?}"),
+    }
+}
+
+#[test]
+fn chat_conversations_save_as_wiki_rejects_unknown_type() {
+    let error = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "conversations",
+        "save-as-wiki",
+        "--conversation-id",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+        "--title",
+        "Research Summary",
+        "--type",
+        "wiki-index",
+    ])
+    .expect_err("save-as-wiki should reject unsupported wiki page types");
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
 }
 
 #[test]

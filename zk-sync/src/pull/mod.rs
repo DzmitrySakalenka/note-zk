@@ -11,9 +11,11 @@ mod note;
 mod snapshot;
 
 use rusqlite::{Connection, Transaction};
+use std::collections::BTreeMap;
 use zk_domain::{
     SyncChange, SyncPullResponse, WireItemType,
-    id::{DeviceId, RelativePath},
+    config::FolderPolicy,
+    id::{DeviceId, NoteId, RelativePath, ServerRevision},
 };
 use zk_index::{DeviceRepo, IndexError};
 use zk_vault::VaultRoot;
@@ -30,6 +32,8 @@ pub struct PullApplyContext<'a> {
     pub clock: &'a dyn Clock,
     /// Configured vault-relative trash directory root.
     pub trash_dir: &'a RelativePath,
+    /// Effective folder policies used by conflict resolution.
+    pub folders: &'a BTreeMap<String, FolderPolicy>,
 }
 
 /// Summary returned after applying one pulled batch.
@@ -39,8 +43,30 @@ pub struct PullApplyOutcome {
     pub applied: u32,
     /// Conflicts detected while applying the batch.
     pub conflicts: Vec<ConflictedItem>,
+    /// Non-fatal sync diagnostics emitted while applying remote changes.
+    pub diagnostics: Vec<SyncDiagnostic>,
     /// Cursor the client stored after the batch committed.
     pub next_cursor: Option<i64>,
+}
+
+/// Kind discriminator for non-fatal sync diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncDiagnosticKind {
+    /// A derived note conflict was resolved by applying the remote revision.
+    SyncDerivedOverwrite,
+}
+
+/// Non-fatal sync diagnostic emitted during pull apply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncDiagnostic {
+    /// Stable diagnostic kind.
+    pub kind: SyncDiagnosticKind,
+    /// Note identifier affected by the diagnostic.
+    pub note_id: NoteId,
+    /// Vault-relative path affected by the diagnostic.
+    pub path: RelativePath,
+    /// Server revision whose content won the conflict.
+    pub winning_revision: ServerRevision,
 }
 
 struct PullWorkspace<'a, 'conn> {
@@ -49,6 +75,7 @@ struct PullWorkspace<'a, 'conn> {
     device_id: &'a DeviceId,
     clock: &'a dyn Clock,
     trash_dir: &'a RelativePath,
+    folders: &'a BTreeMap<String, FolderPolicy>,
     outcome: &'a mut PullApplyOutcome,
 }
 
@@ -80,6 +107,7 @@ pub fn apply_pull_response(
     let mut outcome = PullApplyOutcome {
         applied: 0,
         conflicts: Vec::new(),
+        diagnostics: Vec::new(),
         next_cursor,
     };
 
@@ -90,6 +118,7 @@ pub fn apply_pull_response(
             device_id: ctx.device_id,
             clock: ctx.clock,
             trash_dir: ctx.trash_dir,
+            folders: ctx.folders,
             outcome: &mut outcome,
         };
 
