@@ -28,18 +28,21 @@ use zk_domain::{
     id::{ContentHash, DeviceId, NoteId, RelativePath},
     note::NoteFrontmatter,
 };
+use zk_index::SourcesRepo;
 use zk_server::{
     ServerDb,
     ai::worker::{AiWorkerDeps, spawn_ai_job_worker},
     config::{AiChatConfig, AiConfig, AiProviderKind, ServerConfig},
     http::build_router,
-    repo::{NoteRow, NotesRepo},
+    repo::{AiJobFilter, AiJobKind, AiJobKindFilter, AiJobsRepo, NoteRow, NotesRepo},
     service::{self, IssueTokenSpec},
     state::{ServerState, bootstrap_with_config},
 };
 use zk_vault::{NormalizationContext, analyze_body, normalize_frontmatter, parse_note_file};
 
 const SOURCE_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S6S";
+const OTHER_SOURCE_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S6T";
+const THIRD_SOURCE_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S6V";
 const CREATED_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S75";
 const INDEX_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S76";
 const LOG_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S77";
@@ -127,6 +130,34 @@ impl TestServer {
             .expect("device token fixture should be issued")
             .plaintext
     }
+
+    fn recompute_note_ids(&self) -> Vec<NoteId> {
+        let mut ids = self
+            .state
+            .db()
+            .with_conn(|connection| {
+                AiJobsRepo::new(connection)
+                    .list(AiJobFilter {
+                        status: None,
+                        kind: Some(AiJobKindFilter::RecomputeNote),
+                        limit: None,
+                    })
+                    .map(|jobs| {
+                        jobs.into_iter()
+                            .filter_map(|job| match job.kind {
+                                AiJobKind::RecomputeNote { note_id } => Some(note_id),
+                                AiJobKind::RecomputeVault
+                                | AiJobKind::ChatTurn { .. }
+                                | AiJobKind::IngestSource { .. }
+                                | AiJobKind::LintWiki { .. } => None,
+                            })
+                            .collect::<Vec<_>>()
+                    })
+            })
+            .expect("recompute jobs should list");
+        ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        ids
+    }
 }
 
 impl Drop for TestServer {
@@ -164,12 +195,27 @@ async fn wiki_ingest_by_path_waits_and_writes_sources() {
         Some(&Value::String("Done".to_string()))
     );
     assert_eq!(stdout.get("error"), Some(&Value::Null));
+    let beta_frontmatter =
+        normalize_note_file(&fixture.vault_root, &fixture.app_config(), "wiki/beta.md").0;
+    assert_eq!(beta_frontmatter.note_type.as_deref(), Some("wiki-entity"));
+    assert_eq!(beta_frontmatter.sources, vec![NoteId::new(SOURCE_ID)]);
+    let connection =
+        bootstrap_index_connection(&fixture.app_config()).expect("local index should open");
     assert_eq!(
-        normalize_note_file(&fixture.vault_root, &fixture.app_config(), "wiki/beta.md")
-            .0
-            .sources,
+        SourcesRepo::list_sources_for_note(&connection, &NoteId::new(CREATED_ID))
+            .expect("local sources should query"),
         vec![NoteId::new(SOURCE_ID)]
     );
+    let index_body = parse_note_file(&fixture.vault_root.join("wiki/index.md"))
+        .expect("wiki index should parse")
+        .body_markdown;
+    assert!(index_body.contains("Beta Entity"));
+    assert!(index_body.contains(SOURCE_ID));
+    let log_body = parse_note_file(&fixture.vault_root.join("wiki/log.md"))
+        .expect("wiki log should parse")
+        .body_markdown;
+    assert!(log_body.contains("ingest Source Article -> 1 pages"));
+    assert_eq!(server.recompute_note_ids(), vec![NoteId::new(CREATED_ID)]);
 
     worker_shutdown.cancel();
     timeout(Duration::from_secs(1), worker_handle)
@@ -251,7 +297,13 @@ fn seed_server_notes(state: &ServerState, vault_root: &Path, app_config: &Effect
     state
         .db()
         .with_conn(|connection| {
-            for path in ["raw/source.md", "wiki/index.md", "wiki/log.md"] {
+            for path in [
+                "raw/source.md",
+                "raw/other.md",
+                "raw/third.md",
+                "wiki/index.md",
+                "wiki/log.md",
+            ] {
                 NotesRepo::create(
                     connection,
                     &note_row_from_file(state, vault_root, app_config, path),
@@ -387,6 +439,24 @@ fn write_standard_notes(vault_root: &Path) {
             "Source Article",
             None,
             "# Source Article\n\nRaw facts.",
+        ),
+    );
+    write_text(
+        &vault_root.join("raw/other.md"),
+        &note_file(
+            OTHER_SOURCE_ID,
+            "Other Source",
+            None,
+            "# Other Source\n\nOther raw facts.",
+        ),
+    );
+    write_text(
+        &vault_root.join("raw/third.md"),
+        &note_file(
+            THIRD_SOURCE_ID,
+            "Third Source",
+            None,
+            "# Third Source\n\nMore raw facts.",
         ),
     );
     write_text(

@@ -178,6 +178,15 @@ async fn wiki_lint_wait_and_show_report_planted_findings() {
         serde_json::from_slice(&json_assert.get_output().stdout).expect("stdout should be JSON");
 
     assert_eq!(json_stdout, expected_findings_json());
+    assert_eq!(
+        finding_kind_page_pairs(&json_stdout),
+        vec![
+            ("orphan_page".to_string(), Some(ORPHAN_ID.to_string())),
+            ("stale_claim".to_string(), Some(STALE_ID.to_string())),
+            ("missing_xref".to_string(), Some(ALPHA_ID.to_string())),
+            ("missing_page".to_string(), None),
+        ]
+    );
 
     let job_id = server.latest_lint_job_id();
     let human_assert = wiki_command(&fixture, &server, &token)
@@ -611,6 +620,28 @@ fn expected_findings_json() -> Value {
             }
         ]
     })
+}
+
+fn finding_kind_page_pairs(output: &Value) -> Vec<(String, Option<String>)> {
+    output
+        .get("findings")
+        .and_then(Value::as_array)
+        .expect("findings should be an array")
+        .iter()
+        .map(|finding| {
+            let kind = finding
+                .get("kind")
+                .and_then(Value::as_str)
+                .expect("finding kind should be a string")
+                .to_string();
+            let page_id = finding
+                .get("page_id")
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+
+            (kind, page_id)
+        })
+        .collect()
 }
 
 fn stdout_text(output: &std::process::Output) -> String {

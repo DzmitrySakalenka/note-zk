@@ -16,6 +16,8 @@ use std::{
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::stream::{self, BoxStream};
+use insta::assert_yaml_snapshot;
+use serde::Serialize;
 use tokio::time::{advance, timeout};
 use tokio_util::sync::CancellationToken;
 use zk_ai::{
@@ -46,6 +48,7 @@ use common::{unique_test_dir, write_text};
 
 const SOURCE_ID: &str = "01SOURCE000000000000000001";
 const OTHER_SOURCE_ID: &str = "01SOURCE000000000000000002";
+const THIRD_SOURCE_ID: &str = "01SOURCE000000000000000003";
 const EXISTING_ID: &str = "01WIKIEXISTING00000000001";
 const CREATED_ID: &str = "01WIKICREATED000000000001";
 const INDEX_ID: &str = "01WIKIINDEX0000000000001";
@@ -59,6 +62,7 @@ async fn ingest_source_worker_applies_plan_updates_meta_and_enqueues_recompute()
     fixture.seed_server_notes(&[
         "raw/source.md",
         "raw/other.md",
+        "raw/third.md",
         "wiki/existing.md",
         "wiki/index.md",
         "wiki/log.md",
@@ -75,12 +79,19 @@ async fn ingest_source_worker_applies_plan_updates_meta_and_enqueues_recompute()
     join_worker(handle).await;
 
     assert_eq!(done.attempts, 0);
+    let created_frontmatter = fixture.frontmatter("wiki/beta.md");
     assert_eq!(
-        fixture.frontmatter("wiki/beta.md").sources,
-        vec![NoteId::new(SOURCE_ID)]
+        created_frontmatter.note_type.as_deref(),
+        Some("wiki-entity")
+    );
+    assert_eq!(created_frontmatter.sources, vec![NoteId::new(SOURCE_ID)]);
+    let existing_frontmatter = fixture.frontmatter("wiki/existing.md");
+    assert_eq!(
+        existing_frontmatter.note_type.as_deref(),
+        Some("wiki-entity")
     );
     assert_eq!(
-        fixture.frontmatter("wiki/existing.md").sources,
+        existing_frontmatter.sources,
         vec![NoteId::new(OTHER_SOURCE_ID), NoteId::new(SOURCE_ID)]
     );
     assert_eq!(
@@ -104,8 +115,38 @@ async fn ingest_source_worker_applies_plan_updates_meta_and_enqueues_recompute()
         recompute_note_ids,
         vec![NoteId::new(CREATED_ID), NoteId::new(EXISTING_ID)]
     );
-    assert!(fixture.server_note(&NoteId::new(CREATED_ID)).is_some());
+    assert_eq!(
+        fixture.server_frontmatter(&NoteId::new(CREATED_ID)).sources,
+        vec![NoteId::new(SOURCE_ID)]
+    );
+    assert_eq!(
+        fixture
+            .server_frontmatter(&NoteId::new(EXISTING_ID))
+            .sources,
+        vec![NoteId::new(OTHER_SOURCE_ID), NoteId::new(SOURCE_ID)]
+    );
     assert!(fixture.server_note(&NoteId::new(INDEX_ID)).is_some());
+    assert_yaml_snapshot!(fixture.rendered_wiki_pages(), @r##"
+    - path: wiki/beta.md
+      note_type: wiki-entity
+      sources:
+        - 01SOURCE000000000000000001
+      body_markdown: "# Beta Entity\n\nNew body.\n"
+    - path: wiki/existing.md
+      note_type: wiki-entity
+      sources:
+        - 01SOURCE000000000000000002
+        - 01SOURCE000000000000000001
+      body_markdown: "# Existing Entity\n\nUpdated body.\n"
+    - path: wiki/index.md
+      note_type: wiki-index
+      sources: []
+      body_markdown: "# Wiki Index\n\n- [[Beta Entity]] <- 01SOURCE000000000000000001\n- [[Existing Entity]] <- 01SOURCE000000000000000002, 01SOURCE000000000000000001\n"
+    - path: wiki/log.md
+      note_type: wiki-log
+      sources: []
+      body_markdown: "# Wiki Log\n\n- <timestamp> ingest Source Article -> 2 pages\n"
+    "##);
 
     let duplicate = fixture.enqueue_ingest("req-ingest-source-e2e");
     assert_eq!(duplicate.job_id, job.job_id);
@@ -389,6 +430,16 @@ impl IngestFixture {
             ),
         );
         write_text(
+            &self.vault_path("raw/third.md"),
+            &note_file(
+                THIRD_SOURCE_ID,
+                "Third Source",
+                None,
+                &[],
+                "# Third Source\n",
+            ),
+        );
+        write_text(
             &self.vault_path("wiki/existing.md"),
             &note_file(
                 EXISTING_ID,
@@ -515,6 +566,16 @@ impl IngestFixture {
             .expect("server note lookup should succeed")
     }
 
+    fn server_frontmatter(&self, note_id: &NoteId) -> NoteFrontmatter {
+        serde_json::from_str(
+            &self
+                .server_note(note_id)
+                .expect("server note should exist")
+                .frontmatter_json,
+        )
+        .expect("server note frontmatter should decode")
+    }
+
     fn frontmatter(&self, path: &str) -> NoteFrontmatter {
         normalize_note_file(&self.vault_root, &self.app_config, path).0
     }
@@ -528,6 +589,62 @@ impl IngestFixture {
     fn vault_path(&self, path: &str) -> std::path::PathBuf {
         self.vault_root.join(path)
     }
+
+    fn rendered_wiki_pages(&self) -> Vec<RenderedWikiPage> {
+        [
+            "wiki/beta.md",
+            "wiki/existing.md",
+            "wiki/index.md",
+            "wiki/log.md",
+        ]
+        .into_iter()
+        .map(|path| {
+            let frontmatter = self.frontmatter(path);
+            RenderedWikiPage {
+                path: path.to_string(),
+                note_type: frontmatter.note_type,
+                sources: frontmatter
+                    .sources
+                    .into_iter()
+                    .map(|source| source.to_string())
+                    .collect(),
+                body_markdown: stable_snapshot_body(path, self.body(path)),
+            }
+        })
+        .collect()
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct RenderedWikiPage {
+    path: String,
+    note_type: Option<String>,
+    sources: Vec<String>,
+    body_markdown: String,
+}
+
+fn stable_snapshot_body(path: &str, body: String) -> String {
+    if path != "wiki/log.md" {
+        return body;
+    }
+
+    body.lines()
+        .map(|line| {
+            if line.contains(" ingest ") {
+                line.replacen(
+                    line.split_once(" ingest ")
+                        .expect("ingest log line should contain separator")
+                        .0,
+                    "- <timestamp>",
+                    1,
+                )
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
 }
 
 struct ScriptedChatProvider {

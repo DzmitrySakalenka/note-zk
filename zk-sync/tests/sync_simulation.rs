@@ -406,6 +406,12 @@ fn concurrent_edit_on_derived_folder_uses_remote_lww_without_conflict_copy() {
         client_a.note_row(&note_id).server_revision
     );
     assert!(!client_b.file_exists("wiki/index.conflict-remote-20260423T120000Z.md"));
+    assert!(
+        !client_b
+            .vault_snapshot()
+            .keys()
+            .any(|path| path.starts_with("wiki/index.conflict-"))
+    );
     assert_eq!(
         client_b.note_bytes("wiki/index.md"),
         client_a.note_bytes("wiki/index.md")

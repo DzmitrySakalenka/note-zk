@@ -10,6 +10,8 @@ use std::{
 };
 
 use assert_cmd::Command;
+use insta::assert_yaml_snapshot;
+use serde::Serialize;
 use serde_json::Value;
 use tempfile::{NamedTempFile, TempDir};
 use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
@@ -244,6 +246,28 @@ async fn save_as_wiki_writes_latest_assistant_reply_with_sources() {
             .body_markdown
             .contains(&format!("stub-response: {QUERY}"))
     );
+    assert_yaml_snapshot!(SavedWikiPageSnapshot {
+        title: frontmatter
+            .title
+            .clone()
+            .expect("saved note title should be present"),
+        note_type: frontmatter.note_type.clone(),
+        sources: frontmatter
+            .sources
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        body_markdown: parsed
+            .body_markdown
+            .replace(&conversation_id.to_string(), "<conversation_id>"),
+    }, @r#"
+    title: Research Summary
+    note_type: wiki-synthesis
+    sources:
+      - 01K7C000000000000000000001
+      - 01K7C000000000000000000003
+    body_markdown: "> Saved from chat conversation <conversation_id> using chat model test/save-as-wiki-chat.\n\nstub-response: terminal retrieval bridge\n"
+    "#);
 
     let connection =
         bootstrap_index_connection(&cli.app_config()).expect("local index should open");
@@ -254,6 +278,14 @@ async fn save_as_wiki_writes_latest_assistant_reply_with_sources() {
         vec![NoteId::new(SOURCE_ONE_ID), NoteId::new(SOURCE_THREE_ID)]
     );
     assert_eq!(server.recompute_note_ids(), vec![note_id]);
+}
+
+#[derive(Debug, Serialize)]
+struct SavedWikiPageSnapshot {
+    title: String,
+    note_type: Option<String>,
+    sources: Vec<String>,
+    body_markdown: String,
 }
 
 async fn start_server() -> TestServer {

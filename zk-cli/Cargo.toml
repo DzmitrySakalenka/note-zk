@@ -33,7 +33,7 @@ zk-vault = { version = "0.1.0", path = "../zk-vault", optional = true }
 assert_cmd = "2.2.1"
 axum = "0.8.9"
 hex = "0.4.3"
-insta = "1.47.2"
+insta = { version = "1.47.2", features = ["yaml"] }
 predicates = "3.1.4"
 sha2 = "0.11.0"
 tempfile = "3.27.0"
