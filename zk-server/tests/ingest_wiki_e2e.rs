@@ -7,7 +7,7 @@ use std::{
     fs,
     path::Path,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -159,6 +159,46 @@ async fn ingest_source_worker_applies_plan_updates_meta_and_enqueues_recompute()
             .count(),
         1
     );
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn ingest_source_worker_uses_server_row_body_when_raw_file_is_absent() {
+    let fixture = IngestFixture::new("ingest-wiki-worker-row-body");
+    fixture.seed_standard_vault();
+    fixture.rebuild_local_index();
+    fixture.seed_server_notes(&[
+        "raw/source.md",
+        "wiki/existing.md",
+        "wiki/index.md",
+        "wiki/log.md",
+    ]);
+    fixture.replace_server_note_body(
+        &NoteId::new(SOURCE_ID),
+        "# Source Article\n\nRow-only synced facts.",
+    );
+    fs::remove_file(fixture.vault_path("raw/source.md"))
+        .expect("raw source file should be absent from server vault");
+    let job = fixture.enqueue_ingest("req-ingest-source-row-body");
+    let provider = Arc::new(ScriptedChatProvider::success(success_plan_json()));
+    let shutdown = CancellationToken::new();
+    let handle = fixture.spawn_worker(selector_with_chat(provider.clone()), shutdown.clone());
+
+    let done = wait_for_status(&fixture.db, &job.job_id, AiJobStatus::Done).await;
+    shutdown.cancel();
+    join_worker(handle).await;
+
+    assert_eq!(done.attempts, 0);
+    assert!(fixture.vault_path("wiki/beta.md").exists());
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 1);
+    let prompt = requests[0]
+        .messages
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(prompt.contains("Row-only synced facts."));
+    assert!(!prompt.contains("Raw facts."));
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
@@ -493,6 +533,18 @@ impl IngestFixture {
             .expect("server note row should insert");
     }
 
+    fn replace_server_note_body(&self, note_id: &NoteId, body_markdown: &str) {
+        self.db
+            .with_conn(|connection| {
+                let mut row = NotesRepo::get(connection, note_id.as_str())?
+                    .expect("server note row should exist");
+                row.body_markdown = body_markdown.to_string();
+                row.content_hash = ContentHash::from_bytes(body_markdown.as_bytes()).to_string();
+                NotesRepo::update(connection, &row)
+            })
+            .expect("server note body should update");
+    }
+
     fn enqueue_ingest(&self, request_id: &str) -> AiJob {
         self.db
             .with_conn(|connection| {
@@ -649,6 +701,7 @@ fn stable_snapshot_body(path: &str, body: String) -> String {
 
 struct ScriptedChatProvider {
     calls: AtomicUsize,
+    requests: Mutex<Vec<ChatRequest>>,
     response: AiResult<String>,
 }
 
@@ -656,6 +709,7 @@ impl ScriptedChatProvider {
     fn success(response: &str) -> Self {
         Self {
             calls: AtomicUsize::new(0),
+            requests: Mutex::new(Vec::new()),
             response: Ok(response.to_string()),
         }
     }
@@ -663,10 +717,18 @@ impl ScriptedChatProvider {
     fn failure() -> Self {
         Self {
             calls: AtomicUsize::new(0),
+            requests: Mutex::new(Vec::new()),
             response: Err(AiError::ProviderRequest(
                 "provider failed safely".to_string(),
             )),
         }
+    }
+
+    fn requests(&self) -> Vec<ChatRequest> {
+        self.requests
+            .lock()
+            .expect("recorded chat requests lock should not be poisoned")
+            .clone()
     }
 }
 
@@ -674,9 +736,13 @@ impl ScriptedChatProvider {
 impl ChatProvider for ScriptedChatProvider {
     async fn complete(
         &self,
-        _request: ChatRequest,
+        request: ChatRequest,
     ) -> AiResult<BoxStream<'static, AiResult<ChatChunk>>> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.requests
+            .lock()
+            .expect("recorded chat requests lock should not be poisoned")
+            .push(request);
         let response = match &self.response {
             Ok(response) => response.clone(),
             Err(error) => return Err(AiError::ProviderRequest(error.to_string())),

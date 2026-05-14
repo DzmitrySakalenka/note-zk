@@ -420,7 +420,7 @@ async fn process_ingest_source(
     let source_row = source_row(deps, source_note_id)?;
     let source_title = source_row.title.clone();
     let source = note_record_from_row(&source_row);
-    let source_body = read_note_body(deps, source_note_id)?;
+    let source_body = &source_row.body_markdown;
     let existing_wiki_titles = existing_wiki_titles(deps, &wiki.root_dir)?;
     let vocabulary = WikiVocabulary::new(wiki.root_dir.clone());
     let service = IngestSourceService::new(
@@ -429,7 +429,7 @@ async fn process_ingest_source(
         request_id.to_string(),
     );
     let plan = service
-        .ingest_source(&source, &source_body, &existing_wiki_titles, &vocabulary)
+        .ingest_source(&source, source_body, &existing_wiki_titles, &vocabulary)
         .await?;
     let plan = plan_with_sources(deps, source_note_id, plan)?;
 

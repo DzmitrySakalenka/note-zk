@@ -112,11 +112,6 @@ fn save_as_wiki(args: &ChatSaveAsWikiArgs, shared: &SharedFlags) -> Result<i32, 
     )
     .map_err(map_write_error)?;
 
-    context
-        .runtime
-        .block_on(context.wiki_facade.recompute_note(created_note_id.clone()))
-        .map_err(super::map_app_error)?;
-
     write_save_as_wiki_output(
         &SaveAsWikiOutput {
             note_id: created_note_id.to_string(),

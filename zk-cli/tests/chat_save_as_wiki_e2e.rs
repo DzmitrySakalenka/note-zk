@@ -140,7 +140,7 @@ impl TestServer {
                         label: "CLI save-as-wiki E2E token".to_string(),
                         device_id: None,
                         user_id: Some(USER_ID.to_string()),
-                        scopes: vec![AuthScope::Admin, AuthScope::Chat],
+                        scopes: vec![AuthScope::Chat],
                     },
                     self.state.started_at(),
                 )
@@ -277,7 +277,7 @@ async fn save_as_wiki_writes_latest_assistant_reply_with_sources() {
         sources,
         vec![NoteId::new(SOURCE_ONE_ID), NoteId::new(SOURCE_THREE_ID)]
     );
-    assert_eq!(server.recompute_note_ids(), vec![note_id]);
+    assert_eq!(server.recompute_note_ids(), Vec::<NoteId>::new());
 }
 
 #[derive(Debug, Serialize)]
