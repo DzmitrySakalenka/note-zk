@@ -523,8 +523,30 @@ pub struct WikiArgs {
 pub enum WikiCommand {
     /// Enqueue ingest for one raw source note.
     Ingest(WikiIngestArgs),
+    /// Enqueue or inspect wiki lint findings.
+    Lint(WikiLintArgs),
     /// Show current status for one wiki AI job.
     Status(WikiStatusArgs),
+}
+
+/// Explicit lint scope accepted by `wiki lint`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WikiLintScopeArg {
+    /// Lint the whole configured wiki.
+    Vault,
+}
+
+/// Public wiki lint finding aliases accepted by `wiki lint show --kind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WikiLintKindArg {
+    /// Authored page is not linked from the wiki index or another page.
+    OrphanPage,
+    /// Source note is newer than a page that cites it.
+    StaleClaim,
+    /// Page body mentions another page title without linking to it.
+    MissingXref,
+    /// Repeated source concept has no matching wiki page.
+    MissingPage,
 }
 
 /// Arguments for `wiki ingest`.
@@ -548,6 +570,47 @@ pub struct WikiIngestArgs {
 pub struct WikiStatusArgs {
     /// AI job id to inspect.
     pub job_id: String,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `wiki lint`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(group(ArgGroup::new("wiki_lint_scope").args(["scope", "folder"]).multiple(false)))]
+pub struct WikiLintArgs {
+    /// Optional lint-findings action.
+    #[command(subcommand)]
+    pub command: Option<WikiLintCommand>,
+    /// Lint scope. Only `vault` is accepted; use `--folder` for folder-scoped lint.
+    #[arg(long, value_parser = parse_wiki_lint_scope)]
+    pub scope: Option<WikiLintScopeArg>,
+    /// Vault-relative wiki folder to lint.
+    #[arg(long)]
+    pub folder: Option<String>,
+    /// Wait until the lint job reaches a terminal status and print findings.
+    #[arg(long)]
+    pub wait: bool,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Nested command set under `wiki lint`.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum WikiLintCommand {
+    /// Show findings for one wiki lint job.
+    Show(WikiLintShowArgs),
+}
+
+/// Arguments for `wiki lint show`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct WikiLintShowArgs {
+    /// AI job id whose lint findings should be fetched.
+    pub job_id: String,
+    /// Client-side finding kind filter.
+    #[arg(long, value_parser = parse_wiki_lint_kind)]
+    pub kind: Option<WikiLintKindArg>,
     /// Render compact JSON to stdout.
     #[arg(long)]
     pub json: bool,
@@ -726,5 +789,22 @@ fn parse_admin_ai_status(value: &str) -> Result<String, String> {
     match value {
         "pending" | "in-flight" | "done" | "failed" => Ok(value.to_string()),
         other => Err(format!("unknown AI job status: {other}")),
+    }
+}
+
+fn parse_wiki_lint_scope(value: &str) -> Result<WikiLintScopeArg, String> {
+    match value {
+        "vault" => Ok(WikiLintScopeArg::Vault),
+        other => Err(format!("unknown wiki lint scope: {other}")),
+    }
+}
+
+fn parse_wiki_lint_kind(value: &str) -> Result<WikiLintKindArg, String> {
+    match value {
+        "orphan_page" => Ok(WikiLintKindArg::OrphanPage),
+        "stale_claim" => Ok(WikiLintKindArg::StaleClaim),
+        "missing_xref" => Ok(WikiLintKindArg::MissingXref),
+        "missing_page" => Ok(WikiLintKindArg::MissingPage),
+        other => Err(format!("unknown wiki lint kind: {other}")),
     }
 }
