@@ -261,6 +261,7 @@ impl WikiFacade {
     ///
     /// Returns [`AppError`] when the local index handle is missing or the
     /// local index query fails.
+    // why: facade owns CLI-facing IDs for API symmetry, then borrows them for local index queries.
     #[allow(
         clippy::needless_pass_by_value,
         reason = "facade API accepts owned note IDs for CLI-facing symmetry"
@@ -276,6 +277,7 @@ impl WikiFacade {
     ///
     /// Returns [`AppError`] when the local index handle is missing or the
     /// local index query fails.
+    // why: facade owns CLI-facing IDs for API symmetry, then borrows them for local index queries.
     #[allow(
         clippy::needless_pass_by_value,
         reason = "facade API accepts owned note IDs for CLI-facing symmetry"

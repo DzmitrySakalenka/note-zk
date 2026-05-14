@@ -52,7 +52,7 @@ pub struct NormalizationContext<'a> {
 
 /// Planned normalization changes and informational diagnostics for one note.
 #[derive(Debug, Clone, PartialEq, Eq)]
-// These booleans are independent normalization facts, not a mutually exclusive mode set.
+// why: callers read independent plan flags directly; bitflags would obscure checks like plan.needs_frontmatter_insertion.
 #[allow(clippy::struct_excessive_bools)]
 pub struct NormalizationPlan {
     /// Whether a missing stable note ID should be inserted.
