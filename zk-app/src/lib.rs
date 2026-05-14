@@ -97,6 +97,12 @@ pub use sync::{
 pub use wiki::{list_pages_using_source, list_sources_for_note};
 #[cfg(feature = "ai")]
 #[rustfmt::skip]
+pub use wiki::{
+    AiJobStatus, LocalWikiIndexHandle, WikiFacade, WikiFacadeDeps, WikiLintFinding,
+    WikiLintFindingKind, WikiLintScope, WikiLintSeverity,
+};
+#[cfg(feature = "ai")]
+#[rustfmt::skip]
 pub use ai::{
     AiFacade, AiFacadeDeps, ChatChunk, ChatRequest, ConversationDetail, ConversationDto,
     ListConversationsParams, LocalEmbeddingsRepoHandle, MessageDto, RecomputeLocalSummary,

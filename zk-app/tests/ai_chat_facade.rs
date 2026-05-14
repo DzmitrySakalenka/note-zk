@@ -148,7 +148,7 @@ async fn conversation_methods_use_expected_http_routes() {
         .get_conversation(ConversationId::new(CONVERSATION_ID))
         .await
         .expect("conversation detail should load");
-    assert_conversation_detail(detail);
+    assert_conversation_detail(&detail);
 
     facade
         .rename_conversation(ConversationId::new(CONVERSATION_ID), "Renamed".to_string())
@@ -248,7 +248,7 @@ fn conversation_detail_json() -> serde_json::Value {
     })
 }
 
-fn assert_conversation_detail(detail: ConversationDetail) {
+fn assert_conversation_detail(detail: &ConversationDetail) {
     assert_eq!(
         detail.conversation.conversation_id.as_str(),
         CONVERSATION_ID
