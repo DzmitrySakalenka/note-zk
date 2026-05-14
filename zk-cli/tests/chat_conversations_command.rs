@@ -208,7 +208,7 @@ async fn list_json_writes_parseable_array() {
         .and(header("authorization", "Bearer shared-token"))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_body_json(json!([conversation_json("Original", Value::Null)])),
+                .set_body_json(json!([conversation_json("Original", &Value::Null)])),
         )
         .expect(1)
         .mount(&server)
@@ -225,7 +225,7 @@ async fn list_json_writes_parseable_array() {
     let output: Value =
         serde_json::from_slice(&assert.get_output().stdout).expect("stdout should be JSON");
 
-    assert_eq!(output, json!([conversation_json("Original", Value::Null)]));
+    assert_eq!(output, json!([conversation_json("Original", &Value::Null)]));
     server.verify().await;
 }
 
@@ -238,7 +238,7 @@ async fn mount_list_conversations(server: &MockServer) {
         .and(header("authorization", "Bearer shared-token"))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_body_json(json!([conversation_json("Original", Value::Null)])),
+                .set_body_json(json!([conversation_json("Original", &Value::Null)])),
         )
         .expect(1)
         .mount(server)
@@ -250,7 +250,7 @@ async fn mount_show_conversation(server: &MockServer) {
         .and(path(format!("/ai/chat/conversations/{CONVERSATION_ID}")))
         .and(header("authorization", "Bearer shared-token"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "conversation": conversation_json("Original", Value::Null),
+            "conversation": conversation_json("Original", &Value::Null),
             "messages": [
                 {
                     "message_id": USER_MESSAGE_ID,
@@ -293,7 +293,7 @@ async fn mount_rename_conversation(server: &MockServer) {
         .and(header("authorization", "Bearer shared-token"))
         .and(body_json(json!({"title": "Renamed"})))
         .respond_with(
-            ResponseTemplate::new(200).set_body_json(conversation_json("Renamed", Value::Null)),
+            ResponseTemplate::new(200).set_body_json(conversation_json("Renamed", &Value::Null)),
         )
         .expect(1)
         .mount(server)
@@ -307,7 +307,7 @@ async fn mount_archive_conversation(server: &MockServer) {
         .and(body_json(json!({"archived": true})))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_body_json(conversation_json("Renamed", json!("2026-05-11T10:02:00Z"))),
+                .set_body_json(conversation_json("Renamed", &json!("2026-05-11T10:02:00Z"))),
         )
         .expect(1)
         .mount(server)
@@ -320,7 +320,7 @@ async fn mount_unarchive_conversation(server: &MockServer) {
         .and(header("authorization", "Bearer shared-token"))
         .and(body_json(json!({"archived": false})))
         .respond_with(
-            ResponseTemplate::new(200).set_body_json(conversation_json("Renamed", Value::Null)),
+            ResponseTemplate::new(200).set_body_json(conversation_json("Renamed", &Value::Null)),
         )
         .expect(1)
         .mount(server)
@@ -337,7 +337,7 @@ async fn mount_delete_conversation(server: &MockServer, expected: u64) {
         .await;
 }
 
-fn conversation_json(title: &str, archived_at: Value) -> Value {
+fn conversation_json(title: &str, archived_at: &Value) -> Value {
     json!({
         "conversation_id": CONVERSATION_ID,
         "user_id": "user-a",

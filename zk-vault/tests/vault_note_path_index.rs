@@ -66,6 +66,41 @@ fn build_note_path_index_indexes_only_notes_with_ids() {
 }
 
 #[test]
+fn build_note_path_index_resolves_unique_note_ids_from_paths() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let vault_root = tempdir.path();
+    let config = base_config(vault_root);
+
+    write_text_file(
+        &vault_root.join("raw/source.md"),
+        concat!(
+            "---\n",
+            "id: 01JAR5A3PJEZ3SKG67PN8N6S6S\n",
+            "title: Source\n",
+            "tags:\n",
+            "  - raw\n",
+            "---\n",
+            "Body\n",
+        ),
+    );
+
+    let build = build_note_path_index(vault_root, &config).expect("index build should succeed");
+
+    assert_eq!(
+        build
+            .index
+            .note_id_for_path(&RelativePath::new("raw/source.md")),
+        Some(&NoteId::new("01JAR5A3PJEZ3SKG67PN8N6S6S"))
+    );
+    assert_eq!(
+        build
+            .index
+            .note_id_for_path(&RelativePath::new("raw/missing.md")),
+        None
+    );
+}
+
+#[test]
 fn build_note_path_index_skips_invalid_yaml_and_records_diagnostic() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let vault_root = tempdir.path();
@@ -155,6 +190,20 @@ fn build_note_path_index_excludes_duplicate_ids_from_resolution() {
         build.index.get(&NoteId::new("01INDEXDUPLICATE0000000001")),
         None,
         "duplicate ids must not resolve to an arbitrary path"
+    );
+    assert_eq!(
+        build
+            .index
+            .note_id_for_path(&RelativePath::new("notes/duplicate-a.md")),
+        None,
+        "duplicate ids must not reverse-resolve from any duplicate path"
+    );
+    assert_eq!(
+        build
+            .index
+            .note_id_for_path(&RelativePath::new("notes/duplicate-b.md")),
+        None,
+        "duplicate ids must not reverse-resolve from any duplicate path"
     );
     assert_eq!(
         build.index.get(&NoteId::new("01INDEXUNIQUE000000000001")),

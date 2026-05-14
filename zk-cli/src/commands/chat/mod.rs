@@ -237,9 +237,10 @@ fn source_for_citation(
         .map(|value| value.title)
         .filter(|title| !title.trim().is_empty())
         .unwrap_or_else(|| citation.note_id.to_string());
-    let path = note
-        .map(|value| value.current_path.to_string())
-        .unwrap_or_else(|| "path unavailable".to_string());
+    let path = note.map_or_else(
+        || "path unavailable".to_string(),
+        |value| value.current_path.to_string(),
+    );
 
     Ok(CitationSource { title, path })
 }

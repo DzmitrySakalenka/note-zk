@@ -99,6 +99,17 @@ pub struct WikiLintFinding {
     pub created_at: DateTime<Utc>,
 }
 
+/// Current server-side state for one AI background job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiJobStatus {
+    /// Stable job identifier.
+    pub job_id: JobId,
+    /// Current job status.
+    pub status: AiJobStatus,
+    /// Terminal failure detail, when the server has one.
+    pub last_error: Option<String>,
+}
+
 /// V1 wiki lint rule identifiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -190,6 +201,16 @@ impl WikiFacade {
         Ok(response.findings)
     }
 
+    /// Returns the current status for one remote AI job.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when HTTP transport is missing, the remote
+    /// request fails, or the job is not listed.
+    pub async fn job_status(&self, job_id: JobId) -> AppResult<WikiJobStatus> {
+        self.get_job(&job_id).await
+    }
+
     /// Polls the remote job list until the requested job reaches a terminal status.
     ///
     /// # Errors
@@ -201,7 +222,7 @@ impl WikiFacade {
         let mut backoff = INITIAL_JOB_POLL_BACKOFF;
 
         loop {
-            let status = self.get_job_status(&job_id).await?;
+            let status = self.get_job(&job_id).await?.status;
             if matches!(status, AiJobStatus::Done | AiJobStatus::Failed) {
                 return Ok(status);
             }
@@ -247,12 +268,16 @@ impl WikiFacade {
             .with_index(|connection| list_pages_using_source_local(connection, &source_note_id))
     }
 
-    async fn get_job_status(&self, job_id: &JobId) -> AppResult<AiJobStatus> {
+    async fn get_job(&self, job_id: &JobId) -> AppResult<WikiJobStatus> {
         let jobs: Vec<ListedJob> = self.get_json_with_retry(JOBS_LIST_PATH).await?;
 
         jobs.into_iter()
             .find(|job| job.job_id == *job_id)
-            .map(|job| job.status)
+            .map(|job| WikiJobStatus {
+                job_id: job.job_id,
+                status: job.status,
+                last_error: job.last_error,
+            })
             .ok_or_else(|| AppError::NotFound {
                 message: format!("AI job {job_id} not found"),
             })
@@ -357,6 +382,7 @@ struct FindingsResponse {
 struct ListedJob {
     job_id: JobId,
     status: AiJobStatus,
+    last_error: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

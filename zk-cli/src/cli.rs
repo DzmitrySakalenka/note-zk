@@ -1,6 +1,6 @@
 //! Argument parser definitions for the `zk-cli` binary.
 
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use clap::{ArgGroup, Args, Parser, Subcommand, builder::BoolishValueParser};
 use url::Url;
@@ -48,6 +48,8 @@ pub enum Command {
     Search(SearchArgs),
     /// Send AI chat messages and manage conversations.
     Chat(ChatArgs),
+    /// Run AI-backed wiki workflows.
+    Wiki(WikiArgs),
     /// Resolve one server-side sync conflict explicitly.
     ResolveConflict(ResolveConflictArgs),
 }
@@ -508,6 +510,49 @@ pub struct ChatArgs {
     pub json: bool,
 }
 
+/// Arguments for the `wiki` subcommand group.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct WikiArgs {
+    /// Wiki workflow command to run.
+    #[command(subcommand)]
+    pub command: WikiCommand,
+}
+
+/// Nested command set under `wiki`.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum WikiCommand {
+    /// Enqueue ingest for one raw source note.
+    Ingest(WikiIngestArgs),
+    /// Show current status for one wiki AI job.
+    Status(WikiStatusArgs),
+}
+
+/// Arguments for `wiki ingest`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct WikiIngestArgs {
+    /// Source note id or vault-relative source path.
+    pub source: String,
+    /// Wait until the ingest job reaches a terminal status.
+    #[arg(long)]
+    pub wait: bool,
+    /// Maximum wait duration. Accepts seconds as `60` or `60s`.
+    #[arg(long, default_value = "60s", value_parser = parse_duration_seconds)]
+    pub timeout: Duration,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `wiki status`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct WikiStatusArgs {
+    /// AI job id to inspect.
+    pub job_id: String,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
 impl ChatArgs {
     /// Returns whether the command should request and render streaming output.
     #[must_use]
@@ -658,6 +703,16 @@ fn parse_top_k(value: &str) -> Result<usize, String> {
     }
 
     Ok(parsed)
+}
+
+fn parse_duration_seconds(value: &str) -> Result<Duration, String> {
+    let value = value.trim();
+    let seconds = value.strip_suffix('s').unwrap_or(value);
+    let seconds = seconds
+        .parse::<u64>()
+        .map_err(|error| format!("timeout must be seconds: {error}"))?;
+
+    Ok(Duration::from_secs(seconds))
 }
 
 fn parse_admin_ai_recompute_scope(value: &str) -> Result<AdminAiRecomputeScope, String> {

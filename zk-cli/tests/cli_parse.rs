@@ -1,12 +1,15 @@
 // Integration tests are separate crates; each uses only a subset of package dependencies.
 #![allow(unused_crate_dependencies)]
 
+use std::time::Duration;
+
 use clap::Parser;
 
 use zk_cli::{
     cli::{
         AdminAiCommand, AdminAiRecomputeScope, AiCommand, AuthCommand, ChatConversationCommand,
         ChatSubcommand, Cli, Command, OutputMode, PurgeScope, ResolveStrategy, SyncMode,
+        WikiCommand,
     },
     error::{
         CliError, EXIT_AI_DISABLED, EXIT_ISSUES, EXIT_OK, EXIT_PROVIDER_UNAVAILABLE, EXIT_REQUEST,
@@ -268,6 +271,81 @@ fn chat_rejects_new_and_conversation_id_together() {
     .expect_err("chat should reject conflicting conversation selectors");
 
     assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
+fn wiki_ingest_parses_source_wait_timeout_and_json_flags() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "wiki",
+        "ingest",
+        "raw/source.md",
+        "--wait",
+        "--timeout",
+        "5s",
+        "--json",
+    ])
+    .expect("wiki ingest arguments should parse");
+
+    match cli.command {
+        Command::Wiki(args) => match args.command {
+            WikiCommand::Ingest(args) => {
+                assert_eq!(args.source, "raw/source.md");
+                assert!(args.wait);
+                assert_eq!(args.timeout, Duration::from_secs(5));
+                assert_eq!(OutputMode::from(args.json), OutputMode::Json);
+            }
+            other @ WikiCommand::Status(_) => {
+                panic!("expected wiki ingest command, got {other:?}");
+            }
+        },
+        other => panic!("expected wiki command, got {other:?}"),
+    }
+}
+
+#[test]
+fn wiki_ingest_defaults_to_sixty_second_timeout() {
+    let cli = Cli::try_parse_from(["zk-cli", "wiki", "ingest", "01JAR5A3PJEZ3SKG67PN8N6S6S"])
+        .expect("wiki ingest arguments should parse");
+
+    match cli.command {
+        Command::Wiki(args) => match args.command {
+            WikiCommand::Ingest(args) => {
+                assert_eq!(args.timeout, Duration::from_secs(60));
+                assert!(!args.wait);
+                assert!(!args.json);
+            }
+            other @ WikiCommand::Status(_) => {
+                panic!("expected wiki ingest command, got {other:?}");
+            }
+        },
+        other => panic!("expected wiki command, got {other:?}"),
+    }
+}
+
+#[test]
+fn wiki_status_parses_job_id_and_json_flag() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "wiki",
+        "status",
+        "01JAR5A3PJEZ3SKG67PN8N6S6J",
+        "--json",
+    ])
+    .expect("wiki status arguments should parse");
+
+    match cli.command {
+        Command::Wiki(args) => match args.command {
+            WikiCommand::Status(args) => {
+                assert_eq!(args.job_id, "01JAR5A3PJEZ3SKG67PN8N6S6J");
+                assert_eq!(OutputMode::from(args.json), OutputMode::Json);
+            }
+            other @ WikiCommand::Ingest(_) => {
+                panic!("expected wiki status command, got {other:?}");
+            }
+        },
+        other => panic!("expected wiki command, got {other:?}"),
+    }
 }
 
 #[test]

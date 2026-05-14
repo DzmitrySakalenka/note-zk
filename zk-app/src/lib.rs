@@ -98,7 +98,7 @@ pub use wiki::{list_pages_using_source, list_sources_for_note};
 #[cfg(feature = "ai")]
 #[rustfmt::skip]
 pub use wiki::{
-    AiJobStatus, LocalWikiIndexHandle, WikiFacade, WikiFacadeDeps, WikiLintFinding,
+    AiJobStatus, LocalWikiIndexHandle, WikiFacade, WikiFacadeDeps, WikiJobStatus, WikiLintFinding,
     WikiLintFindingKind, WikiLintScope, WikiLintSeverity,
 };
 #[cfg(feature = "ai")]

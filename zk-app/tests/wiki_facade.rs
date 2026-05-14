@@ -254,6 +254,42 @@ async fn wait_for_job_missing_job_maps_to_not_found() {
     server.verify().await;
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn job_status_returns_current_status_and_last_error() {
+    let server = MockServer::start().await;
+    let facade = connected_facade(&server);
+
+    Mock::given(method("GET"))
+        .and(path("/admin/ai/jobs"))
+        .and(query_param("limit", "1000"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "job_id": JOB_ID,
+            "kind": "ingest_source",
+            "status": "failed",
+            "attempts": 1,
+            "last_error": "provider unavailable",
+            "enqueued_at": "2026-05-13T12:00:00Z",
+            "started_at": "2026-05-13T12:00:01Z",
+            "finished_at": "2026-05-13T12:00:02Z"
+        }])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let status = facade
+        .job_status(JobId::new(JOB_ID).expect("job id should parse"))
+        .await
+        .expect("job status should decode");
+
+    assert_eq!(
+        status.job_id,
+        JobId::new(JOB_ID).expect("job id should parse")
+    );
+    assert_eq!(status.status, AiJobStatus::Failed);
+    assert_eq!(status.last_error.as_deref(), Some("provider unavailable"));
+    server.verify().await;
+}
+
 #[test]
 fn provenance_methods_read_local_index() {
     let connection = open_memory().expect("open in-memory SQLite");

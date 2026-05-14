@@ -78,6 +78,7 @@ pub struct FrontmatterParseFailure {
 /// Reusable note-id to path lookup used by higher-level write flows.
 pub struct NotePathIndex {
     paths_by_id: HashMap<NoteId, RelativePath>,
+    ids_by_path: HashMap<RelativePath, NoteId>,
     ambiguous_ids: HashSet<NoteId>,
 }
 
@@ -94,6 +95,12 @@ impl NotePathIndex {
         self.paths_by_id.get(note_id)
     }
 
+    /// Returns the resolved note ID for a unique vault-relative path.
+    #[must_use]
+    pub fn note_id_for_path(&self, relative_path: &RelativePath) -> Option<&NoteId> {
+        self.ids_by_path.get(relative_path)
+    }
+
     /// Inserts a note ID to path mapping, marking duplicate IDs as ambiguous.
     pub fn insert(&mut self, note_id: NoteId, relative_path: RelativePath) {
         if self.ambiguous_ids.contains(&note_id) {
@@ -102,12 +109,16 @@ impl NotePathIndex {
 
         match self.paths_by_id.get(&note_id) {
             None => {
-                self.paths_by_id.insert(note_id, relative_path);
+                self.paths_by_id
+                    .insert(note_id.clone(), relative_path.clone());
+                self.ids_by_path.insert(relative_path, note_id);
             }
             Some(existing_path) if existing_path == &relative_path => {}
             Some(_) => {
                 let removed_note_id = note_id.clone();
-                let _ = self.paths_by_id.remove(&removed_note_id);
+                if let Some(existing_path) = self.paths_by_id.remove(&removed_note_id) {
+                    let _ = self.ids_by_path.remove(&existing_path);
+                }
                 let _ = self.ambiguous_ids.insert(note_id);
             }
         }

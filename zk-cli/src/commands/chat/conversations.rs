@@ -146,11 +146,10 @@ fn write_conversation_table(conversations: &[ConversationDto]) -> Result<(), Cli
         .context("while attempting to write chat conversations output")
         .map_err(CliError::Internal)?;
     for conversation in conversations {
-        let last_message_at = conversation
-            .last_message_at
-            .as_ref()
-            .map(|timestamp| timestamp.to_rfc3339())
-            .unwrap_or_else(|| "-".to_string());
+        let last_message_at = match &conversation.last_message_at {
+            Some(timestamp) => timestamp.to_rfc3339(),
+            None => "-".to_string(),
+        };
         writeln!(
             out,
             "{}\t{}\t{}\t{}\t{}",
