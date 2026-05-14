@@ -11,6 +11,7 @@ members = [
     "zk-cli-core",
     "zk-server",
     "zk-cli",
+    "zk-tui",
 ]
 resolver = "3"
 

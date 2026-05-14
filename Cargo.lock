@@ -5747,6 +5747,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "zk-tui"
+version = "0.1.0"
+
+[[package]]
 name = "zk-vault"
 version = "0.1.0"
 dependencies = [
