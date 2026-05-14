@@ -1,3 +1,5 @@
+#![allow(unused_crate_dependencies)]
+
 use ratatui::layout::Rect;
 use tokio::runtime::Builder;
 use zk_tui as _;

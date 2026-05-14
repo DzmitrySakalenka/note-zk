@@ -37,3 +37,6 @@ default = []
 ai = ["dep:zk-ai", "dep:zk-index", "dep:zk-vault", "zk-app/ai"]
 ai-local = ["ai"]
 test-stub-ai = ["ai"]
+
+[dev-dependencies]
+insta = "1.47.2"

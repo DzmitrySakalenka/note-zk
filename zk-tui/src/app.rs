@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use crossterm::event::{KeyCode, KeyEventKind};
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Constraint, Layout, Rect},
     widgets::{Block, Borders, Clear, Paragraph},
 };
 use rusqlite::Connection;
@@ -21,6 +21,10 @@ use crate::{
     keymap::{GlobalKeyAction, KeyChord, global_action_for_key},
     screens::help::HelpScreen,
     terminal::TerminalGuard,
+    widgets::{
+        status_bar::StatusBar,
+        toast::{Toast, ToastLine, ToastQueue, ToastSeverity},
+    },
 };
 
 const EVENT_TICK: Duration = Duration::from_millis(250);
@@ -196,6 +200,14 @@ impl ScreenCtx {
             .context("while attempting to open preview index connection")?;
         Ok(Self::new(config, connection))
     }
+
+    /// Pushes a transient toast for the shared toast row.
+    pub fn push_toast(&mut self, toast: Toast) {
+        if toast.severity == ToastSeverity::Error {
+            tracing::error!(message = %toast.text, "TUI error toast");
+        }
+        self.status_messages.push(toast);
+    }
 }
 
 /// Runtime feature flags exposed to screens.
@@ -221,24 +233,8 @@ pub struct Theme {
     _private: (),
 }
 
-/// Placeholder status-message queue carried by [`ScreenCtx`] until TG-TUI-007 lands.
-#[derive(Debug, Clone, Default)]
-pub struct StatusMessages {
-    messages: Vec<String>,
-}
-
-impl StatusMessages {
-    /// Pushes a plain status message.
-    pub fn push(&mut self, message: String) {
-        self.messages.push(message);
-    }
-
-    /// Returns all retained status messages.
-    #[must_use]
-    pub fn messages(&self) -> &[String] {
-        &self.messages
-    }
-}
+/// Shared toast queue carried by [`ScreenCtx`].
+pub type StatusMessages = ToastQueue;
 
 /// Placeholder background job runner handle until TG-TUI-009 lands.
 #[derive(Debug, Clone, Default)]
@@ -364,15 +360,32 @@ impl App {
         let Some(index) = self.current_index() else {
             return;
         };
+        let [content_area, toast_area, status_area] = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .areas(area);
 
         let ctx = &self.ctx;
-        if let Some(screen) = self.screens.get_mut(index) {
-            screen.render(frame, area, ctx);
-        }
+        let Some(screen) = self.screens.get_mut(index) else {
+            return;
+        };
+        let screen_title = screen.title().to_string();
+        screen.render(frame, content_area, ctx);
 
         if let Some(modal) = &mut self.modal {
-            modal.render(frame, area, ctx);
+            modal.render(frame, content_area, ctx);
         }
+
+        frame.render_widget(
+            ToastLine::new(self.ctx.status_messages.visible()),
+            toast_area,
+        );
+        frame.render_widget(
+            StatusBar::new(&screen_title, index + 1, self.screens.len(), &self.ctx),
+            status_area,
+        );
     }
 
     /// Handles an event and returns `false` when the caller should stop the loop.
@@ -432,6 +445,10 @@ impl App {
     }
 
     fn dispatch_event(&mut self, event: &AppEvent) -> bool {
+        if matches!(event, AppEvent::Tick) {
+            self.ctx.status_messages.tick();
+        }
+
         let action = if let Some(modal) = &mut self.modal {
             modal.handle_event(event, &mut self.ctx)
         } else {

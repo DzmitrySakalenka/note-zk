@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg_attr(test, allow(unused_crate_dependencies))]
 //! Terminal UI crate for note-zk.
 
 pub mod app;
@@ -6,6 +7,7 @@ pub mod event;
 pub mod keymap;
 pub mod screens;
 pub mod terminal;
+pub mod widgets;
 
 // TG-TUI-003 wires the dependency surface before the modules consume it.
 use anyhow as _;

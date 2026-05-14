@@ -1,5 +1,5 @@
-// This integration test keeps the initial public TUI API reachable.
 #![allow(unused_crate_dependencies)]
+// This integration test keeps the initial public TUI API reachable.
 
 use std::io::Stdout;
 
