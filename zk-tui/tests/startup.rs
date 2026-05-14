@@ -1,21 +1,19 @@
-// This integration test exercises the binary through Cargo's executable path.
+// This integration test keeps the initial public TUI API reachable.
 #![allow(unused_crate_dependencies)]
 
-use std::process::Command;
+use std::io::Stdout;
 
 #[test]
-fn startup_prints_name_and_version() {
-    let output = Command::new(env!("CARGO_BIN_EXE_zk-tui"))
-        .output()
-        .expect("zk-tui binary should run");
+fn terminal_lifecycle_api_is_public() {
+    type DefaultTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<Stdout>>;
 
-    assert!(output.status.success(), "zk-tui should exit successfully");
-    assert_eq!(
-        String::from_utf8(output.stdout).expect("stdout should be valid UTF-8"),
-        format!("zk-tui {}\n", env!("CARGO_PKG_VERSION"))
-    );
-    assert!(
-        output.stderr.is_empty(),
-        "zk-tui should not write to stderr"
-    );
+    fn assert_init_signature(
+        _init: fn() -> anyhow::Result<(zk_tui::terminal::TerminalGuard, DefaultTerminal)>,
+    ) {
+    }
+
+    fn assert_hook_signature(_install_hook: fn()) {}
+
+    assert_init_signature(zk_tui::terminal::TerminalGuard::init);
+    assert_hook_signature(zk_tui::terminal::install_panic_hook);
 }
