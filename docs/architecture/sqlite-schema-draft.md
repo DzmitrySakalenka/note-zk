@@ -277,7 +277,7 @@ Indexes:
 - `idx_wiki_lint_findings_job ON wiki_lint_findings(job_id)`
 - `idx_wiki_lint_findings_page ON wiki_lint_findings(page_id) WHERE page_id IS NOT NULL`
 
-Last verified against `zk-server/src/schema.rs` on 2026-05-13.
+Last verified against `zk-server/src/schema.rs` on 2026-05-14.
 
 ## Chat Tables (server schema v4)
 
