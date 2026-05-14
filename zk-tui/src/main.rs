@@ -1,17 +1,12 @@
 // Most package dependencies are consumed by library modules as the TUI grows.
 #![allow(unused_crate_dependencies)]
 
-use std::{io, process::ExitCode, time::Duration};
+use std::{io, process::ExitCode};
 
 use anyhow::{Context, Result};
-use crossterm::event::KeyCode;
-use ratatui::{
-    Frame,
-    widgets::{Block, Borders, Paragraph},
-};
 use zk_tui::{
-    event::{AppEvent, EventLoop},
-    terminal::{TerminalGuard, install_panic_hook},
+    app::{App, ScreenCtx},
+    terminal::install_panic_hook,
 };
 
 fn main() -> ExitCode {
@@ -38,29 +33,16 @@ fn init_tracing() {
 }
 
 fn run() -> Result<()> {
-    let (_guard, mut terminal) = TerminalGuard::init()?;
-    let events = EventLoop::start(Duration::from_millis(250));
+    let vault_root =
+        zk_cli_core::resolve_vault_root(None).context("while attempting to resolve vault root")?;
+    let overrides = zk_cli_core::CliOverrides {
+        vault_path: Some(vault_root.clone()),
+        ..zk_cli_core::CliOverrides::default()
+    };
+    let config = zk_cli_core::load_effective_config(&vault_root, &overrides)
+        .context("while attempting to load TUI config")?;
+    let connection = zk_cli_core::open_index_connection(&config)
+        .context("while attempting to open TUI index connection")?;
 
-    terminal
-        .draw(draw)
-        .context("while attempting to draw TUI frame")?;
-    loop {
-        match events
-            .recv()
-            .context("while attempting to receive TUI event")?
-        {
-            AppEvent::Key(key) if matches!(key.code, KeyCode::Char('q')) => return Ok(()),
-            AppEvent::Tick | AppEvent::Resize(_, _) | AppEvent::Background(_) => {
-                terminal
-                    .draw(draw)
-                    .context("while attempting to draw TUI frame")?;
-            }
-            AppEvent::Key(_) => {}
-        }
-    }
-}
-
-fn draw(frame: &mut Frame<'_>) {
-    let paragraph = Paragraph::new("press q to quit").block(Block::default().borders(Borders::ALL));
-    frame.render_widget(paragraph, frame.area());
+    App::new(ScreenCtx::new(config, connection)).run()
 }

@@ -1,7 +1,10 @@
 #![deny(missing_docs)]
 //! Terminal UI crate for note-zk.
 
+pub mod app;
 pub mod event;
+pub mod keymap;
+pub mod screens;
 pub mod terminal;
 
 // TG-TUI-003 wires the dependency surface before the modules consume it.

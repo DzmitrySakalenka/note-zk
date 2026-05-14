@@ -13,6 +13,7 @@ fn runtime_dependency_surface_is_wired() {
         .enable_time()
         .build()
         .expect("current-thread runtime should build");
+    let _connection = rusqlite::Connection::open_in_memory().expect("in-memory SQLite should open");
     let _json = serde_json::json!({ "theme": "default" });
     let _toml: toml::Value = toml::from_str("theme = 'default'").expect("TOML should parse");
     let _url = url::Url::parse("https://zk.example.com").expect("URL should parse");

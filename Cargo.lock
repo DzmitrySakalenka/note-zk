@@ -5941,6 +5941,7 @@ dependencies = [
  "anyhow",
  "crossterm",
  "ratatui",
+ "rusqlite",
  "serde",
  "serde_json",
  "tokio",

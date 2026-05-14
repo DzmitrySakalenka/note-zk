@@ -1,0 +1,606 @@
+//! Top-level TUI application state and screen routing.
+
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
+use anyhow::{Context, Result};
+use crossterm::event::{KeyCode, KeyEventKind};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    widgets::{Block, Borders, Clear, Paragraph},
+};
+use rusqlite::Connection;
+use zk_app::EffectiveConfig;
+
+use crate::{
+    event::{AppEvent, EventLoop},
+    keymap::{GlobalKeyAction, KeyChord, global_action_for_key},
+    screens::help::HelpScreen,
+    terminal::TerminalGuard,
+};
+
+const EVENT_TICK: Duration = Duration::from_millis(250);
+
+/// A synchronous screen owned by the top-level app router.
+pub trait Screen {
+    /// Returns the user-facing screen title.
+    fn title(&self) -> &str;
+
+    /// Handles one application event and returns the requested router action.
+    fn handle_event(&mut self, event: &AppEvent, ctx: &mut ScreenCtx) -> ScreenAction;
+
+    /// Renders the screen into the provided terminal frame area.
+    fn render(&mut self, frame: &mut Frame<'_>, area: Rect, ctx: &ScreenCtx);
+
+    /// Handles a router-level quit request.
+    fn on_quit(&mut self, _ctx: &mut ScreenCtx) -> ScreenAction {
+        ScreenAction::Quit
+    }
+
+    /// Returns screen-local key bindings for the help overlay.
+    fn keybindings(&self) -> &'static [(KeyChord, &'static str)] {
+        &[]
+    }
+}
+
+/// Router actions returned by screens and modal screens.
+pub enum ScreenAction {
+    /// Keep the current screen and modal state unchanged.
+    Stay,
+    /// Exit the TUI event loop.
+    Quit,
+    /// Switch focus to another screen.
+    SwitchTo(ScreenId),
+    /// Open a modal overlay.
+    OpenModal(Modal),
+    /// Close the active modal overlay.
+    CloseModal,
+    /// Enqueue a background job when a runner is available.
+    EnqueueJob(JobSpec),
+}
+
+/// Stable identifiers for top-level TUI screens.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ScreenId {
+    /// Vault overview and status screen.
+    Overview,
+    /// Notes browser screen.
+    Notes,
+    /// Sync workflow screen.
+    Sync,
+    /// Doctor report screen.
+    Doctor,
+    /// Trash browser screen.
+    Trash,
+    /// Conflict resolution screen.
+    Resolve,
+    /// Auth and token management screen.
+    Auth,
+    /// Admin backup and AI jobs screen.
+    Admin,
+    /// Semantic search screen.
+    #[cfg(feature = "ai")]
+    Search,
+    /// Chat screen.
+    #[cfg(feature = "ai")]
+    Chat,
+    /// Wiki ingestion and lint screen.
+    #[cfg(feature = "ai")]
+    Wiki,
+}
+
+#[cfg(not(feature = "ai"))]
+const SCREEN_IDS: &[ScreenId] = &[
+    ScreenId::Overview,
+    ScreenId::Notes,
+    ScreenId::Sync,
+    ScreenId::Doctor,
+    ScreenId::Trash,
+    ScreenId::Resolve,
+    ScreenId::Auth,
+    ScreenId::Admin,
+];
+
+#[cfg(feature = "ai")]
+const SCREEN_IDS: &[ScreenId] = &[
+    ScreenId::Overview,
+    ScreenId::Notes,
+    ScreenId::Sync,
+    ScreenId::Doctor,
+    ScreenId::Trash,
+    ScreenId::Resolve,
+    ScreenId::Auth,
+    ScreenId::Admin,
+    ScreenId::Search,
+    ScreenId::Chat,
+    ScreenId::Wiki,
+];
+
+impl ScreenId {
+    /// Returns screen ids in router order.
+    #[must_use]
+    pub const fn all() -> &'static [Self] {
+        SCREEN_IDS
+    }
+
+    /// Returns the display title for this screen id.
+    #[must_use]
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Overview => "Overview",
+            Self::Notes => "Notes",
+            Self::Sync => "Sync",
+            Self::Doctor => "Doctor",
+            Self::Trash => "Trash",
+            Self::Resolve => "Resolve",
+            Self::Auth => "Auth",
+            Self::Admin => "Admin",
+            #[cfg(feature = "ai")]
+            Self::Search => "Search",
+            #[cfg(feature = "ai")]
+            Self::Chat => "Chat",
+            #[cfg(feature = "ai")]
+            Self::Wiki => "Wiki",
+        }
+    }
+}
+
+/// Shared mutable state passed to screens during event handling and rendering.
+#[derive(Clone)]
+pub struct ScreenCtx {
+    /// Effective application configuration.
+    pub config: EffectiveConfig,
+    /// Resolved vault root path.
+    pub vault_root: PathBuf,
+    /// Shared local index connection.
+    pub connection: Arc<Mutex<Connection>>,
+    /// Runtime feature flags.
+    pub features: FeatureFlags,
+    /// Current immutable theme placeholder.
+    pub theme: Arc<Theme>,
+    /// Shared status messages placeholder.
+    pub status_messages: StatusMessages,
+    /// Optional background job runner handle.
+    pub job_runner: Option<JobRunnerHandle>,
+}
+
+impl ScreenCtx {
+    /// Creates a screen context from resolved config and an open index connection.
+    #[must_use]
+    pub fn new(config: EffectiveConfig, connection: Connection) -> Self {
+        let vault_root = config.vault_path.clone();
+        Self {
+            config,
+            vault_root,
+            connection: Arc::new(Mutex::new(connection)),
+            features: FeatureFlags::current(),
+            theme: Arc::new(Theme::default()),
+            status_messages: StatusMessages::default(),
+            job_runner: None,
+        }
+    }
+
+    /// Creates an isolated in-memory context for integration tests.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the in-memory index cannot be opened or migrated.
+    pub fn for_test() -> Result<Self> {
+        let config = EffectiveConfig::default();
+        let connection = zk_app::bootstrap_preview_index_connection()
+            .context("while attempting to open preview index connection")?;
+        Ok(Self::new(config, connection))
+    }
+}
+
+/// Runtime feature flags exposed to screens.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FeatureFlags {
+    /// Whether AI-backed screens are compiled into this TUI.
+    pub ai: bool,
+}
+
+impl FeatureFlags {
+    /// Returns the feature flags for the current build.
+    #[must_use]
+    pub const fn current() -> Self {
+        Self {
+            ai: cfg!(feature = "ai"),
+        }
+    }
+}
+
+/// Placeholder theme carried by [`ScreenCtx`] until TG-TUI-008 lands.
+#[derive(Debug, Clone, Default)]
+pub struct Theme {
+    _private: (),
+}
+
+/// Placeholder status-message queue carried by [`ScreenCtx`] until TG-TUI-007 lands.
+#[derive(Debug, Clone, Default)]
+pub struct StatusMessages {
+    messages: Vec<String>,
+}
+
+impl StatusMessages {
+    /// Pushes a plain status message.
+    pub fn push(&mut self, message: String) {
+        self.messages.push(message);
+    }
+
+    /// Returns all retained status messages.
+    #[must_use]
+    pub fn messages(&self) -> &[String] {
+        &self.messages
+    }
+}
+
+/// Placeholder background job runner handle until TG-TUI-009 lands.
+#[derive(Debug, Clone, Default)]
+pub struct JobRunnerHandle {
+    _private: (),
+}
+
+impl JobRunnerHandle {
+    /// Accepts a job specification.
+    pub fn enqueue(&self, _spec: JobSpec) {}
+}
+
+/// Placeholder background job specification until TG-TUI-009 lands.
+#[derive(Debug, Clone, Default)]
+pub struct JobSpec {
+    _private: (),
+}
+
+/// Modal requests understood by the app router.
+pub enum Modal {
+    /// Built-in help overlay.
+    Help,
+    /// Confirmation dialog with an accept callback.
+    Confirm(ConfirmDialog),
+}
+
+/// Confirmation dialog data and accept callback.
+pub struct ConfirmDialog {
+    title: String,
+    message: String,
+    on_accept: Option<ConfirmCallback>,
+}
+
+type ConfirmCallback = Box<dyn FnOnce(&mut ScreenCtx) -> ScreenAction + Send>;
+
+impl ConfirmDialog {
+    /// Creates a confirmation dialog.
+    pub fn new(
+        title: impl Into<String>,
+        message: impl Into<String>,
+        on_accept: impl FnOnce(&mut ScreenCtx) -> ScreenAction + Send + 'static,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            message: message.into(),
+            on_accept: Some(Box::new(on_accept)),
+        }
+    }
+}
+
+/// Top-level app state machine and screen router.
+pub struct App {
+    screens: Vec<Box<dyn Screen>>,
+    current: ScreenId,
+    modal: Option<Box<dyn Screen>>,
+    ctx: ScreenCtx,
+}
+
+impl App {
+    /// Creates the production app with placeholder screens in fixed router order.
+    #[must_use]
+    pub fn new(ctx: ScreenCtx) -> Self {
+        let screens = ScreenId::all()
+            .iter()
+            .copied()
+            .map(|id| Box::new(PlaceholderScreen { id }) as Box<dyn Screen>)
+            .collect();
+        Self::with_screens(screens, ctx)
+    }
+
+    /// Creates an app from injected screens for integration tests and future wiring.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `screens` is empty or contains more entries than [`ScreenId`] defines.
+    #[must_use]
+    pub fn with_screens(screens: Vec<Box<dyn Screen>>, ctx: ScreenCtx) -> Self {
+        assert!(!screens.is_empty(), "app requires at least one screen");
+        assert!(
+            screens.len() <= ScreenId::all().len(),
+            "app cannot own more screens than ScreenId defines"
+        );
+
+        Self {
+            screens,
+            current: ScreenId::all()[0],
+            modal: None,
+            ctx,
+        }
+    }
+
+    /// Runs the app with the real terminal and event loop.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when terminal setup, drawing, or event reception fails.
+    pub fn run(mut self) -> Result<()> {
+        let (_guard, mut terminal) =
+            TerminalGuard::init().context("while attempting to initialize TUI terminal")?;
+        let events = EventLoop::start(EVENT_TICK);
+
+        terminal
+            .draw(|frame| self.render(frame))
+            .context("while attempting to draw TUI frame")?;
+
+        loop {
+            let event = events
+                .recv()
+                .context("while attempting to receive TUI event")?;
+            if !self.handle_event(event) {
+                return Ok(());
+            }
+
+            terminal
+                .draw(|frame| self.render(frame))
+                .context("while attempting to draw TUI frame")?;
+        }
+    }
+
+    /// Renders the current screen and optional modal overlay.
+    pub fn render(&mut self, frame: &mut Frame<'_>) {
+        let area = frame.area();
+        let Some(index) = self.current_index() else {
+            return;
+        };
+
+        let ctx = &self.ctx;
+        if let Some(screen) = self.screens.get_mut(index) {
+            screen.render(frame, area, ctx);
+        }
+
+        if let Some(modal) = &mut self.modal {
+            modal.render(frame, area, ctx);
+        }
+    }
+
+    /// Handles an event and returns `false` when the caller should stop the loop.
+    #[must_use]
+    pub fn handle_event(&mut self, event: AppEvent) -> bool {
+        match event {
+            AppEvent::Key(key) => self.handle_key_event(key),
+            other => self.dispatch_event(&other),
+        }
+    }
+
+    /// Returns the focused screen id.
+    #[must_use]
+    pub fn current_screen_id(&self) -> ScreenId {
+        self.current
+    }
+
+    /// Returns whether a modal overlay is currently open.
+    #[must_use]
+    pub fn has_modal(&self) -> bool {
+        self.modal.is_some()
+    }
+
+    fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        let Some(action) = global_action_for_key(key) else {
+            let event = AppEvent::Key(key);
+            return self.dispatch_event(&event);
+        };
+
+        match action {
+            GlobalKeyAction::Quit => {
+                let action = self.current_screen_quit_action();
+                self.apply_action(action)
+            }
+            GlobalKeyAction::OpenHelp => self.apply_action(ScreenAction::OpenModal(Modal::Help)),
+            GlobalKeyAction::NextScreen => {
+                self.next_screen();
+                true
+            }
+            GlobalKeyAction::PreviousScreen => {
+                self.previous_screen();
+                true
+            }
+            GlobalKeyAction::JumpTo(index) => {
+                self.jump_to_numbered_screen(index);
+                true
+            }
+            GlobalKeyAction::Escape if self.modal.is_some() => {
+                self.modal = None;
+                true
+            }
+            GlobalKeyAction::Escape => {
+                let event = AppEvent::Key(key);
+                self.dispatch_event(&event)
+            }
+        }
+    }
+
+    fn dispatch_event(&mut self, event: &AppEvent) -> bool {
+        let action = if let Some(modal) = &mut self.modal {
+            modal.handle_event(event, &mut self.ctx)
+        } else {
+            let Some(index) = self.current_index() else {
+                return true;
+            };
+            let screen = self
+                .screens
+                .get_mut(index)
+                .expect("current screen index should be valid");
+            screen.handle_event(event, &mut self.ctx)
+        };
+
+        self.apply_action(action)
+    }
+
+    fn apply_action(&mut self, action: ScreenAction) -> bool {
+        match action {
+            ScreenAction::Stay => true,
+            ScreenAction::Quit => false,
+            ScreenAction::SwitchTo(screen_id) => {
+                self.switch_to(screen_id);
+                true
+            }
+            ScreenAction::OpenModal(modal) => {
+                self.open_modal(modal);
+                true
+            }
+            ScreenAction::CloseModal => {
+                self.modal = None;
+                true
+            }
+            ScreenAction::EnqueueJob(spec) => {
+                if let Some(job_runner) = &self.ctx.job_runner {
+                    job_runner.enqueue(spec);
+                }
+                true
+            }
+        }
+    }
+
+    fn current_screen_quit_action(&mut self) -> ScreenAction {
+        let Some(index) = self.current_index() else {
+            return ScreenAction::Quit;
+        };
+        let screen = self
+            .screens
+            .get_mut(index)
+            .expect("current screen index should be valid");
+        screen.on_quit(&mut self.ctx)
+    }
+
+    fn open_modal(&mut self, modal: Modal) {
+        match modal {
+            Modal::Help => self.open_help_modal(),
+            Modal::Confirm(dialog) => {
+                self.modal = Some(Box::new(ConfirmDialogScreen { dialog }));
+            }
+        }
+    }
+
+    fn open_help_modal(&mut self) {
+        let Some(index) = self.current_index() else {
+            return;
+        };
+        let screen = self
+            .screens
+            .get(index)
+            .expect("current screen index should be valid");
+        self.modal = Some(Box::new(HelpScreen::new(
+            screen.title().to_string(),
+            screen.keybindings().to_vec(),
+        )));
+    }
+
+    fn next_screen(&mut self) {
+        let Some(index) = self.current_index() else {
+            return;
+        };
+        let next = (index + 1) % self.screens.len();
+        self.current = self.available_screen_ids()[next];
+    }
+
+    fn previous_screen(&mut self) {
+        let Some(index) = self.current_index() else {
+            return;
+        };
+        let previous = index.checked_sub(1).unwrap_or(self.screens.len() - 1);
+        self.current = self.available_screen_ids()[previous];
+    }
+
+    fn jump_to_numbered_screen(&mut self, number: usize) {
+        let Some(index) = number.checked_sub(1) else {
+            return;
+        };
+        if let Some(screen_id) = self.available_screen_ids().get(index).copied() {
+            self.current = screen_id;
+        }
+    }
+
+    fn switch_to(&mut self, screen_id: ScreenId) {
+        if self.available_screen_ids().contains(&screen_id) {
+            self.current = screen_id;
+        }
+    }
+
+    fn current_index(&self) -> Option<usize> {
+        self.available_screen_ids()
+            .iter()
+            .position(|screen_id| *screen_id == self.current)
+    }
+
+    fn available_screen_ids(&self) -> &[ScreenId] {
+        &ScreenId::all()[..self.screens.len()]
+    }
+}
+
+struct PlaceholderScreen {
+    id: ScreenId,
+}
+
+impl Screen for PlaceholderScreen {
+    fn title(&self) -> &str {
+        self.id.title()
+    }
+
+    fn handle_event(&mut self, _event: &AppEvent, _ctx: &mut ScreenCtx) -> ScreenAction {
+        ScreenAction::Stay
+    }
+
+    fn render(&mut self, frame: &mut Frame<'_>, area: Rect, _ctx: &ScreenCtx) {
+        let paragraph = Paragraph::new(format!("{} screen", self.title()))
+            .block(Block::default().borders(Borders::ALL).title(self.title()));
+        frame.render_widget(paragraph, area);
+    }
+}
+
+struct ConfirmDialogScreen {
+    dialog: ConfirmDialog,
+}
+
+impl Screen for ConfirmDialogScreen {
+    fn title(&self) -> &str {
+        &self.dialog.title
+    }
+
+    fn handle_event(&mut self, event: &AppEvent, ctx: &mut ScreenCtx) -> ScreenAction {
+        let AppEvent::Key(key) = event else {
+            return ScreenAction::Stay;
+        };
+        if key.kind == KeyEventKind::Release {
+            return ScreenAction::Stay;
+        }
+
+        match key.code {
+            KeyCode::Enter => self
+                .dialog
+                .on_accept
+                .take()
+                .map_or(ScreenAction::CloseModal, |on_accept| on_accept(ctx)),
+            KeyCode::Esc => ScreenAction::CloseModal,
+            _ => ScreenAction::Stay,
+        }
+    }
+
+    fn render(&mut self, frame: &mut Frame<'_>, area: Rect, _ctx: &ScreenCtx) {
+        let paragraph = Paragraph::new(self.dialog.message.as_str())
+            .block(Block::default().borders(Borders::ALL).title(self.title()));
+        frame.render_widget(Clear, area);
+        frame.render_widget(paragraph, area);
+    }
+}
