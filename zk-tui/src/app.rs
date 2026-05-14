@@ -21,6 +21,7 @@ use crate::{
     keymap::{GlobalKeyAction, KeyChord, global_action_for_key},
     screens::help::HelpScreen,
     terminal::TerminalGuard,
+    theme::{Theme, ThemeKind},
     widgets::{
         status_bar::StatusBar,
         toast::{Toast, ToastLine, ToastQueue, ToastSeverity},
@@ -189,6 +190,23 @@ impl ScreenCtx {
         }
     }
 
+    /// Returns a context with the requested built-in theme.
+    #[must_use]
+    pub fn with_theme_kind(mut self, kind: ThemeKind) -> Self {
+        self.set_theme_kind(kind);
+        self
+    }
+
+    /// Sets the active built-in theme.
+    pub fn set_theme_kind(&mut self, kind: ThemeKind) {
+        self.theme = Arc::new(kind.build());
+    }
+
+    /// Cycles to the next built-in theme variant.
+    pub fn cycle_theme(&mut self) {
+        self.set_theme_kind(self.theme.kind.next());
+    }
+
     /// Creates an isolated in-memory context for integration tests.
     ///
     /// # Errors
@@ -225,12 +243,6 @@ impl FeatureFlags {
             ai: cfg!(feature = "ai"),
         }
     }
-}
-
-/// Placeholder theme carried by [`ScreenCtx`] until TG-TUI-008 lands.
-#[derive(Debug, Clone, Default)]
-pub struct Theme {
-    _private: (),
 }
 
 /// Shared toast queue carried by [`ScreenCtx`].
@@ -379,7 +391,7 @@ impl App {
         }
 
         frame.render_widget(
-            ToastLine::new(self.ctx.status_messages.visible()),
+            ToastLine::new(self.ctx.status_messages.visible(), &self.ctx.theme),
             toast_area,
         );
         frame.render_widget(
@@ -427,6 +439,10 @@ impl App {
             }
             GlobalKeyAction::PreviousScreen => {
                 self.previous_screen();
+                true
+            }
+            GlobalKeyAction::CycleTheme => {
+                self.ctx.cycle_theme();
                 true
             }
             GlobalKeyAction::JumpTo(index) => {

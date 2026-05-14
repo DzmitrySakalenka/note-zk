@@ -7,6 +7,7 @@ pub mod event;
 pub mod keymap;
 pub mod screens;
 pub mod terminal;
+pub mod theme;
 pub mod widgets;
 
 // TG-TUI-003 wires the dependency surface before the modules consume it.

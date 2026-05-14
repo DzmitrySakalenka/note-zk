@@ -1,11 +1,6 @@
 //! Single-row footer for current screen and global key hints.
 
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Color, Style},
-    widgets::Widget,
-};
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 use crate::app::ScreenCtx;
 
@@ -44,7 +39,7 @@ impl Widget for StatusBar<'_> {
         }
 
         let line = self.line(area.width as usize);
-        buf.set_string(area.x, area.y, line, Style::default().fg(Color::DarkGray));
+        buf.set_string(area.x, area.y, line, self.ctx.theme.muted);
     }
 }
 

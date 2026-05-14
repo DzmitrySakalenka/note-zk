@@ -30,6 +30,7 @@ const GLOBAL_KEYBINDINGS: &[(KeyChord, &str)] = &[
         KeyChord::new(KeyCode::Esc, KeyModifiers::NONE),
         "close modal",
     ),
+    (KeyChord::char('t'), "cycle theme"),
 ];
 
 /// A normalized terminal key combination.
@@ -104,6 +105,7 @@ pub(crate) enum GlobalKeyAction {
     OpenHelp,
     NextScreen,
     PreviousScreen,
+    CycleTheme,
     JumpTo(usize),
     Escape,
 }
@@ -125,6 +127,7 @@ pub(crate) fn global_action_for_key(event: KeyEvent) -> Option<GlobalKeyAction> 
         chord if chord == KeyChord::new(KeyCode::BackTab, KeyModifiers::SHIFT) => {
             Some(GlobalKeyAction::PreviousScreen)
         }
+        chord if chord == KeyChord::char('t') => Some(GlobalKeyAction::CycleTheme),
         chord if chord == KeyChord::new(KeyCode::Esc, KeyModifiers::NONE) => {
             Some(GlobalKeyAction::Escape)
         }

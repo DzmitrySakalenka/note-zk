@@ -2,12 +2,9 @@
 
 use std::collections::VecDeque;
 
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Color, Style},
-    widgets::Widget,
-};
+use ratatui::{buffer::Buffer, layout::Rect, style::Style, widgets::Widget};
+
+use crate::theme::Theme;
 
 const TOAST_QUEUE_CAPACITY: usize = 8;
 
@@ -45,12 +42,12 @@ impl ToastSeverity {
         }
     }
 
-    fn style(self) -> Style {
+    fn style(self, theme: &Theme) -> Style {
         match self {
-            Self::Info => Style::default().fg(Color::Blue),
-            Self::Success => Style::default().fg(Color::Green),
-            Self::Warn => Style::default().fg(Color::Yellow),
-            Self::Error => Style::default().fg(Color::Red),
+            Self::Info => theme.info,
+            Self::Success => theme.success,
+            Self::Warn => theme.warn,
+            Self::Error => theme.error,
         }
     }
 }
@@ -104,13 +101,14 @@ impl ToastQueue {
 /// Single-row toast widget.
 pub struct ToastLine<'a> {
     toast: Option<&'a Toast>,
+    theme: &'a Theme,
 }
 
 impl<'a> ToastLine<'a> {
     /// Creates a toast row for the currently visible toast.
     #[must_use]
-    pub const fn new(toast: Option<&'a Toast>) -> Self {
-        Self { toast }
+    pub const fn new(toast: Option<&'a Toast>, theme: &'a Theme) -> Self {
+        Self { toast, theme }
     }
 }
 
@@ -129,7 +127,7 @@ impl Widget for ToastLine<'_> {
         let text = single_line(&toast.text);
         let message = format!("{}: {text}", toast.severity.label());
         let message = truncate_to_width(&message, area.width as usize);
-        buf.set_string(area.x, area.y, message, toast.severity.style());
+        buf.set_string(area.x, area.y, message, toast.severity.style(self.theme));
     }
 }
 
