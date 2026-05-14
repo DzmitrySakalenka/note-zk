@@ -11,3 +11,28 @@ workspace = true
 [[bin]]
 name = "zk-tui"
 path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+crossterm = "0.28.1"
+ratatui = "0.29.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
+toml = "1.1.2"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+url = "2"
+zk-ai = { version = "0.1.0", path = "../zk-ai", optional = true }
+zk-app = { version = "0.1.0", path = "../zk-app" }
+zk-cli-core = { version = "0.1.0", path = "../zk-cli-core" }
+zk-domain = { version = "0.1.0", path = "../zk-domain" }
+zk-index = { version = "0.1.0", path = "../zk-index", optional = true }
+zk-sync = { version = "0.1.0", path = "../zk-sync" }
+zk-vault = { version = "0.1.0", path = "../zk-vault", optional = true }
+
+[features]
+default = []
+ai = ["dep:zk-ai", "dep:zk-index", "dep:zk-vault", "zk-app/ai"]
+ai-local = ["ai"]
+test-stub-ai = ["ai"]
