@@ -45,7 +45,7 @@ fn index_names(connection: &Connection, table_name: &str) -> Vec<String> {
         .expect("index names should decode")
 }
 
-fn create_v6_messages_fixture(connection: &Connection) {
+fn create_v5_messages_fixture(connection: &Connection) {
     connection
         .execute(
             "CREATE TABLE server_schema_version (
@@ -113,16 +113,16 @@ fn create_v6_messages_fixture(connection: &Connection) {
         .expect("users table should be created");
     connection
         .execute(
-            "INSERT INTO server_schema_version (id, version) VALUES (1, 6)",
+            "INSERT INTO server_schema_version (id, version) VALUES (1, 5)",
             [],
         )
-        .expect("V6 schema version should be inserted");
+        .expect("V5 schema version should be inserted");
 }
 
 #[test]
-fn migrating_from_v6_adds_message_request_id_lookup() {
+fn migrating_from_v5_adds_message_request_id_lookup() {
     let connection = Connection::open_in_memory().expect("in-memory database should open");
-    create_v6_messages_fixture(&connection);
+    create_v5_messages_fixture(&connection);
 
     ensure_schema(&connection).expect("schema migration should succeed");
 

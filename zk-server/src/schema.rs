@@ -281,30 +281,30 @@ pub(crate) const V4_INDEX_DDL: &[&str] = &[
     CREATE_INDEX_MESSAGE_CITATIONS_NOTE,
 ];
 
-pub(crate) const V5_TABLE_DDL: &[&str] = &[CREATE_TABLE_WIKI_LINT_FINDINGS];
+pub(crate) const V5_TABLE_DDL: &[&str] = &[];
 
-pub(crate) const V5_INDEX_DDL: &[&str] = &[
-    CREATE_INDEX_WIKI_LINT_FINDINGS_JOB,
-    CREATE_INDEX_WIKI_LINT_FINDINGS_PAGE,
-];
-
-pub(crate) const V6_TABLE_DDL: &[&str] = &[];
-
-pub(crate) const V6_INDEX_DDL: &[&str] =
+pub(crate) const V5_INDEX_DDL: &[&str] =
     &[CREATE_INDEX_NOTES_REVISION, CREATE_INDEX_ASSETS_REVISION];
 
-pub(crate) const V7_TABLE_DDL: &[&str] = &[ALTER_TABLE_MESSAGES_ADD_REQUEST_ID];
+pub(crate) const V6_TABLE_DDL: &[&str] = &[ALTER_TABLE_MESSAGES_ADD_REQUEST_ID];
 
-pub(crate) const V7_INDEX_DDL: &[&str] = &[CREATE_INDEX_MESSAGES_REQUEST];
+pub(crate) const V6_INDEX_DDL: &[&str] = &[CREATE_INDEX_MESSAGES_REQUEST];
 
-pub(crate) const V8_TABLE_DDL: &[&str] = &[ALTER_TABLE_DEVICE_TOKENS_ADD_USER_ID];
+pub(crate) const V7_TABLE_DDL: &[&str] = &[ALTER_TABLE_DEVICE_TOKENS_ADD_USER_ID];
 
-pub(crate) const V8_INDEX_DDL: &[&str] = &[];
+pub(crate) const V7_INDEX_DDL: &[&str] = &[];
 
-pub(crate) const V9_TABLE_DDL: &[&str] = &[];
+pub(crate) const V8_TABLE_DDL: &[&str] = &[];
 
-pub(crate) const V9_INDEX_DDL: &[&str] = &[
+pub(crate) const V8_INDEX_DDL: &[&str] = &[
     DROP_INDEX_SYNC_EVENTS_SEQ,
     DROP_INDEX_DEVICE_TOKENS_HASH,
     DROP_INDEX_USERS_USERNAME,
+];
+
+pub(crate) const V9_TABLE_DDL: &[&str] = &[CREATE_TABLE_WIKI_LINT_FINDINGS];
+
+pub(crate) const V9_INDEX_DDL: &[&str] = &[
+    CREATE_INDEX_WIKI_LINT_FINDINGS_JOB,
+    CREATE_INDEX_WIKI_LINT_FINDINGS_PAGE,
 ];

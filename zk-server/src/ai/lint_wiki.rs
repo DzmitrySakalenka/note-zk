@@ -160,7 +160,7 @@ struct WikiPage {
     current_path: RelativePath,
     title: String,
     note_type: WikiPageType,
-    updated_at: DateTime<Utc>,
+    updated_at: Option<DateTime<Utc>>,
     body: Option<String>,
 }
 
@@ -176,7 +176,7 @@ struct RawSource {
 
 struct SourceRecord {
     current_path: RelativePath,
-    updated_at: DateTime<Utc>,
+    updated_at: Option<DateTime<Utc>>,
 }
 
 fn load_lint_context(
@@ -241,7 +241,7 @@ fn load_wiki_pages(
             current_path: note.current_path.clone(),
             title: metadata.title,
             note_type,
-            updated_at: parse_updated_at(note)?,
+            updated_at: parse_optional_updated_at(note)?,
             body: None,
         });
     }
@@ -341,7 +341,7 @@ fn load_source_records(
             && !record.is_deleted
             && !record.is_trashed
         {
-            let updated_at = parse_updated_at(&record)?;
+            let updated_at = parse_optional_updated_at(&record)?;
             source_records.insert(
                 source_id,
                 SourceRecord {
@@ -447,7 +447,10 @@ fn stale_claim_findings(context: &WikiLintContext) -> Vec<WikiLintFinding> {
             let Some(source) = context.source_records_by_id.get(source_id) else {
                 continue;
             };
-            if source.updated_at > page.updated_at {
+            if let (Some(source_updated_at), Some(page_updated_at)) =
+                (source.updated_at.as_ref(), page.updated_at.as_ref())
+                && source_updated_at > page_updated_at
+            {
                 findings.push(WikiLintFinding {
                     kind: WikiLintFindingKind::StaleClaim,
                     page_id: Some(page.note_id.clone()),
@@ -588,9 +591,14 @@ fn resolve_scope_root(
     }
 }
 
-fn parse_updated_at(record: &NoteRecord) -> Result<DateTime<Utc>, WikiLintError> {
+fn parse_optional_updated_at(record: &NoteRecord) -> Result<Option<DateTime<Utc>>, WikiLintError> {
+    if record.updated_at.trim().is_empty() {
+        return Ok(None);
+    }
+
     DateTime::parse_from_rfc3339(&record.updated_at)
         .map(|timestamp| timestamp.with_timezone(&Utc))
+        .map(Some)
         .map_err(|source| WikiLintError::MalformedTimestamp {
             note_id: record.note_id.clone(),
             value: record.updated_at.clone(),

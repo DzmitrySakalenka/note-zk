@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use zk_server::migration::ensure_schema;
 
 const CURRENT_SCHEMA_VERSION: i64 = 9;
-const EXPECTED_V5_INDEXES: &[(&str, &str)] = &[
+const EXPECTED_REVISION_INDEXES: &[(&str, &str)] = &[
     ("notes", "idx_notes_revision"),
     ("assets", "idx_assets_revision"),
 ];
@@ -78,7 +78,7 @@ fn create_auth_tables(connection: &Connection) {
         .expect("users table should be created");
 }
 
-fn create_v5_revision_fixture(connection: &Connection) {
+fn create_v4_revision_fixture(connection: &Connection) {
     connection
         .execute(
             "CREATE TABLE server_schema_version (
@@ -145,21 +145,21 @@ fn create_v5_revision_fixture(connection: &Connection) {
         .expect("messages table should be created");
     connection
         .execute(
-            "INSERT INTO server_schema_version (id, version) VALUES (1, 5)",
+            "INSERT INTO server_schema_version (id, version) VALUES (1, 4)",
             [],
         )
-        .expect("V5 schema version should be inserted");
+        .expect("V4 schema version should be inserted");
 }
 
 #[test]
-fn migrating_from_v5_creates_revision_indexes() {
+fn migrating_from_v4_creates_revision_indexes() {
     let connection = Connection::open_in_memory().expect("in-memory database should open");
-    create_v5_revision_fixture(&connection);
+    create_v4_revision_fixture(&connection);
 
     ensure_schema(&connection).expect("schema migration should succeed");
 
     assert_eq!(query_schema_version(&connection), CURRENT_SCHEMA_VERSION);
-    for (table_name, index_name) in EXPECTED_V5_INDEXES {
+    for (table_name, index_name) in EXPECTED_REVISION_INDEXES {
         let indexes = index_names(&connection, table_name);
 
         assert!(

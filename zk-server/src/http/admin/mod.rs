@@ -17,6 +17,7 @@ pub(crate) fn admin_routes() -> Router<ServerState> {
         .route("/admin/backups/{backup_id}", get(backups::get))
         .route("/admin/ai/recompute", post(ai::recompute))
         .route("/admin/ai/jobs", get(ai::jobs))
+        .route("/admin/ai/jobs/{job_id}", get(ai::job))
         .route("/admin/ai/cancel/{job_id}", post(ai::cancel))
         .route("/admin/ai/wiki/ingest", post(wiki::ingest))
         .route("/admin/ai/wiki/lint", post(wiki::lint))

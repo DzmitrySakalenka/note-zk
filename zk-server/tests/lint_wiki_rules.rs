@@ -76,6 +76,36 @@ StaleClaim|page=01LINTSTALE000000000001|source=01LINTSOURCE000000000001|severity
 }
 
 #[test]
+fn stale_claim_skips_blank_page_timestamp() {
+    let fixture = LintFixture::new();
+    let source = fixture.add_note(
+        NoteSpec::raw_source(
+            "01LINTSOURCEBLANK0000001",
+            "raw/blank-source.md",
+            "Blank Source",
+            "# Blank Source\n",
+        )
+        .updated_at("2026-05-03T00:00:00Z"),
+    );
+    let page = fixture.add_note(
+        NoteSpec::wiki_entity(
+            "01LINTPAGEBLANK00000001",
+            "wiki/blank-page.md",
+            "Blank Page",
+            "# Blank Page\n",
+        )
+        .updated_at(""),
+    );
+    let index = fixture.add_note(NoteSpec::wiki_index());
+    fixture.add_link(&index, &page, "Blank Page");
+    fixture.add_source(&page, &source);
+
+    let findings = fixture.lint_vault();
+
+    assert_snapshot!(render_findings(&findings), @"");
+}
+
+#[test]
 fn missing_cross_reference_ignores_existing_link() {
     let fixture = LintFixture::new();
     let alpha = fixture.add_note(NoteSpec::wiki_entity(
@@ -136,6 +166,31 @@ fn important_concept_counts_raw_sources_and_skips_existing_entity() {
 
     assert_snapshot!(render_findings(&findings), @r###"
 ImportantConceptWithoutPage|page=-|source=-|severity=Warning|concept "Quantum Field Theory" appears in 3 raw sources without a wiki-entity page
+"###);
+}
+
+#[test]
+fn important_concept_tolerates_blank_raw_source_timestamp() {
+    let fixture = LintFixture::new();
+    for (index, path) in ["raw/blank-one.md", "raw/blank-two.md", "raw/blank-three.md"]
+        .into_iter()
+        .enumerate()
+    {
+        fixture.add_note(
+            NoteSpec::raw_source(
+                &format!("01LINTBLANKSRC{index:010}"),
+                path,
+                &format!("Blank Source {index}"),
+                "# Source\n\nBlank Timestamp Concept appears here.\n",
+            )
+            .updated_at(""),
+        );
+    }
+
+    let findings = fixture.lint_vault();
+
+    assert_snapshot!(render_findings(&findings), @r###"
+ImportantConceptWithoutPage|page=-|source=-|severity=Warning|concept "Blank Timestamp Concept" appears in 3 raw sources without a wiki-entity page
 "###);
 }
 

@@ -26,7 +26,7 @@ const INGEST_PATH: &str = "/admin/ai/wiki/ingest";
 const LINT_PATH: &str = "/admin/ai/wiki/lint";
 const FINDINGS_PATH: &str = "/admin/ai/wiki/lint/findings";
 const RECOMPUTE_PATH: &str = "/admin/ai/recompute";
-const JOBS_LIST_PATH: &str = "/admin/ai/jobs?limit=1000";
+const JOBS_PATH: &str = "/admin/ai/jobs";
 const INITIAL_JOB_POLL_BACKOFF: Duration = Duration::from_millis(250);
 const MAX_JOB_POLL_BACKOFF: Duration = Duration::from_secs(2);
 const MAX_HTTP_ATTEMPTS: u8 = 2;
@@ -288,18 +288,23 @@ impl WikiFacade {
     }
 
     async fn get_job(&self, job_id: &JobId) -> AppResult<WikiJobStatus> {
-        let jobs: Vec<ListedJob> = self.get_json_with_retry(JOBS_LIST_PATH).await?;
+        let job: ListedJob =
+            self.get_json_with_retry(&job_path(job_id))
+                .await
+                .map_err(|error| match error {
+                    AppError::NotFound { message } if message == "AI job not found" => {
+                        AppError::NotFound {
+                            message: format!("AI job {job_id} not found"),
+                        }
+                    }
+                    error => error,
+                })?;
 
-        jobs.into_iter()
-            .find(|job| job.job_id == *job_id)
-            .map(|job| WikiJobStatus {
-                job_id: job.job_id,
-                status: job.status,
-                last_error: job.last_error,
-            })
-            .ok_or_else(|| AppError::NotFound {
-                message: format!("AI job {job_id} not found"),
-            })
+        Ok(WikiJobStatus {
+            job_id: job.job_id,
+            status: job.status,
+            last_error: job.last_error,
+        })
     }
 
     async fn get_json_with_retry<T>(&self, path: &str) -> AppResult<T>
@@ -431,6 +436,10 @@ fn findings_path(job_id: &JobId, limit: Option<u32>) -> String {
         Some(limit) => format!("{FINDINGS_PATH}?job_id={job_id}&limit={limit}"),
         None => format!("{FINDINGS_PATH}?job_id={job_id}"),
     }
+}
+
+fn job_path(job_id: &JobId) -> String {
+    format!("{JOBS_PATH}/{job_id}")
 }
 
 fn should_retry(status: u16, attempt: u8) -> bool {

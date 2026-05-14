@@ -261,7 +261,7 @@ Index:
 
 - `idx_ai_jobs_status_enqueued ON ai_jobs(status, enqueued_at)`
 
-### `wiki_lint_findings` (server schema v5 only)
+### `wiki_lint_findings` (server schema v9 only)
 
 - `finding_id TEXT PRIMARY KEY`
 - `job_id TEXT NOT NULL REFERENCES ai_jobs(job_id) ON DELETE CASCADE`

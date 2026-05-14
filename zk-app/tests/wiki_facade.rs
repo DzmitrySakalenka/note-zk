@@ -227,27 +227,23 @@ async fn server_unauthorized_response_maps_to_auth_error() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn wait_for_job_polls_jobs_list_until_terminal_status() {
+async fn wait_for_job_polls_exact_job_until_terminal_status() {
     let server = MockServer::start().await;
     let facade = connected_facade(&server);
 
     let _pending_mock = server
         .register_as_scoped(
             Mock::given(method("GET"))
-                .and(path("/admin/ai/jobs"))
-                .and(query_param("limit", "1000"))
-                .respond_with(
-                    ResponseTemplate::new(200).set_body_json(json!([job_json("pending")])),
-                )
+                .and(path(format!("/admin/ai/jobs/{JOB_ID}")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(job_json("pending")))
                 .up_to_n_times(1),
         )
         .await;
     let _done_mock = server
         .register_as_scoped(
             Mock::given(method("GET"))
-                .and(path("/admin/ai/jobs"))
-                .and(query_param("limit", "1000"))
-                .respond_with(ResponseTemplate::new(200).set_body_json(json!([job_json("done")])))
+                .and(path(format!("/admin/ai/jobs/{JOB_ID}")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(job_json("done")))
                 .expect(1),
         )
         .await;
@@ -270,9 +266,13 @@ async fn wait_for_job_missing_job_maps_to_not_found() {
     let facade = connected_facade(&server);
 
     Mock::given(method("GET"))
-        .and(path("/admin/ai/jobs"))
-        .and(query_param("limit", "1000"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .and(path(format!("/admin/ai/jobs/{JOB_ID}")))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "error": {
+                "code": "not_found",
+                "message": "AI job not found"
+            }
+        })))
         .expect(1)
         .mount(&server)
         .await;
@@ -295,9 +295,8 @@ async fn job_status_returns_current_status_and_last_error() {
     let facade = connected_facade(&server);
 
     Mock::given(method("GET"))
-        .and(path("/admin/ai/jobs"))
-        .and(query_param("limit", "1000"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+        .and(path(format!("/admin/ai/jobs/{JOB_ID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "job_id": JOB_ID,
             "kind": "ingest_source",
             "status": "failed",
@@ -306,7 +305,7 @@ async fn job_status_returns_current_status_and_last_error() {
             "enqueued_at": "2026-05-13T12:00:00Z",
             "started_at": "2026-05-13T12:00:01Z",
             "finished_at": "2026-05-13T12:00:02Z"
-        }])))
+        })))
         .expect(1)
         .mount(&server)
         .await;

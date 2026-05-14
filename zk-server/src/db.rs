@@ -14,7 +14,9 @@ use crate::{ServerError, ServerResult, migration};
 ///
 /// Phase 1 uses a single mutex-protected connection because Milestone C
 /// workloads do not justify a pool yet.
-/// TODO: Revisit post-Milestone-C if concurrent reads become a bottleneck.
+/// TODO: switch from `Mutex<Connection>` to a connection pool when concurrent
+/// reads become a bottleneck; tracked under TG18 operational hardening. See
+/// `.tasks/.local/progress.md` lines 1376-1383 for the V1 trade-off.
 pub struct ServerDb {
     conn: Mutex<Connection>,
 }
