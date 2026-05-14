@@ -1,15 +1,18 @@
 // Most package dependencies are consumed by library modules as the TUI grows.
 #![allow(unused_crate_dependencies)]
 
-use std::{io, process::ExitCode};
+use std::{io, process::ExitCode, time::Duration};
 
 use anyhow::{Context, Result};
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
     widgets::{Block, Borders, Paragraph},
 };
-use zk_tui::terminal::{TerminalGuard, install_panic_hook};
+use zk_tui::{
+    event::{AppEvent, EventLoop},
+    terminal::{TerminalGuard, install_panic_hook},
+};
 
 fn main() -> ExitCode {
     install_panic_hook();
@@ -36,16 +39,23 @@ fn init_tracing() {
 
 fn run() -> Result<()> {
     let (_guard, mut terminal) = TerminalGuard::init()?;
+    let events = EventLoop::start(Duration::from_millis(250));
 
+    terminal
+        .draw(draw)
+        .context("while attempting to draw TUI frame")?;
     loop {
-        terminal
-            .draw(draw)
-            .context("while attempting to draw TUI frame")?;
-
-        if let Event::Key(key) = event::read().context("while attempting to read terminal event")? {
-            if matches!(key.code, KeyCode::Char('q')) {
-                return Ok(());
+        match events
+            .recv()
+            .context("while attempting to receive TUI event")?
+        {
+            AppEvent::Key(key) if matches!(key.code, KeyCode::Char('q')) => return Ok(()),
+            AppEvent::Tick | AppEvent::Resize(_, _) | AppEvent::Background(_) => {
+                terminal
+                    .draw(draw)
+                    .context("while attempting to draw TUI frame")?;
             }
+            AppEvent::Key(_) => {}
         }
     }
 }

@@ -3,6 +3,7 @@
 use std::{
     io::{self, Stdout, stdout},
     panic,
+    sync::{Arc, Mutex},
 };
 
 use anyhow::{Context, Result};
@@ -41,11 +42,6 @@ impl TerminalGuard {
 
         Ok((Self { _private: () }, terminal))
     }
-
-    #[cfg(test)]
-    fn test_guard() -> Self {
-        Self { _private: () }
-    }
 }
 
 impl Drop for TerminalGuard {
@@ -68,8 +64,7 @@ fn enter_alternate_screen() -> io::Result<()> {
 }
 
 fn restore_terminal() {
-    #[cfg(test)]
-    if tests::record_restore_for_test() {
+    if test_support::record_restore_for_test() {
         return;
     }
 
@@ -82,20 +77,14 @@ fn restore_terminal() {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::{
-        panic,
-        sync::{Arc, Mutex},
-        thread,
-    };
+#[doc(hidden)]
+pub mod test_support {
+    use super::{Arc, Mutex, TerminalGuard};
 
-    use super::*;
-
-    static HOOK_LOCK: Mutex<()> = Mutex::new(());
     static RESTORE_EVENTS: Mutex<Option<Arc<Mutex<Vec<&'static str>>>>> = Mutex::new(None);
 
-    struct RestoreRecorder;
+    /// Clears the installed terminal-restore recorder when dropped.
+    pub struct RestoreRecorder;
 
     impl Drop for RestoreRecorder {
         fn drop(&mut self) {
@@ -105,79 +94,33 @@ mod tests {
         }
     }
 
-    fn install_restore_recorder(events: Arc<Mutex<Vec<&'static str>>>) -> RestoreRecorder {
+    /// Installs a restore recorder for integration tests.
+    pub fn install_restore_recorder(events: Arc<Mutex<Vec<&'static str>>>) -> RestoreRecorder {
         *RESTORE_EVENTS
             .lock()
             .expect("restore event recorder should lock") = Some(events);
         RestoreRecorder
     }
 
-    fn restore_events(events: &Arc<Mutex<Vec<&'static str>>>) -> Vec<&'static str> {
-        events
-            .lock()
-            .expect("restore event list should lock")
-            .clone()
+    /// Creates a terminal guard without mutating the real terminal.
+    pub fn terminal_guard_for_test() -> TerminalGuard {
+        TerminalGuard { _private: () }
     }
 
-    pub(super) fn record_restore_for_test() -> bool {
-        let recorder = RESTORE_EVENTS
-            .lock()
-            .expect("restore event recorder should lock")
-            .clone();
+    pub(crate) fn record_restore_for_test() -> bool {
+        let Ok(recorder) = RESTORE_EVENTS.lock() else {
+            return false;
+        };
 
-        if let Some(events) = recorder {
-            events
-                .lock()
-                .expect("restore event list should lock")
-                .push("restore");
-            return true;
-        }
+        let Some(events) = recorder.clone() else {
+            return false;
+        };
 
-        false
-    }
+        let Ok(mut events) = events.lock() else {
+            return false;
+        };
 
-    #[test]
-    fn drop_runs_restore_routine() {
-        let _hook_lock = HOOK_LOCK.lock().expect("panic hook test lock should lock");
-        let events = Arc::new(Mutex::new(Vec::new()));
-        let _recorder = install_restore_recorder(Arc::clone(&events));
-
-        {
-            let _guard = TerminalGuard::test_guard();
-        }
-
-        assert_eq!(restore_events(&events), vec!["restore"]);
-    }
-
-    #[test]
-    fn panic_hook_restores_before_previous_hook_and_unwinds_guard() {
-        let _hook_lock = HOOK_LOCK.lock().expect("panic hook test lock should lock");
-        let events = Arc::new(Mutex::new(Vec::new()));
-        let _recorder = install_restore_recorder(Arc::clone(&events));
-
-        let original_hook = panic::take_hook();
-        let previous_events = Arc::clone(&events);
-        panic::set_hook(Box::new(move |_| {
-            previous_events
-                .lock()
-                .expect("restore event list should lock")
-                .push("previous");
-        }));
-
-        install_panic_hook();
-        let panic_result = thread::spawn(|| {
-            let _guard = TerminalGuard::test_guard();
-            panic!("terminal panic hook test");
-        })
-        .join();
-
-        let _installed_hook = panic::take_hook();
-        panic::set_hook(original_hook);
-
-        assert!(panic_result.is_err(), "thread should propagate panic");
-        assert_eq!(
-            restore_events(&events),
-            vec!["restore", "previous", "restore"]
-        );
+        events.push("restore");
+        true
     }
 }
