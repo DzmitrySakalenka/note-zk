@@ -17,7 +17,8 @@ use rusqlite::Connection;
 use zk_app::EffectiveConfig;
 
 use crate::{
-    event::{AppEvent, EventLoop},
+    event::{AppEvent, BackgroundResult, EventLoop},
+    jobs::{JobContext, JobResult, JobRunner, JobRunnerHandle, JobSpec},
     keymap::{GlobalKeyAction, KeyChord, global_action_for_key},
     screens::help::HelpScreen,
     terminal::TerminalGuard,
@@ -166,9 +167,9 @@ pub struct ScreenCtx {
     pub connection: Arc<Mutex<Connection>>,
     /// Runtime feature flags.
     pub features: FeatureFlags,
-    /// Current immutable theme placeholder.
+    /// Current immutable theme.
     pub theme: Arc<Theme>,
-    /// Shared status messages placeholder.
+    /// Shared status messages.
     pub status_messages: StatusMessages,
     /// Optional background job runner handle.
     pub job_runner: Option<JobRunnerHandle>,
@@ -247,23 +248,6 @@ impl FeatureFlags {
 
 /// Shared toast queue carried by [`ScreenCtx`].
 pub type StatusMessages = ToastQueue;
-
-/// Placeholder background job runner handle until TG-TUI-009 lands.
-#[derive(Debug, Clone, Default)]
-pub struct JobRunnerHandle {
-    _private: (),
-}
-
-impl JobRunnerHandle {
-    /// Accepts a job specification.
-    pub fn enqueue(&self, _spec: JobSpec) {}
-}
-
-/// Placeholder background job specification until TG-TUI-009 lands.
-#[derive(Debug, Clone, Default)]
-pub struct JobSpec {
-    _private: (),
-}
 
 /// Modal requests understood by the app router.
 pub enum Modal {
@@ -347,6 +331,11 @@ impl App {
         let (_guard, mut terminal) =
             TerminalGuard::init().context("while attempting to initialize TUI terminal")?;
         let events = EventLoop::start(EVENT_TICK);
+        let jobs = JobRunner::start(
+            events.sender(),
+            JobContext::new(self.ctx.config.clone(), self.ctx.vault_root.clone()),
+        );
+        self.ctx.job_runner = Some(jobs.handle());
 
         terminal
             .draw(|frame| self.render(frame))
@@ -403,6 +392,10 @@ impl App {
     /// Handles an event and returns `false` when the caller should stop the loop.
     #[must_use]
     pub fn handle_event(&mut self, event: AppEvent) -> bool {
+        if let AppEvent::Background(result) = &event {
+            self.handle_background_result(result);
+        }
+
         match event {
             AppEvent::Key(key) => self.handle_key_event(key),
             other => self.dispatch_event(&other),
@@ -499,7 +492,7 @@ impl App {
             }
             ScreenAction::EnqueueJob(spec) => {
                 if let Some(job_runner) = &self.ctx.job_runner {
-                    job_runner.enqueue(spec);
+                    let _handle = job_runner.enqueue(spec);
                 }
                 true
             }
@@ -515,6 +508,18 @@ impl App {
             .get_mut(index)
             .expect("current screen index should be valid");
         screen.on_quit(&mut self.ctx)
+    }
+
+    fn handle_background_result(&mut self, result: &BackgroundResult) {
+        let Some(JobResult::Error { error, .. }) = result.downcast_ref::<JobResult>() else {
+            return;
+        };
+
+        self.ctx.push_toast(Toast {
+            severity: ToastSeverity::Error,
+            text: error.to_string(),
+            ttl: 3,
+        });
     }
 
     fn open_modal(&mut self, modal: Modal) {

@@ -42,6 +42,15 @@ impl BackgroundResult {
         Self { payload }
     }
 
+    /// Borrows the wrapped payload as a concrete type.
+    #[must_use]
+    pub fn downcast_ref<T>(&self) -> Option<&T>
+    where
+        T: Any + Send,
+    {
+        self.payload.downcast_ref::<T>()
+    }
+
     /// Returns the wrapped opaque payload.
     pub fn into_payload(self) -> Box<dyn Any + Send> {
         self.payload

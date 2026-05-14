@@ -4,6 +4,7 @@
 
 pub mod app;
 pub mod event;
+pub mod jobs;
 pub mod keymap;
 pub mod screens;
 pub mod terminal;
