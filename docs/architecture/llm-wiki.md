@@ -3,6 +3,8 @@
 Date: 2026-04-07
 Status: Draft
 
+Decision records: [ADR 0016](../decisions/0016-llm-wiki-protocol.md)
+
 ## Goal
 
 Support LLM-maintained wiki generation as a first-class workflow within the note system.

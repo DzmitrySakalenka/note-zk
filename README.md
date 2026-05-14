@@ -374,7 +374,7 @@ Add `--json` to any subcommand for machine-readable output on stdout.
 Detailed design documents live under `docs/`:
 
 - `docs/architecture/` -- stable system design documents
-- `docs/decisions/` -- ADR-style decision records (0001-0015)
+- `docs/decisions/` -- ADR-style decision records (0001-0016)
 - `docs/plans/` -- phased implementation plans and roadmaps
 
 ## High-Level Shape
