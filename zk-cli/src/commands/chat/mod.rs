@@ -4,6 +4,7 @@ mod conversations;
 
 use std::{
     io::{self, Read, Write},
+    path::PathBuf,
     str::FromStr,
     sync::Arc,
 };
@@ -15,7 +16,10 @@ use zk_ai::{
     AiError,
     provider::{ChatUsage, FinishReason},
 };
-use zk_app::{AiFacade, AiFacadeDeps, AppError, ChatChunk, ChatRequest};
+use zk_app::{
+    AiFacade, AiFacadeDeps, AppError, ChatChunk, ChatRequest, EffectiveConfig, WikiFacade,
+    WikiFacadeDeps,
+};
 use zk_domain::{Citation, ConversationId, ExecutionMode};
 use zk_index::NoteRepo;
 use zk_sync::HttpTransport;
@@ -28,7 +32,10 @@ use crate::{
 
 struct ChatRuntime {
     facade: AiFacade,
+    wiki_facade: WikiFacade,
     connection: rusqlite::Connection,
+    config: EffectiveConfig,
+    vault_root: PathBuf,
     runtime: tokio::runtime::Runtime,
 }
 
@@ -76,11 +83,16 @@ fn build_chat_runtime(shared: &SharedFlags, mode: ExecutionMode) -> Result<ChatR
         &config.sync.bearer_token_env,
     )?;
     let facade = AiFacade::new(AiFacadeDeps {
-        http,
+        http: http.clone(),
         mode,
         ..AiFacadeDeps::default()
     })
     .map_err(map_ai_error)?;
+    let wiki_facade = WikiFacade::new(WikiFacadeDeps {
+        http,
+        local_index: None,
+    })
+    .map_err(map_app_error)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -89,7 +101,10 @@ fn build_chat_runtime(shared: &SharedFlags, mode: ExecutionMode) -> Result<ChatR
 
     Ok(ChatRuntime {
         facade,
+        wiki_facade,
         connection,
+        config,
+        vault_root,
         runtime,
     })
 }

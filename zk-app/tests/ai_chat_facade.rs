@@ -225,6 +225,7 @@ fn conversation_json(title: Option<&str>, message_count: u32) -> serde_json::Val
 fn conversation_detail_json() -> serde_json::Value {
     json!({
         "conversation": conversation_json(Some("Renamed"), 1),
+        "chat_model_id": "test/chat-model",
         "messages": [
             {
                 "message_id": MESSAGE_ID,
@@ -254,6 +255,7 @@ fn assert_conversation_detail(detail: &ConversationDetail) {
         CONVERSATION_ID
     );
     assert_eq!(detail.messages.len(), 1);
+    assert_eq!(detail.chat_model_id.as_str(), "test/chat-model");
     assert_eq!(detail.messages[0].message_id.as_str(), MESSAGE_ID);
     assert_eq!(detail.messages[0].citations.len(), 1);
     assert_eq!(detail.messages[0].citations[0].snippet, "source text");

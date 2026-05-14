@@ -125,6 +125,41 @@ async fn lint_wiki_posts_folder_scope_and_returns_job_id() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn recompute_note_posts_admin_request_and_returns_job_id() {
+    let server = MockServer::start().await;
+    let facade = connected_facade(&server);
+
+    Mock::given(method("POST"))
+        .and(path("/admin/ai/recompute"))
+        .and(header("authorization", "Bearer shared-token"))
+        .and(|request: &wiremock::Request| {
+            let body: serde_json::Value = request.body_json().expect("body should be JSON");
+
+            body == json!({
+                "scope": "note",
+                "note_id": PAGE_ID,
+            })
+        })
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "job_id": JOB_ID,
+            "kind": "recompute_note",
+            "note_id": PAGE_ID,
+            "status": "pending"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let job_id = facade
+        .recompute_note(NoteId::new(PAGE_ID))
+        .await
+        .expect("recompute note should enqueue");
+
+    assert_eq!(job_id, JobId::new(JOB_ID).expect("job id should parse"));
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn list_lint_findings_decodes_server_response() {
     let server = MockServer::start().await;
     let facade = connected_facade(&server);

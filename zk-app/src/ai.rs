@@ -134,6 +134,8 @@ pub struct ConversationDto {
 pub struct ConversationDetail {
     /// Conversation metadata.
     pub conversation: ConversationDto,
+    /// Chat model configured on the server when the detail was returned.
+    pub chat_model_id: EmbeddingModelId,
     /// Recent messages in chronological order.
     pub messages: Vec<MessageDto>,
 }

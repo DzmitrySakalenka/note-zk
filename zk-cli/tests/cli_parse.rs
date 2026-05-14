@@ -8,8 +8,8 @@ use clap::Parser;
 use zk_cli::{
     cli::{
         AdminAiCommand, AdminAiRecomputeScope, AiCommand, AuthCommand, ChatConversationCommand,
-        ChatSubcommand, Cli, Command, OutputMode, PurgeScope, ResolveStrategy, SyncMode,
-        WikiCommand, WikiLintCommand, WikiLintKindArg, WikiLintScopeArg,
+        ChatSaveAsWikiTypeArg, ChatSubcommand, Cli, Command, OutputMode, PurgeScope,
+        ResolveStrategy, SyncMode, WikiCommand, WikiLintCommand, WikiLintKindArg, WikiLintScopeArg,
     },
     error::{
         CliError, EXIT_AI_DISABLED, EXIT_ISSUES, EXIT_OK, EXIT_PROVIDER_UNAVAILABLE, EXIT_REQUEST,
@@ -510,6 +510,92 @@ fn chat_conversations_show_parses_json() {
         },
         other => panic!("expected chat command, got {other:?}"),
     }
+}
+
+#[test]
+fn chat_conversations_save_as_wiki_parses_defaults_and_json() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "conversations",
+        "save-as-wiki",
+        "--conversation-id",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+        "--title",
+        "Research Summary",
+        "--json",
+    ])
+    .expect("chat conversations save-as-wiki arguments should parse");
+
+    match cli.command {
+        Command::Chat(args) => match args.command {
+            Some(ChatSubcommand::Conversations(conversations)) => match conversations.command {
+                ChatConversationCommand::SaveAsWiki(save) => {
+                    assert_eq!(save.conversation_id, "01JAR5A3PJEZ3SKG67PN8N6S6S");
+                    assert_eq!(save.title, "Research Summary");
+                    assert_eq!(save.note_type, ChatSaveAsWikiTypeArg::WikiSynthesis);
+                    assert_eq!(save.path, None);
+                    assert!(save.json);
+                }
+                other => panic!("expected conversations save-as-wiki command, got {other:?}"),
+            },
+            other => panic!("expected conversations subcommand, got {other:?}"),
+        },
+        other => panic!("expected chat command, got {other:?}"),
+    }
+}
+
+#[test]
+fn chat_conversations_save_as_wiki_parses_entity_type_and_path() {
+    let cli = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "conversations",
+        "save-as-wiki",
+        "--conversation-id",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+        "--title",
+        "Entity Page",
+        "--type",
+        "wiki-entity",
+        "--path",
+        "wiki/entities/entity-page.md",
+    ])
+    .expect("chat conversations save-as-wiki arguments should parse");
+
+    match cli.command {
+        Command::Chat(args) => match args.command {
+            Some(ChatSubcommand::Conversations(conversations)) => match conversations.command {
+                ChatConversationCommand::SaveAsWiki(save) => {
+                    assert_eq!(save.note_type, ChatSaveAsWikiTypeArg::WikiEntity);
+                    assert_eq!(save.path.as_deref(), Some("wiki/entities/entity-page.md"));
+                    assert!(!save.json);
+                }
+                other => panic!("expected conversations save-as-wiki command, got {other:?}"),
+            },
+            other => panic!("expected conversations subcommand, got {other:?}"),
+        },
+        other => panic!("expected chat command, got {other:?}"),
+    }
+}
+
+#[test]
+fn chat_conversations_save_as_wiki_rejects_unknown_type() {
+    let error = Cli::try_parse_from([
+        "zk-cli",
+        "chat",
+        "conversations",
+        "save-as-wiki",
+        "--conversation-id",
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+        "--title",
+        "Research Summary",
+        "--type",
+        "wiki-index",
+    ])
+    .expect_err("save-as-wiki should reject unsupported wiki page types");
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
 }
 
 #[test]

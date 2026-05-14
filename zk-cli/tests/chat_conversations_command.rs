@@ -251,6 +251,7 @@ async fn mount_show_conversation(server: &MockServer) {
         .and(header("authorization", "Bearer shared-token"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "conversation": conversation_json("Original", &Value::Null),
+            "chat_model_id": "test/chat-conversations",
             "messages": [
                 {
                     "message_id": USER_MESSAGE_ID,

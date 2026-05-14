@@ -646,6 +646,8 @@ pub enum ChatConversationCommand {
     List(ChatConversationsListArgs),
     /// Show one conversation and its recent messages.
     Show(ChatConversationsShowArgs),
+    /// Save the latest assistant response as a local wiki page.
+    SaveAsWiki(ChatSaveAsWikiArgs),
     /// Delete one conversation permanently.
     Delete(ChatConversationsDeleteArgs),
     /// Rename one conversation.
@@ -678,6 +680,46 @@ pub struct ChatConversationsListArgs {
 pub struct ChatConversationsShowArgs {
     /// Conversation id to show.
     pub conversation_id: String,
+    /// Render compact JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Supported wiki page types for chat write-back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatSaveAsWikiTypeArg {
+    /// A synthesized wiki page.
+    WikiSynthesis,
+    /// An entity wiki page.
+    WikiEntity,
+}
+
+impl ChatSaveAsWikiTypeArg {
+    /// Returns the frontmatter `type` value.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::WikiSynthesis => "wiki-synthesis",
+            Self::WikiEntity => "wiki-entity",
+        }
+    }
+}
+
+/// Arguments for `chat conversations save-as-wiki`.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct ChatSaveAsWikiArgs {
+    /// Conversation id whose latest assistant response should be saved.
+    #[arg(long = "conversation-id")]
+    pub conversation_id: String,
+    /// Title for the created wiki page.
+    #[arg(long)]
+    pub title: String,
+    /// Wiki page frontmatter type.
+    #[arg(long = "type", default_value = "wiki-synthesis", value_parser = parse_chat_save_as_wiki_type)]
+    pub note_type: ChatSaveAsWikiTypeArg,
+    /// Optional vault-relative target path.
+    #[arg(long)]
+    pub path: Option<String>,
     /// Render compact JSON to stdout.
     #[arg(long)]
     pub json: bool,
@@ -806,5 +848,13 @@ fn parse_wiki_lint_kind(value: &str) -> Result<WikiLintKindArg, String> {
         "missing_xref" => Ok(WikiLintKindArg::MissingXref),
         "missing_page" => Ok(WikiLintKindArg::MissingPage),
         other => Err(format!("unknown wiki lint kind: {other}")),
+    }
+}
+
+fn parse_chat_save_as_wiki_type(value: &str) -> Result<ChatSaveAsWikiTypeArg, String> {
+    match value {
+        "wiki-synthesis" => Ok(ChatSaveAsWikiTypeArg::WikiSynthesis),
+        "wiki-entity" => Ok(ChatSaveAsWikiTypeArg::WikiEntity),
+        other => Err(format!("unknown chat save-as-wiki type: {other}")),
     }
 }

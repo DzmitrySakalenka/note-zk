@@ -25,6 +25,7 @@ use super::{
 const INGEST_PATH: &str = "/admin/ai/wiki/ingest";
 const LINT_PATH: &str = "/admin/ai/wiki/lint";
 const FINDINGS_PATH: &str = "/admin/ai/wiki/lint/findings";
+const RECOMPUTE_PATH: &str = "/admin/ai/recompute";
 const JOBS_LIST_PATH: &str = "/admin/ai/jobs?limit=1000";
 const INITIAL_JOB_POLL_BACKOFF: Duration = Duration::from_millis(250);
 const MAX_JOB_POLL_BACKOFF: Duration = Duration::from_secs(2);
@@ -180,6 +181,22 @@ impl WikiFacade {
             "request_id": request_id,
         });
         let response: JobResponse = self.post_json_with_retry(LINT_PATH, &body).await?;
+
+        Ok(response.job_id)
+    }
+
+    /// Enqueues semantic recompute for one note on the remote server.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when HTTP transport is missing, the remote
+    /// request fails, or the server rejects the request.
+    pub async fn recompute_note(&self, note_id: NoteId) -> AppResult<JobId> {
+        let body = json!({
+            "scope": "note",
+            "note_id": note_id.to_string(),
+        });
+        let response: JobResponse = self.post_json_with_retry(RECOMPUTE_PATH, &body).await?;
 
         Ok(response.job_id)
     }

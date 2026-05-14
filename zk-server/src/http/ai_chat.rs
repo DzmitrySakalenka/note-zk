@@ -17,8 +17,8 @@ use zk_ai::{
     provider::{ChatChunk, ChatUsage, FinishReason},
 };
 use zk_domain::{
-    Citation, ConversationId, ConversationRecord, MessageId, MessageRecord, MessageRole,
-    auth::UserId,
+    Citation, ConversationId, ConversationRecord, EmbeddingModelId, MessageId, MessageRecord,
+    MessageRole, auth::UserId,
 };
 
 use crate::{
@@ -78,6 +78,7 @@ struct ConversationDto {
 #[derive(Debug, Serialize)]
 struct ConversationDetailDto {
     conversation: ConversationDto,
+    chat_model_id: EmbeddingModelId,
     messages: Vec<MessageDto>,
 }
 
@@ -218,6 +219,7 @@ async fn get_conversation(
 ) -> Result<Json<ConversationDetailDto>, ApiError> {
     let conversation_id = parse_conversation_id(&conversation_id)?;
     let limit = message_limit(&query)?;
+    let chat_model_id = configured_chat_model_id(&state)?;
     let db = state.db_handle();
     let user_id = authenticated_user.user_id;
     let detail = run_blocking("get chat conversation", move || {
@@ -234,6 +236,7 @@ async fn get_conversation(
 
             Ok(ConversationDetailDto {
                 conversation: conversation_dto(conversation, message_count),
+                chat_model_id,
                 messages: message_dtos(messages, citations),
             })
         })
@@ -241,6 +244,15 @@ async fn get_conversation(
     .await?;
 
     Ok(Json(detail))
+}
+
+fn configured_chat_model_id(state: &ServerState) -> Result<EmbeddingModelId, ApiError> {
+    state
+        .config()
+        .ai
+        .as_ref()
+        .map(|config| config.chat.clone().unwrap_or_default().model_id)
+        .ok_or_else(|| ApiError::from(ServerError::NotFound("not found".to_string())))
 }
 
 async fn patch_conversation(
