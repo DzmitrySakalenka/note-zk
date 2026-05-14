@@ -20,7 +20,7 @@ use crate::{
     event::{AppEvent, BackgroundResult, EventLoop},
     jobs::{JobContext, JobResult, JobRunner, JobRunnerHandle, JobSpec},
     keymap::{GlobalKeyAction, KeyChord, global_action_for_key},
-    screens::help::HelpScreen,
+    screens::{help::HelpScreen, overview::OverviewScreen},
     terminal::TerminalGuard,
     theme::{Theme, ThemeKind},
     widgets::{
@@ -41,6 +41,11 @@ pub trait Screen {
 
     /// Renders the screen into the provided terminal frame area.
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect, ctx: &ScreenCtx);
+
+    /// Handles focus entry for screens that need to refresh state.
+    fn on_enter(&mut self, _ctx: &mut ScreenCtx) -> ScreenAction {
+        ScreenAction::Stay
+    }
 
     /// Handles a router-level quit request.
     fn on_quit(&mut self, _ctx: &mut ScreenCtx) -> ScreenAction {
@@ -253,6 +258,8 @@ pub type StatusMessages = ToastQueue;
 pub enum Modal {
     /// Built-in help overlay.
     Help,
+    /// Built-in screen-switching palette.
+    GoToScreen,
     /// Confirmation dialog with an accept callback.
     Confirm(ConfirmDialog),
 }
@@ -290,13 +297,13 @@ pub struct App {
 }
 
 impl App {
-    /// Creates the production app with placeholder screens in fixed router order.
+    /// Creates the production app with built-in screens in fixed router order.
     #[must_use]
     pub fn new(ctx: ScreenCtx) -> Self {
         let screens = ScreenId::all()
             .iter()
             .copied()
-            .map(|id| Box::new(PlaceholderScreen { id }) as Box<dyn Screen>)
+            .map(default_screen)
             .collect();
         Self::with_screens(screens, ctx)
     }
@@ -336,6 +343,9 @@ impl App {
             JobContext::new(self.ctx.config.clone(), self.ctx.vault_root.clone()),
         );
         self.ctx.job_runner = Some(jobs.handle());
+        if !self.enter_current_screen() {
+            return Ok(());
+        }
 
         terminal
             .draw(|frame| self.render(frame))
@@ -415,6 +425,16 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        if self.modal.is_some() {
+            if matches!(global_action_for_key(key), Some(GlobalKeyAction::Escape)) {
+                self.modal = None;
+                return true;
+            }
+
+            let event = AppEvent::Key(key);
+            return self.dispatch_event(&event);
+        }
+
         let Some(action) = global_action_for_key(key) else {
             let event = AppEvent::Key(key);
             return self.dispatch_event(&event);
@@ -428,11 +448,11 @@ impl App {
             GlobalKeyAction::OpenHelp => self.apply_action(ScreenAction::OpenModal(Modal::Help)),
             GlobalKeyAction::NextScreen => {
                 self.next_screen();
-                true
+                self.enter_current_screen()
             }
             GlobalKeyAction::PreviousScreen => {
                 self.previous_screen();
-                true
+                self.enter_current_screen()
             }
             GlobalKeyAction::CycleTheme => {
                 self.ctx.cycle_theme();
@@ -440,7 +460,7 @@ impl App {
             }
             GlobalKeyAction::JumpTo(index) => {
                 self.jump_to_numbered_screen(index);
-                true
+                self.enter_current_screen()
             }
             GlobalKeyAction::Escape if self.modal.is_some() => {
                 self.modal = None;
@@ -479,8 +499,9 @@ impl App {
             ScreenAction::Stay => true,
             ScreenAction::Quit => false,
             ScreenAction::SwitchTo(screen_id) => {
+                self.modal = None;
                 self.switch_to(screen_id);
-                true
+                self.enter_current_screen()
             }
             ScreenAction::OpenModal(modal) => {
                 self.open_modal(modal);
@@ -525,6 +546,11 @@ impl App {
     fn open_modal(&mut self, modal: Modal) {
         match modal {
             Modal::Help => self.open_help_modal(),
+            Modal::GoToScreen => {
+                self.modal = Some(Box::new(GoToScreenScreen::new(
+                    self.available_screen_ids().to_vec(),
+                )));
+            }
             Modal::Confirm(dialog) => {
                 self.modal = Some(Box::new(ConfirmDialogScreen { dialog }));
             }
@@ -576,6 +602,18 @@ impl App {
         }
     }
 
+    fn enter_current_screen(&mut self) -> bool {
+        let Some(index) = self.current_index() else {
+            return true;
+        };
+        let screen = self
+            .screens
+            .get_mut(index)
+            .expect("current screen index should be valid");
+        let action = screen.on_enter(&mut self.ctx);
+        self.apply_action(action)
+    }
+
     fn current_index(&self) -> Option<usize> {
         self.available_screen_ids()
             .iter()
@@ -584,6 +622,21 @@ impl App {
 
     fn available_screen_ids(&self) -> &[ScreenId] {
         &ScreenId::all()[..self.screens.len()]
+    }
+}
+
+fn default_screen(id: ScreenId) -> Box<dyn Screen> {
+    match id {
+        ScreenId::Overview => Box::<OverviewScreen>::default(),
+        ScreenId::Notes
+        | ScreenId::Sync
+        | ScreenId::Doctor
+        | ScreenId::Trash
+        | ScreenId::Resolve
+        | ScreenId::Auth
+        | ScreenId::Admin => Box::new(PlaceholderScreen { id }),
+        #[cfg(feature = "ai")]
+        ScreenId::Search | ScreenId::Chat | ScreenId::Wiki => Box::new(PlaceholderScreen { id }),
     }
 }
 
@@ -603,6 +656,96 @@ impl Screen for PlaceholderScreen {
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect, _ctx: &ScreenCtx) {
         let paragraph = Paragraph::new(format!("{} screen", self.title()))
             .block(Block::default().borders(Borders::ALL).title(self.title()));
+        frame.render_widget(paragraph, area);
+    }
+}
+
+struct GoToScreenScreen {
+    screen_ids: Vec<ScreenId>,
+    selected: usize,
+}
+
+impl GoToScreenScreen {
+    fn new(screen_ids: Vec<ScreenId>) -> Self {
+        Self {
+            screen_ids,
+            selected: 0,
+        }
+    }
+
+    fn select_previous(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+    }
+
+    fn select_next(&mut self) {
+        if self.selected + 1 < self.screen_ids.len() {
+            self.selected += 1;
+        }
+    }
+
+    fn selected_screen(&self) -> ScreenAction {
+        self.screen_ids
+            .get(self.selected)
+            .copied()
+            .map_or(ScreenAction::CloseModal, ScreenAction::SwitchTo)
+    }
+
+    fn numbered_screen(&self, digit: char) -> ScreenAction {
+        let Some(index) = digit.to_digit(10).and_then(|value| value.checked_sub(1)) else {
+            return ScreenAction::Stay;
+        };
+
+        self.screen_ids
+            .get(index as usize)
+            .copied()
+            .map_or(ScreenAction::Stay, ScreenAction::SwitchTo)
+    }
+}
+
+impl Screen for GoToScreenScreen {
+    fn title(&self) -> &'static str {
+        "Go to screen"
+    }
+
+    fn handle_event(&mut self, event: &AppEvent, _ctx: &mut ScreenCtx) -> ScreenAction {
+        let AppEvent::Key(key) = event else {
+            return ScreenAction::Stay;
+        };
+        if key.kind == KeyEventKind::Release {
+            return ScreenAction::Stay;
+        }
+
+        match key.code {
+            KeyCode::Char(digit @ '1'..='9') => self.numbered_screen(digit),
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.select_next();
+                ScreenAction::Stay
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.select_previous();
+                ScreenAction::Stay
+            }
+            KeyCode::Enter => self.selected_screen(),
+            KeyCode::Esc => ScreenAction::CloseModal,
+            _ => ScreenAction::Stay,
+        }
+    }
+
+    fn render(&mut self, frame: &mut Frame<'_>, area: Rect, _ctx: &ScreenCtx) {
+        let lines = self
+            .screen_ids
+            .iter()
+            .enumerate()
+            .map(|(index, screen_id)| {
+                let marker = if index == self.selected { ">" } else { " " };
+                format!("{marker} {} {}", index + 1, screen_id.title())
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let paragraph =
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(self.title()));
+
+        frame.render_widget(Clear, area);
         frame.render_widget(paragraph, area);
     }
 }
