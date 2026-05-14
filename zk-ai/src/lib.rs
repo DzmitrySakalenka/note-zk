@@ -9,7 +9,7 @@ pub mod provider;
 pub mod selector;
 pub mod service;
 
-pub use chunker::{Chunker, ChunkerOptions, ParagraphChunker};
+pub use chunker::{ChunkerOptions, ParagraphChunker};
 pub use error::{AiError, AiResult};
 #[cfg(feature = "provider-local")]
 pub use provider::local_candle::{LocalEmbeddingsConfig, LocalEmbeddingsProvider};

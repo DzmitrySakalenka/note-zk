@@ -1,24 +1,9 @@
-//! Note chunking traits and implementations.
-
-use zk_domain::{ChunkRecord, id::NoteId};
-
-use crate::AiResult;
+//! Note chunking options and implementations.
 
 /// Paragraph and heading-aware chunker implementation.
 pub mod paragraph;
 
 pub use paragraph::ParagraphChunker;
-
-/// Splits note bodies into embedding-ready chunk records.
-pub trait Chunker: Send + Sync {
-    /// Splits a note body into deterministic chunk text and metadata.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`crate::AiError`] when chunker configuration is invalid or
-    /// when the implementation cannot make progress.
-    fn chunk(&self, note_id: &NoteId, body: &str) -> AiResult<Vec<ChunkRecord>>;
-}
 
 /// Options controlling V1 paragraph chunking.
 #[derive(Debug, Clone, PartialEq, Eq)]

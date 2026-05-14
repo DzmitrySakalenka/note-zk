@@ -6,7 +6,7 @@ use std::any::{type_name, type_name_of_val};
 use zk_ai::{
     AppendChatMessageParams, AssembleParams, ChatCapability, ChatChunk, ChatConversationsRepo,
     ChatMessage, ChatMessageCitationsRepo, ChatMessagesRepo, ChatProvider, ChatProviderResolver,
-    ChatRequest, ChatService, ChatServiceRepos, ChatTurnRequest, ChatUsage, ChunkOutcome, Chunker,
+    ChatRequest, ChatService, ChatServiceRepos, ChatTurnRequest, ChatUsage, ChunkOutcome,
     ChunkerOptions, ChunkingService, ChunksWriter, CitationFormat, EmbeddingsCapability,
     EmbeddingsProvider, EmbeddingsReader, EmbeddingsRequest, EmbeddingsResponse, EmbeddingsService,
     EmbeddingsServiceOptions, EmbeddingsWriter, FinishReason, ParagraphChunker, PromptAssembler,
@@ -22,7 +22,6 @@ use zk_domain::{
 fn ai_operator_public_api_is_available_from_crate_root() {
     assert!(!type_name::<ChunkerOptions>().is_empty());
     assert!(!type_name::<ParagraphChunker>().is_empty());
-    assert!(!type_name::<dyn Chunker>().is_empty());
     assert!(!type_name::<dyn EmbeddingsProvider>().is_empty());
     assert!(!type_name::<EmbeddingsRequest>().is_empty());
     assert!(!type_name::<EmbeddingsResponse>().is_empty());
@@ -30,7 +29,7 @@ fn ai_operator_public_api_is_available_from_crate_root() {
     assert!(!type_name::<StubEmbeddingsProvider>().is_empty());
     assert!(!type_name::<ProviderRegistry>().is_empty());
     assert!(!type_name::<ProviderSelector>().is_empty());
-    assert!(!type_name::<ChunkingService<ParagraphChunker, NoopChunksWriter>>().is_empty());
+    assert!(!type_name::<ChunkingService<NoopChunksWriter>>().is_empty());
     assert!(!type_name::<dyn ChunksWriter>().is_empty());
     assert!(!type_name::<ChunkOutcome>().is_empty());
     assert!(

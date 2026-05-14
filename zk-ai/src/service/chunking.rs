@@ -2,7 +2,7 @@
 
 use zk_domain::{ChunkRecord, id::NoteId};
 
-use crate::{AiError, AiResult, chunker::Chunker};
+use crate::{AiError, AiResult, chunker::ParagraphChunker};
 
 /// Persists and reads note chunks for [`ChunkingService`].
 pub trait ChunksWriter {
@@ -38,19 +38,18 @@ pub enum ChunkOutcome {
 
 /// Idempotent note chunking service.
 #[derive(Debug, Clone)]
-pub struct ChunkingService<C: Chunker, R: ChunksWriter> {
-    chunker: C,
+pub struct ChunkingService<R: ChunksWriter> {
+    chunker: ParagraphChunker,
     repo: R,
 }
 
-impl<C, R> ChunkingService<C, R>
+impl<R> ChunkingService<R>
 where
-    C: Chunker,
     R: ChunksWriter,
 {
     /// Creates a chunking service from a chunker and chunk repository.
     #[must_use]
-    pub fn new(chunker: C, repo: R) -> Self {
+    pub fn new(chunker: ParagraphChunker, repo: R) -> Self {
         Self { chunker, repo }
     }
 
