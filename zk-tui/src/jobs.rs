@@ -3,6 +3,7 @@
 use std::{
     any::Any,
     fmt, fs,
+    io::ErrorKind,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -268,8 +269,18 @@ pub struct NoteListResult {
 pub struct NoteBodyResult {
     /// Vault-relative note path that was read.
     pub path: RelativePath,
+    /// Resolved preview, or a sentinel for files missing on disk.
+    pub preview: NoteBodyPreview,
+}
+
+/// Outcome of attempting to read a note body for preview.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoteBodyPreview {
     /// Markdown body preview capped to the first 200 lines.
-    pub preview: String,
+    Available(String),
+    /// The note's file no longer exists on disk (e.g. hard-deleted, or a
+    /// stale index row left over from sync).
+    Missing,
 }
 
 /// One semantic-search hit enriched with local note-list metadata.
@@ -1261,16 +1272,37 @@ fn run_list_notes_job(ctx: &JobContext, request: NoteListRequest) -> Result<JobR
 
 fn run_read_note_body_job(ctx: &JobContext, path: RelativePath) -> Result<JobResult> {
     let absolute_path = ctx.vault_root.join(path.as_str());
-    let document = zk_vault::parse_note_file(&absolute_path)
-        .context("while attempting to read note body from TUI job")?;
-    let preview = document
-        .body_markdown
-        .lines()
-        .take(NOTE_BODY_PREVIEW_LINES)
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    Ok(JobResult::NoteBody(NoteBodyResult { path, preview }))
+    match zk_vault::parse_note_file(&absolute_path) {
+        Ok(document) => {
+            let preview = document
+                .body_markdown
+                .lines()
+                .take(NOTE_BODY_PREVIEW_LINES)
+                .collect::<Vec<_>>()
+                .join("\n");
+            Ok(JobResult::NoteBody(NoteBodyResult {
+                path,
+                preview: NoteBodyPreview::Available(preview),
+            }))
+        }
+        // A missing file on disk for an indexed note is a common state when
+        // the user hard-deletes a file (no trash move) or when sync wrote
+        // an index row without the body. Surface it as a benign "Missing"
+        // outcome so the screen can render an inline message without
+        // raising an error toast.
+        Err(zk_vault::error::VaultError::Io { source, .. })
+            if source.kind() == ErrorKind::NotFound =>
+        {
+            Ok(JobResult::NoteBody(NoteBodyResult {
+                path,
+                preview: NoteBodyPreview::Missing,
+            }))
+        }
+        Err(error) => {
+            Err(anyhow::Error::new(error)
+                .context("while attempting to read note body from TUI job"))
+        }
+    }
 }
 
 #[cfg(feature = "ai")]
@@ -2277,17 +2309,29 @@ fn is_conflict_copy_name(name: &str, stem: &str, extension: Option<&str>) -> boo
 
 fn run_sync_job(runtime: &Runtime, ctx: &JobContext, intent: SyncIntent) -> Result<JobResult> {
     let mut connection = open_job_connection(ctx)?;
-    let settings = zk_cli_core::resolve_sync_settings(&ctx.config)
-        .context("while attempting to resolve sync settings for TUI job")?;
-    let device_id = DeviceId::new(&settings.device_id);
 
+    // The status panel only needs a local DB query, so resolve `device_id`
+    // on its own and skip the full sync-settings bootstrap. This keeps the
+    // Sync screen useful even when `server_url` or the bearer-token env var
+    // are not configured yet.
     if matches!(intent, SyncIntent::DeviceStatus) {
+        let device_id_str = ctx
+            .config
+            .sync
+            .device_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("device_id is required to read sync status"))
+            .context("while attempting to resolve sync device id for TUI job")?;
+        let device_id = DeviceId::new(device_id_str);
         return Ok(JobResult::Sync(SyncOutcome::DeviceStatus(
             zk_app::get_device_sync_status(&connection, &device_id)
                 .context("while attempting to inspect device sync status from TUI job")?,
         )));
     }
 
+    let settings = zk_cli_core::resolve_sync_settings(&ctx.config)
+        .context("while attempting to resolve sync settings for TUI job")?;
+    let device_id = DeviceId::new(&settings.device_id);
     let transport = HttpTransport::new(settings.server_url, Some(settings.bearer_token))
         .context("while attempting to construct HTTP sync transport for TUI job")?;
     runtime

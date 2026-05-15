@@ -14,7 +14,9 @@ use zk_index::ListedNote;
 use crate::{
     app::{Screen, ScreenAction, ScreenCtx, ScreenId},
     event::{AppEvent, BackgroundResult},
-    jobs::{JobKind, JobResult, JobSpec, NoteBodyResult, SemanticSearchResultItem},
+    jobs::{
+        JobKind, JobResult, JobSpec, NoteBodyPreview, NoteBodyResult, SemanticSearchResultItem,
+    },
     keymap::KeyChord,
     screens::body_preview::{BodyCache, BodyState},
     widgets::toast::{Toast, ToastSeverity},
@@ -322,9 +324,15 @@ impl SearchScreen {
             return;
         }
 
-        self.body_cache
-            .insert(result.path.clone(), result.preview.clone());
-        self.body.loaded(result.preview.clone());
+        match &result.preview {
+            NoteBodyPreview::Available(preview) => {
+                self.body_cache.insert(result.path.clone(), preview.clone());
+                self.body.loaded(preview.clone());
+            }
+            NoteBodyPreview::Missing => {
+                self.body.missing(result.path.clone());
+            }
+        }
     }
 
     fn seed_notes_with_selected(&mut self, ctx: &mut ScreenCtx) -> ScreenAction {

@@ -1,5 +1,7 @@
 //! Read-only note browser screen.
 
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
     Frame,
@@ -7,6 +9,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
 };
+use zk_domain::id::NoteId;
 use zk_index::ListedNote;
 
 use crate::{
@@ -14,7 +17,8 @@ use crate::{
     editor,
     event::{AppEvent, BackgroundResult},
     jobs::{
-        JobKind, JobResult, JobSpec, NoteBodyResult, NoteFilter, NoteListRequest, NoteListResult,
+        JobKind, JobResult, JobSpec, NoteBodyPreview, NoteBodyResult, NoteFilter, NoteListRequest,
+        NoteListResult,
     },
     keymap::KeyChord,
     screens::body_preview::{BodyCache, BodyState},
@@ -22,7 +26,7 @@ use crate::{
 };
 
 const DEFAULT_HALF_PAGE: usize = 5;
-const NOTES_BINDINGS: &[(KeyChord, &str)] = &[
+const NOTES_BINDINGS_FLAT: &[(KeyChord, &str)] = &[
     (KeyChord::char('j'), "next note"),
     (KeyChord::char('k'), "previous note"),
     (
@@ -39,7 +43,66 @@ const NOTES_BINDINGS: &[(KeyChord, &str)] = &[
         KeyChord::new(KeyCode::Enter, KeyModifiers::NONE),
         "open in editor",
     ),
+    (KeyChord::char('v'), "tree view"),
 ];
+
+const NOTES_BINDINGS_TREE: &[(KeyChord, &str)] = &[
+    (KeyChord::char('j'), "next row"),
+    (KeyChord::char('k'), "previous row"),
+    (
+        KeyChord::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        "half-page down",
+    ),
+    (
+        KeyChord::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        "half-page up",
+    ),
+    (KeyChord::char('/'), "filter notes"),
+    (KeyChord::char('r'), "refresh notes"),
+    (KeyChord::char(' '), "toggle expand"),
+    (
+        KeyChord::new(KeyCode::Enter, KeyModifiers::NONE),
+        "open / toggle",
+    ),
+    (KeyChord::char('v'), "flat view"),
+];
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum ViewMode {
+    #[default]
+    Flat,
+    Tree,
+}
+
+/// One row in the flattened tree-view representation of the notes list.
+#[derive(Clone)]
+pub enum TreeRow {
+    /// A directory header (collapsible).
+    Dir {
+        /// Accumulated vault-relative directory path (e.g. `"projects/2026"`).
+        path: String,
+        /// Indentation depth, starting at 0 for the root level.
+        depth: usize,
+        /// Whether the directory is currently expanded.
+        expanded: bool,
+    },
+    /// A note row.
+    Note {
+        /// Index into the notes slice that was passed to [`build_tree_rows`].
+        note_index: usize,
+        /// Indentation depth, starting at 0 for the root level.
+        depth: usize,
+    },
+}
+
+/// Selection anchor used to keep the cursor stable across tree rebuilds.
+#[derive(Clone)]
+pub enum TreeAnchor {
+    /// Anchor by stable note identifier.
+    Note(NoteId),
+    /// Anchor by accumulated directory path.
+    Dir(String),
+}
 
 /// Read-only paginated note browser.
 pub struct NotesScreen {
@@ -56,6 +119,11 @@ pub struct NotesScreen {
     filter_input: String,
     filter_draft: Option<String>,
     last_list_height: usize,
+    view_mode: ViewMode,
+    expanded: HashSet<String>,
+    tree_rows: Vec<TreeRow>,
+    tree_selected: usize,
+    tree_anchor: Option<TreeAnchor>,
 }
 
 impl Default for NotesScreen {
@@ -74,6 +142,11 @@ impl Default for NotesScreen {
             filter_input: String::new(),
             filter_draft: None,
             last_list_height: DEFAULT_HALF_PAGE * 2,
+            view_mode: ViewMode::Flat,
+            expanded: HashSet::new(),
+            tree_rows: Vec::new(),
+            tree_selected: 0,
+            tree_anchor: None,
         }
     }
 }
@@ -95,6 +168,7 @@ impl Screen for NotesScreen {
             self.seeded_note = true;
             self.filter_input.clear();
             self.filter_draft = None;
+            self.rebuild_tree_after_notes_change(false);
             return self.load_selected_body();
         }
 
@@ -136,7 +210,10 @@ impl Screen for NotesScreen {
     }
 
     fn keybindings(&self) -> &'static [(KeyChord, &'static str)] {
-        NOTES_BINDINGS
+        match self.view_mode {
+            ViewMode::Flat => NOTES_BINDINGS_FLAT,
+            ViewMode::Tree => NOTES_BINDINGS_TREE,
+        }
     }
 }
 
@@ -204,7 +281,8 @@ impl NotesScreen {
         self.list_loading = false;
         self.list_error = None;
         self.notes.clone_from(&result.notes);
-        self.selected = if self.select_last_after_load {
+        let select_last = self.select_last_after_load;
+        self.selected = if select_last {
             self.notes.len().saturating_sub(1)
         } else {
             0
@@ -214,10 +292,14 @@ impl NotesScreen {
 
         if self.notes.is_empty() {
             self.body.empty();
-            ScreenAction::Stay
-        } else {
-            self.load_selected_body()
+            self.tree_rows.clear();
+            self.tree_selected = 0;
+            self.tree_anchor = None;
+            return ScreenAction::Stay;
         }
+
+        self.rebuild_tree_after_notes_change(select_last);
+        self.load_selected_body_for_current_row()
     }
 
     fn handle_body_result(&mut self, result: &NoteBodyResult) {
@@ -225,9 +307,15 @@ impl NotesScreen {
             return;
         }
 
-        self.body_cache
-            .insert(result.path.clone(), result.preview.clone());
-        self.body.loaded(result.preview.clone());
+        match &result.preview {
+            NoteBodyPreview::Available(preview) => {
+                self.body_cache.insert(result.path.clone(), preview.clone());
+                self.body.loaded(preview.clone());
+            }
+            NoteBodyPreview::Missing => {
+                self.body.missing(result.path.clone());
+            }
+        }
     }
 
     fn handle_filter_key(&mut self, code: KeyCode) -> ScreenAction {
@@ -268,6 +356,7 @@ impl NotesScreen {
         ctx: &mut ScreenCtx,
     ) -> ScreenAction {
         match (code, modifiers) {
+            (KeyCode::Char('v'), KeyModifiers::NONE) => self.toggle_view_mode(),
             (KeyCode::Char('r'), KeyModifiers::NONE) => {
                 if self.seeded_note {
                     self.seeded_note = false;
@@ -279,21 +368,28 @@ impl NotesScreen {
                 }
                 self.selected = 0;
                 self.first_visible = 0;
+                self.tree_selected = 0;
+                self.tree_anchor = None;
                 self.request_current_page()
             }
-            (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, _) => self.move_selection(1),
-            (KeyCode::Char('k'), KeyModifiers::NONE) | (KeyCode::Up, _) => self.move_selection(-1),
-            (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
-                self.move_selection(self.half_page_step())
-            }
-            (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
-                self.move_selection(-self.half_page_step())
-            }
+            (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, _) => self.move_step(1),
+            (KeyCode::Char('k'), KeyModifiers::NONE) | (KeyCode::Up, _) => self.move_step(-1),
+            (KeyCode::Char('d'), KeyModifiers::CONTROL) => self.move_step(self.half_page_step()),
+            (KeyCode::Char('u'), KeyModifiers::CONTROL) => self.move_step(-self.half_page_step()),
             (KeyCode::Char('/'), KeyModifiers::NONE) => {
                 self.filter_draft = Some(self.filter_input.clone());
                 ScreenAction::Stay
             }
-            (KeyCode::Enter, KeyModifiers::NONE) => self.open_selected_note(ctx),
+            (KeyCode::Char(' '), KeyModifiers::NONE) if self.view_mode == ViewMode::Tree => {
+                self.toggle_current_dir_expansion()
+            }
+            (KeyCode::Enter, KeyModifiers::NONE) => match self.view_mode {
+                ViewMode::Flat => self.open_selected_note(ctx),
+                ViewMode::Tree => match self.tree_rows.get(self.tree_selected) {
+                    Some(TreeRow::Dir { .. }) => self.toggle_current_dir_expansion(),
+                    Some(TreeRow::Note { .. }) | None => self.open_selected_note(ctx),
+                },
+            },
             _ => ScreenAction::Stay,
         }
     }
@@ -308,6 +404,13 @@ impl NotesScreen {
         self.request.offset = offset;
         self.select_last_after_load = select_last_after_load;
         self.request_current_page()
+    }
+
+    fn move_step(&mut self, steps: isize) -> ScreenAction {
+        match self.view_mode {
+            ViewMode::Flat => self.move_selection(steps),
+            ViewMode::Tree => self.move_tree_selection(steps),
+        }
     }
 
     fn move_selection(&mut self, steps: isize) -> ScreenAction {
@@ -338,6 +441,86 @@ impl NotesScreen {
         } else {
             ScreenAction::Stay
         }
+    }
+
+    fn move_tree_selection(&mut self, steps: isize) -> ScreenAction {
+        if self.tree_rows.is_empty() || steps == 0 {
+            return ScreenAction::Stay;
+        }
+
+        let mut moved = false;
+        for _ in 0..steps.unsigned_abs() {
+            if steps.is_positive() {
+                if self.tree_selected + 1 < self.tree_rows.len() {
+                    self.tree_selected += 1;
+                    moved = true;
+                } else if self.notes.len() == self.request.limit as usize {
+                    return self.request_page(self.request.offset + self.request.limit, false);
+                }
+            } else if self.tree_selected > 0 {
+                self.tree_selected -= 1;
+                moved = true;
+            } else if self.request.offset >= self.request.limit {
+                return self.request_page(self.request.offset - self.request.limit, true);
+            }
+        }
+
+        if moved {
+            self.refresh_tree_anchor();
+            self.keep_selection_visible();
+            self.load_selected_body_for_current_row()
+        } else {
+            ScreenAction::Stay
+        }
+    }
+
+    fn toggle_view_mode(&mut self) -> ScreenAction {
+        self.view_mode = match self.view_mode {
+            ViewMode::Flat => ViewMode::Tree,
+            ViewMode::Tree => ViewMode::Flat,
+        };
+        self.first_visible = 0;
+        match self.view_mode {
+            ViewMode::Tree => {
+                let anchor = self
+                    .notes
+                    .get(self.selected)
+                    .map(|note| TreeAnchor::Note(note.note_id.clone()));
+                self.tree_anchor = anchor;
+                self.tree_rows = build_tree_rows(&self.notes, &self.expanded);
+                self.tree_selected =
+                    resolve_tree_selection(&self.tree_rows, self.tree_anchor.as_ref(), &self.notes);
+                self.refresh_tree_anchor();
+                self.load_selected_body_for_current_row()
+            }
+            ViewMode::Flat => {
+                if let Some(TreeAnchor::Note(note_id)) = self.tree_anchor.as_ref() {
+                    if let Some(index) = self.notes.iter().position(|note| &note.note_id == note_id)
+                    {
+                        self.selected = index;
+                    }
+                }
+                self.keep_selection_visible();
+                self.load_selected_body()
+            }
+        }
+    }
+
+    fn toggle_current_dir_expansion(&mut self) -> ScreenAction {
+        let Some(TreeRow::Dir { path, .. }) = self.tree_rows.get(self.tree_selected).cloned()
+        else {
+            return ScreenAction::Stay;
+        };
+        if !self.expanded.remove(&path) {
+            self.expanded.insert(path.clone());
+        }
+        self.tree_anchor = Some(TreeAnchor::Dir(path));
+        self.tree_rows = build_tree_rows(&self.notes, &self.expanded);
+        self.tree_selected =
+            resolve_tree_selection(&self.tree_rows, self.tree_anchor.as_ref(), &self.notes);
+        self.refresh_tree_anchor();
+        self.keep_selection_visible();
+        self.load_selected_body_for_current_row()
     }
 
     fn load_selected_body(&mut self) -> ScreenAction {
@@ -384,12 +567,56 @@ impl NotesScreen {
     }
 
     fn keep_selection_visible(&mut self) {
-        if self.selected < self.first_visible {
-            self.first_visible = self.selected;
+        let cursor = match self.view_mode {
+            ViewMode::Flat => self.selected,
+            ViewMode::Tree => self.tree_selected,
+        };
+        if cursor < self.first_visible {
+            self.first_visible = cursor;
         }
-        if self.selected >= self.first_visible + self.last_list_height {
-            self.first_visible = self.selected + 1 - self.last_list_height;
+        if cursor >= self.first_visible + self.last_list_height {
+            self.first_visible = cursor + 1 - self.last_list_height;
         }
+    }
+
+    fn load_selected_body_for_current_row(&mut self) -> ScreenAction {
+        match self.view_mode {
+            ViewMode::Flat => self.load_selected_body(),
+            ViewMode::Tree => match self.tree_rows.get(self.tree_selected) {
+                Some(TreeRow::Note { note_index, .. }) => {
+                    self.selected = *note_index;
+                    self.load_selected_body()
+                }
+                Some(TreeRow::Dir { .. }) | None => {
+                    self.body.empty();
+                    ScreenAction::Stay
+                }
+            },
+        }
+    }
+
+    fn refresh_tree_anchor(&mut self) {
+        self.tree_anchor = match self.tree_rows.get(self.tree_selected) {
+            Some(TreeRow::Note { note_index, .. }) => self
+                .notes
+                .get(*note_index)
+                .map(|note| TreeAnchor::Note(note.note_id.clone())),
+            Some(TreeRow::Dir { path, .. }) => Some(TreeAnchor::Dir(path.clone())),
+            None => None,
+        };
+    }
+
+    fn rebuild_tree_after_notes_change(&mut self, select_last: bool) {
+        if self.view_mode != ViewMode::Tree {
+            return;
+        }
+        self.tree_rows = build_tree_rows(&self.notes, &self.expanded);
+        self.tree_selected = if select_last {
+            self.tree_rows.len().saturating_sub(1)
+        } else {
+            0
+        };
+        self.refresh_tree_anchor();
     }
 
     fn half_page_step(&self) -> isize {
@@ -415,6 +642,14 @@ impl NotesScreen {
             return lines;
         }
 
+        match self.view_mode {
+            ViewMode::Flat => self.append_flat_lines(ctx, &mut lines),
+            ViewMode::Tree => self.append_tree_lines(ctx, &mut lines),
+        }
+        lines
+    }
+
+    fn append_flat_lines(&self, ctx: &ScreenCtx, lines: &mut Vec<Line<'static>>) {
         let visible_end = (self.first_visible + self.last_list_height).min(self.notes.len());
         for (index, note) in self.notes[self.first_visible..visible_end]
             .iter()
@@ -426,20 +661,60 @@ impl NotesScreen {
             } else {
                 " "
             };
-            let indicator = if note.is_trashed { "T" } else { " " };
-            let indicator_style = if note.is_trashed {
-                ctx.theme.muted
-            } else {
-                ctx.theme.primary
-            };
             lines.push(Line::from(vec![
                 Span::raw(format!("{marker} ")),
-                Span::styled(indicator.to_string(), indicator_style),
+                trashed_indicator_span(note, ctx),
                 Span::raw(format!(" {} -- {}", note.title, note.current_path.as_str())),
             ]));
         }
+    }
 
-        lines
+    fn append_tree_lines(&self, ctx: &ScreenCtx, lines: &mut Vec<Line<'static>>) {
+        let visible_end = (self.first_visible + self.last_list_height).min(self.tree_rows.len());
+        for (index, row) in self.tree_rows[self.first_visible..visible_end]
+            .iter()
+            .enumerate()
+        {
+            let absolute_index = self.first_visible + index;
+            let marker = if absolute_index == self.tree_selected {
+                ">"
+            } else {
+                " "
+            };
+            match row {
+                TreeRow::Dir {
+                    path,
+                    depth,
+                    expanded,
+                } => {
+                    let dir_name = path.rsplit('/').next().unwrap_or(path.as_str()).to_string();
+                    let prefix = if *expanded { "[-] " } else { "[+] " };
+                    lines.push(Line::from(vec![Span::raw(format!(
+                        "{marker} {}{}{}/",
+                        "  ".repeat(*depth),
+                        prefix,
+                        dir_name
+                    ))]));
+                }
+                TreeRow::Note { note_index, depth } => {
+                    let Some(note) = self.notes.get(*note_index) else {
+                        continue;
+                    };
+                    let file_name = note
+                        .current_path
+                        .as_str()
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or_else(|| note.current_path.as_str())
+                        .to_string();
+                    lines.push(Line::from(vec![
+                        Span::raw(format!("{marker} {}    ", "  ".repeat(*depth))),
+                        trashed_indicator_span(note, ctx),
+                        Span::raw(format!(" {} -- {}", note.title, file_name)),
+                    ]));
+                }
+            }
+        }
     }
 
     fn preview_lines(&self) -> Vec<Line<'static>> {
@@ -477,4 +752,144 @@ fn parse_filter(input: &str) -> NoteFilter {
     } else {
         NoteFilter::Tag(tag.to_string())
     }
+}
+
+fn trashed_indicator_span(note: &ListedNote, ctx: &ScreenCtx) -> Span<'static> {
+    let indicator = if note.is_trashed { "T" } else { " " };
+    let style = if note.is_trashed {
+        ctx.theme.muted
+    } else {
+        ctx.theme.primary
+    };
+    Span::styled(indicator.to_string(), style)
+}
+
+// Splits a normalized vault-relative path into its directory path and file
+// segment. A path without slashes has an empty directory ("" = root).
+fn split_dir_and_file(path: &str) -> (&str, &str) {
+    match path.rsplit_once('/') {
+        Some((dir, file)) => (dir, file),
+        None => ("", path),
+    }
+}
+
+// Walks the directory path "a/b/c" and yields each parent path in order:
+// "" -> "a" -> "a/b". Used to register every ancestor directory so collapsed
+// intermediate folders still show up at the appropriate level.
+fn ancestor_dirs(dir_path: &str) -> Vec<String> {
+    if dir_path.is_empty() {
+        return Vec::new();
+    }
+    let mut acc = Vec::new();
+    let mut current = String::new();
+    for segment in dir_path.split('/') {
+        if !current.is_empty() {
+            current.push('/');
+        }
+        current.push_str(segment);
+        acc.push(current.clone());
+    }
+    acc
+}
+
+struct TreeIndex<'a> {
+    child_dirs: BTreeMap<String, BTreeSet<String>>,
+    notes_by_dir: BTreeMap<String, Vec<usize>>,
+    expanded: &'a HashSet<String>,
+}
+
+/// Builds a flattened directory-tree view of `notes`, including only the
+/// children of directories present in `expanded`. Directories sort before
+/// notes at the same level, both alphabetically.
+#[allow(clippy::implicit_hasher)]
+pub fn build_tree_rows(notes: &[ListedNote], expanded: &HashSet<String>) -> Vec<TreeRow> {
+    // Index the input into a directory tree before flattening. Using BTree
+    // containers guarantees alphabetical iteration without an extra sort.
+    let mut index = TreeIndex {
+        child_dirs: BTreeMap::new(),
+        notes_by_dir: BTreeMap::new(),
+        expanded,
+    };
+    for (note_idx, note) in notes.iter().enumerate() {
+        let path = note.current_path.as_str();
+        let (dir, _file) = split_dir_and_file(path);
+        index
+            .notes_by_dir
+            .entry(dir.to_string())
+            .or_default()
+            .push(note_idx);
+
+        let mut parent = String::new();
+        for ancestor in ancestor_dirs(dir) {
+            index
+                .child_dirs
+                .entry(parent.clone())
+                .or_default()
+                .insert(ancestor.clone());
+            parent = ancestor;
+        }
+    }
+
+    // Sort each directory's notes by (title, full path) so ties (duplicate
+    // titles in different folders, identical-named files) get a stable order.
+    for note_indices in index.notes_by_dir.values_mut() {
+        note_indices.sort_by(|left, right| {
+            let left_note = &notes[*left];
+            let right_note = &notes[*right];
+            left_note.title.cmp(&right_note.title).then_with(|| {
+                left_note
+                    .current_path
+                    .as_str()
+                    .cmp(right_note.current_path.as_str())
+            })
+        });
+    }
+
+    let mut rows = Vec::new();
+    push_tree_level(&mut rows, "", 0, &index);
+    rows
+}
+
+fn push_tree_level(rows: &mut Vec<TreeRow>, dir_path: &str, depth: usize, index: &TreeIndex<'_>) {
+    if let Some(children) = index.child_dirs.get(dir_path) {
+        for child in children {
+            let is_expanded = index.expanded.contains(child);
+            rows.push(TreeRow::Dir {
+                path: child.clone(),
+                depth,
+                expanded: is_expanded,
+            });
+            if is_expanded {
+                push_tree_level(rows, child, depth + 1, index);
+            }
+        }
+    }
+    if let Some(note_indices) = index.notes_by_dir.get(dir_path) {
+        for note_index in note_indices {
+            rows.push(TreeRow::Note {
+                note_index: *note_index,
+                depth,
+            });
+        }
+    }
+}
+
+/// Resolves the row index that best matches `anchor` after a tree rebuild,
+/// defaulting to row 0 when the anchor is missing or no longer visible.
+pub fn resolve_tree_selection(
+    rows: &[TreeRow],
+    anchor: Option<&TreeAnchor>,
+    notes: &[ListedNote],
+) -> usize {
+    let Some(anchor) = anchor else {
+        return 0;
+    };
+    let matched = rows.iter().position(|row| match (row, anchor) {
+        (TreeRow::Note { note_index, .. }, TreeAnchor::Note(note_id)) => notes
+            .get(*note_index)
+            .is_some_and(|note| &note.note_id == note_id),
+        (TreeRow::Dir { path, .. }, TreeAnchor::Dir(target)) => path == target,
+        _ => false,
+    });
+    matched.unwrap_or(0)
 }

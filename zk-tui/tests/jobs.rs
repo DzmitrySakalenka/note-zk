@@ -31,7 +31,8 @@ use zk_tui::{
     jobs::{
         ConflictItemKind, ConflictResolutionStrategy, ConflictResolutionTarget,
         IssueDeviceTokenIntent, JobContext, JobHandle, JobKind, JobResult, JobRunner, JobSpec,
-        MockJob, NoteFilter, NoteListRequest, ResolveConflictIntent, ScanArgs, SyncIntent,
+        MockJob, NoteBodyPreview, NoteFilter, NoteListRequest, ResolveConflictIntent, ScanArgs,
+        SyncIntent,
     },
 };
 
@@ -533,9 +534,12 @@ fn runner_reads_note_body_preview_from_disk() {
     };
 
     assert_eq!(result.path.as_str(), "notes/long.md");
-    assert_eq!(result.preview.lines().count(), 200);
-    assert!(result.preview.contains("line 200"));
-    assert!(!result.preview.contains("line 201"));
+    let NoteBodyPreview::Available(preview) = &result.preview else {
+        panic!("expected available preview");
+    };
+    assert_eq!(preview.lines().count(), 200);
+    assert!(preview.contains("line 200"));
+    assert!(!preview.contains("line 201"));
 }
 
 #[test]

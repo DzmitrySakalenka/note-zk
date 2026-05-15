@@ -17,9 +17,15 @@ use rusqlite::Connection;
 use zk_app::EffectiveConfig;
 use zk_index::ListedNote;
 
+#[cfg(feature = "ai")]
+use crate::screens::search::SearchScreen;
+#[cfg(feature = "ai")]
+use crate::screens::wiki::WikiScreen;
+#[cfg(feature = "ai")]
+use crate::screens::{chat::ChatScreen, chat::chat_error_hint};
 use crate::{
     event::{AppEvent, BackgroundResult, EventLoop},
-    jobs::{JobContext, JobResult, JobRunner, JobRunnerHandle, JobSpec},
+    jobs::{JobContext, JobKind, JobResult, JobRunner, JobRunnerHandle, JobSpec},
     keymap::{GlobalKeyAction, KeyChord, global_action_for_key},
     screens::{
         admin::AdminScreen, auth::AuthScreen, doctor::DoctorScreen, help::HelpScreen,
@@ -33,15 +39,6 @@ use crate::{
         toast::{Toast, ToastLine, ToastQueue, ToastSeverity},
     },
 };
-
-#[cfg(feature = "ai")]
-use crate::jobs::JobKind;
-#[cfg(feature = "ai")]
-use crate::screens::search::SearchScreen;
-#[cfg(feature = "ai")]
-use crate::screens::wiki::WikiScreen;
-#[cfg(feature = "ai")]
-use crate::screens::{chat::ChatScreen, chat::chat_error_hint};
 
 const EVENT_TICK: Duration = Duration::from_millis(250);
 #[cfg(feature = "ai")]
@@ -600,9 +597,22 @@ impl App {
             _ => {}
         }
 
-        let JobResult::Error { error, .. } = job_result else {
+        let JobResult::Error { kind, error } = job_result else {
             return;
         };
+        // The Notes/Search screens already surface ReadNoteBody failures
+        // inline in their preview pane. Avoid a persistent red error toast
+        // that would re-fire on every navigation step (e.g. when an index
+        // row points at a file that no longer exists on disk) by flashing a
+        // single short Warn-severity message instead.
+        if *kind == JobKind::ReadNoteBody {
+            self.ctx.push_toast(Toast {
+                severity: ToastSeverity::Warn,
+                text: format!("note preview unavailable: {error}"),
+                ttl: 1,
+            });
+            return;
+        }
         self.ctx.push_toast(Toast {
             severity: ToastSeverity::Error,
             text: error.to_string(),

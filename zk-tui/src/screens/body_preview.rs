@@ -14,6 +14,7 @@ pub(super) enum BodyState {
         preview: String,
     },
     Error(String),
+    Missing(RelativePath),
 }
 
 impl BodyState {
@@ -33,6 +34,10 @@ impl BodyState {
         *self = Self::Error(error);
     }
 
+    pub(super) fn missing(&mut self, path: RelativePath) {
+        *self = Self::Missing(path);
+    }
+
     pub(super) fn is_loading_path(&self, path: &RelativePath) -> bool {
         matches!(self, Self::Loading(pending) if pending == path)
     }
@@ -49,6 +54,10 @@ impl BodyState {
                 .map(|line| Line::from(line.to_string()))
                 .collect(),
             Self::Error(error) => vec![Line::from(format!("Error: {error}"))],
+            Self::Missing(path) => vec![Line::from(format!(
+                "Note file is missing from disk: {}",
+                path.as_str()
+            ))],
         }
     }
 

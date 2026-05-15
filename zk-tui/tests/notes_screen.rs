@@ -9,7 +9,8 @@ use zk_tui::{
     app::{Screen, ScreenAction, ScreenCtx},
     event::{AppEvent, BackgroundResult},
     jobs::{
-        JobKind, JobResult, JobSpec, NoteBodyResult, NoteFilter, NoteListRequest, NoteListResult,
+        JobKind, JobResult, JobSpec, NoteBodyPreview, NoteBodyResult, NoteFilter, NoteListRequest,
+        NoteListResult,
     },
     screens::notes::NotesScreen,
 };
@@ -333,7 +334,7 @@ fn body_event(path: &str, preview: &str) -> AppEvent {
     AppEvent::Background(BackgroundResult::new(Box::new(JobResult::NoteBody(
         NoteBodyResult {
             path: RelativePath::new(path),
-            preview: preview.to_string(),
+            preview: NoteBodyPreview::Available(preview.to_string()),
         },
     ))))
 }
