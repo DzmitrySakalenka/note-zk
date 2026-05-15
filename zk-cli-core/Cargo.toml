@@ -10,9 +10,14 @@ workspace = true
 
 [dependencies]
 anyhow = "1.0.102"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "cookies", "rustls-tls"] }
 rusqlite = { version = "0.39.0", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
 url = "2"
 zk-app = { version = "0.1.0", path = "../zk-app" }
+zk-domain = { version = "0.1.0", path = "../zk-domain" }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6.5"

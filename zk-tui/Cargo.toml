@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.102"
+arboard = { version = "3.6.1", optional = true, default-features = false }
 crossterm = "0.28.1"
 ratatui = "0.29.0"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
@@ -24,6 +25,7 @@ toml = "1.1.2"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 url = "2"
+zeroize = "1.8.2"
 zk-ai = { version = "0.1.0", path = "../zk-ai", optional = true }
 zk-app = { version = "0.1.0", path = "../zk-app" }
 zk-cli-core = { version = "0.1.0", path = "../zk-cli-core" }
@@ -36,6 +38,7 @@ zk-vault = { version = "0.1.0", path = "../zk-vault" }
 default = []
 ai = ["dep:zk-ai", "zk-app/ai"]
 ai-local = ["ai"]
+clipboard = ["dep:arboard"]
 test-stub-ai = ["ai"]
 
 [dev-dependencies]

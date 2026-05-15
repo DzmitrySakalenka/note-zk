@@ -170,6 +170,7 @@ impl NotesScreen {
             | JobResult::RebuildIndex(_)
             | JobResult::Conflicts(_)
             | JobResult::ConflictResolution(_)
+            | JobResult::IssuedDeviceToken(_)
             | JobResult::Sync(_)
             | JobResult::TrashOutcome(_)
             | JobResult::Error { .. }

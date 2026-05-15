@@ -13,6 +13,7 @@ use ratatui::{
     layout::Rect,
     widgets::{Paragraph, Widget},
 };
+use zeroize::Zeroizing;
 use zk_domain::id::RelativePath;
 use zk_tui::{
     app::{App, Screen, ScreenAction, ScreenCtx},
@@ -20,9 +21,9 @@ use zk_tui::{
         AppEvent, AppEventSender, BackgroundResult, EventLoop, SystemClock, TerminalEventSource,
     },
     jobs::{
-        ConflictItemKind, ConflictResolutionStrategy, ConflictResolutionTarget, JobContext,
-        JobHandle, JobKind, JobResult, JobRunner, JobSpec, MockJob, NoteFilter, NoteListRequest,
-        ResolveConflictIntent, ScanArgs, SyncIntent,
+        ConflictItemKind, ConflictResolutionStrategy, ConflictResolutionTarget,
+        IssueDeviceTokenIntent, JobContext, JobHandle, JobKind, JobResult, JobRunner, JobSpec,
+        MockJob, NoteFilter, NoteListRequest, ResolveConflictIntent, ScanArgs, SyncIntent,
     },
 };
 
@@ -108,6 +109,16 @@ fn job_runner_public_api_is_reachable() {
         })
         .kind(),
         JobKind::ResolveConflict
+    );
+    assert_eq!(
+        JobSpec::IssueDeviceToken(IssueDeviceTokenIntent {
+            username: "admin".to_string(),
+            label: "laptop".to_string(),
+            scopes: vec![zk_domain::AuthScope::Sync],
+            password: Zeroizing::new("secret".to_string()),
+        })
+        .kind(),
+        JobKind::IssueDeviceToken
     );
     for intent in [
         SyncIntent::DeviceStatus,

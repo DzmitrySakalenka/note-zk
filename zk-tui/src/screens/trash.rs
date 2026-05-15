@@ -222,6 +222,7 @@ impl TrashScreen {
             | JobResult::NoteBody(_)
             | JobResult::Conflicts(_)
             | JobResult::ConflictResolution(_)
+            | JobResult::IssuedDeviceToken(_)
             | JobResult::Sync(_)
             | JobResult::Error { .. }
             | JobResult::Cancelled { .. }

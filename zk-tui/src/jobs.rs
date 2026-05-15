@@ -1,7 +1,7 @@
 //! Background job runner for facade work that must stay off the render thread.
 
 use std::{
-    fs,
+    fmt, fs,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -14,15 +14,17 @@ use std::{
 
 use anyhow::{Context, Result};
 use tokio::runtime::Runtime;
+use zeroize::Zeroizing;
 use zk_app::{
     BootstrapOutcome, DeviceId, DeviceSyncStatus, DoctorReport, EffectiveConfig, PullApplyOutcome,
     PurgeOutcome, PurgeRequest, PushApplyOutcome, RebuildOptions, RebuildOutcome,
     RegisterDeviceRequest, RestoreRequest, RestoredItem, ScanOutcome, StatusSummary, SyncContext,
     SystemClock, TrashRequest, TrashedItem,
 };
+use zk_cli_core::auth::IssueDeviceTokenInput;
 use zk_domain::{
-    ResolveConflictRequest, ResolveConflictResponse, WireConflictResolution, WireItemType,
-    id::RelativePath, sync::SyncStatus,
+    AuthScope, ResolveConflictRequest, ResolveConflictResponse, WireConflictResolution,
+    WireItemType, id::RelativePath, sync::SyncStatus,
 };
 use zk_index::{AssetRepo, ListedNote, NoteListQuery, NoteRepo, SyncStateRepo};
 use zk_sync::HttpTransport;
@@ -347,6 +349,59 @@ pub struct ConflictResolutionOutcome {
     pub new_server_revision: Option<i64>,
 }
 
+/// Device-token issuance requested by the Auth screen.
+#[derive(Clone, PartialEq, Eq)]
+pub struct IssueDeviceTokenIntent {
+    /// Admin login username.
+    pub username: String,
+    /// Operator-visible label for the issued token.
+    pub label: String,
+    /// Requested authorization scopes.
+    pub scopes: Vec<AuthScope>,
+    /// Admin login password, zeroized when dropped.
+    pub password: Zeroizing<String>,
+}
+
+impl fmt::Debug for IssueDeviceTokenIntent {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("IssueDeviceTokenIntent")
+            .field("username", &self.username)
+            .field("label", &self.label)
+            .field("scopes", &self.scopes)
+            .field("password", &"<REDACTED>")
+            .finish()
+    }
+}
+
+/// Result payload for one issued device token.
+#[derive(Clone, PartialEq, Eq)]
+pub struct IssuedDeviceTokenOutcome {
+    /// Operator-visible label copied from the request.
+    pub label: String,
+    /// Granted authorization scopes.
+    pub scopes: Vec<AuthScope>,
+    /// First six plaintext token characters for session-local audit display.
+    pub token_prefix: String,
+    /// One-time plaintext token, zeroized when the success modal is closed.
+    pub plaintext: Zeroizing<String>,
+    /// Creation timestamp formatted for display.
+    pub created_at: String,
+}
+
+impl fmt::Debug for IssuedDeviceTokenOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("IssuedDeviceTokenOutcome")
+            .field("label", &self.label)
+            .field("scopes", &self.scopes)
+            .field("token_prefix", &self.token_prefix)
+            .field("plaintext", &"<REDACTED>")
+            .field("created_at", &self.created_at)
+            .finish()
+    }
+}
+
 /// Work item accepted by the background runner.
 #[derive(Debug, Clone)]
 pub enum JobSpec {
@@ -369,6 +424,8 @@ pub enum JobSpec {
     ListConflicts,
     /// Resolves one local sync conflict through the configured server.
     ResolveConflict(ResolveConflictIntent),
+    /// Issues one device token through password-auth HTTP flow.
+    IssueDeviceToken(IssueDeviceTokenIntent),
     /// Runs one sync workflow.
     Sync(SyncIntent),
     /// Runs one trash, restore, or purge workflow.
@@ -391,6 +448,7 @@ impl JobSpec {
             Self::ReadNoteBody { .. } => JobKind::ReadNoteBody,
             Self::ListConflicts => JobKind::ListConflicts,
             Self::ResolveConflict(_) => JobKind::ResolveConflict,
+            Self::IssueDeviceToken(_) => JobKind::IssueDeviceToken,
             Self::Sync(_) => JobKind::Sync,
             Self::TrashAction(_) => JobKind::TrashAction,
             Self::Mock(_) => JobKind::Mock,
@@ -417,6 +475,8 @@ pub enum JobKind {
     ListConflicts,
     /// Explicit conflict-resolution job.
     ResolveConflict,
+    /// Device-token issuance job.
+    IssueDeviceToken,
     /// Sync workflow job.
     Sync,
     /// Trash, restore, or purge job.
@@ -477,6 +537,8 @@ pub enum JobResult {
     Conflicts(ConflictListResult),
     /// Explicit conflict resolution completed successfully.
     ConflictResolution(ConflictResolutionOutcome),
+    /// Device-token issuance completed successfully.
+    IssuedDeviceToken(IssuedDeviceTokenOutcome),
     /// Sync workflow completed successfully.
     Sync(SyncOutcome),
     /// Trash lifecycle workflow completed successfully.
@@ -657,6 +719,7 @@ fn execute_job(
         JobSpec::ReadNoteBody { path } => run_read_note_body_job(ctx, path),
         JobSpec::ListConflicts => run_list_conflicts_job(ctx),
         JobSpec::ResolveConflict(intent) => run_resolve_conflict_job(runtime, ctx, intent),
+        JobSpec::IssueDeviceToken(intent) => run_issue_device_token_job(ctx, intent),
         JobSpec::Sync(intent) => run_sync_job(runtime, ctx, intent),
         JobSpec::TrashAction(intent) => run_trash_job(ctx, intent),
         JobSpec::Mock(job) => Ok(run_mock_job(job, cancelled)),
@@ -839,6 +902,35 @@ fn resolution_outcome(
         accepted: response.accepted,
         new_server_revision: response.new_server_revision,
     }
+}
+
+fn run_issue_device_token_job(
+    ctx: &JobContext,
+    intent: IssueDeviceTokenIntent,
+) -> Result<JobResult> {
+    let server_url = ctx
+        .config
+        .sync
+        .server_url
+        .clone()
+        .context("server_url is required for auth screen")?;
+    let input = IssueDeviceTokenInput {
+        server_url,
+        username: intent.username,
+        label: intent.label,
+        device_id: ctx.config.sync.device_id.clone(),
+        scopes: intent.scopes,
+    };
+    let issued = zk_cli_core::auth::issue_device_token(&input, intent.password.as_str())
+        .context("while attempting to issue device token from TUI job")?;
+
+    Ok(JobResult::IssuedDeviceToken(IssuedDeviceTokenOutcome {
+        label: input.label,
+        scopes: issued.scopes,
+        token_prefix: issued.plaintext.chars().take(6).collect(),
+        plaintext: Zeroizing::new(issued.plaintext),
+        created_at: issued.created_at.to_rfc3339(),
+    }))
 }
 
 fn preview_note_file(vault_root: &Path, path: &RelativePath) -> String {

@@ -21,8 +21,9 @@ use crate::{
     jobs::{JobContext, JobResult, JobRunner, JobRunnerHandle, JobSpec},
     keymap::{GlobalKeyAction, KeyChord, global_action_for_key},
     screens::{
-        doctor::DoctorScreen, help::HelpScreen, notes::NotesScreen, overview::OverviewScreen,
-        resolve_conflict::ResolveConflictScreen, sync::SyncScreen, trash::TrashScreen,
+        auth::AuthScreen, doctor::DoctorScreen, help::HelpScreen, notes::NotesScreen,
+        overview::OverviewScreen, resolve_conflict::ResolveConflictScreen, sync::SyncScreen,
+        trash::TrashScreen,
     },
     terminal::TerminalGuard,
     theme::{Theme, ThemeKind},
@@ -655,7 +656,8 @@ fn default_screen(id: ScreenId) -> Box<dyn Screen> {
         ScreenId::Doctor => Box::<DoctorScreen>::default(),
         ScreenId::Trash => Box::<TrashScreen>::default(),
         ScreenId::Resolve => Box::<ResolveConflictScreen>::default(),
-        ScreenId::Auth | ScreenId::Admin => Box::new(PlaceholderScreen { id }),
+        ScreenId::Auth => Box::<AuthScreen>::default(),
+        ScreenId::Admin => Box::new(PlaceholderScreen { id }),
         #[cfg(feature = "ai")]
         ScreenId::Search | ScreenId::Chat | ScreenId::Wiki => Box::new(PlaceholderScreen { id }),
     }

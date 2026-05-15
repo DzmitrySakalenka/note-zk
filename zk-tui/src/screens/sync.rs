@@ -141,6 +141,7 @@ impl SyncScreen {
             | JobResult::NoteBody(_)
             | JobResult::Conflicts(_)
             | JobResult::ConflictResolution(_)
+            | JobResult::IssuedDeviceToken(_)
             | JobResult::TrashOutcome(_)
             | JobResult::Error { .. }
             | JobResult::Cancelled { .. }

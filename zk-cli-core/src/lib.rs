@@ -11,6 +11,8 @@ use std::{
 use anyhow::Context;
 use rusqlite::Connection;
 
+pub mod auth;
+
 pub use zk_app::{CliOverrides, EffectiveConfig};
 
 /// Error categories returned by shared bootstrap helpers.
