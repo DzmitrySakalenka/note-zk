@@ -20,7 +20,10 @@ use crate::{
     event::{AppEvent, BackgroundResult, EventLoop},
     jobs::{JobContext, JobResult, JobRunner, JobRunnerHandle, JobSpec},
     keymap::{GlobalKeyAction, KeyChord, global_action_for_key},
-    screens::{help::HelpScreen, notes::NotesScreen, overview::OverviewScreen, sync::SyncScreen},
+    screens::{
+        doctor::DoctorScreen, help::HelpScreen, notes::NotesScreen, overview::OverviewScreen,
+        sync::SyncScreen,
+    },
     terminal::TerminalGuard,
     theme::{Theme, ThemeKind},
     widgets::{
@@ -630,11 +633,10 @@ fn default_screen(id: ScreenId) -> Box<dyn Screen> {
         ScreenId::Overview => Box::<OverviewScreen>::default(),
         ScreenId::Notes => Box::<NotesScreen>::default(),
         ScreenId::Sync => Box::<SyncScreen>::default(),
-        ScreenId::Doctor
-        | ScreenId::Trash
-        | ScreenId::Resolve
-        | ScreenId::Auth
-        | ScreenId::Admin => Box::new(PlaceholderScreen { id }),
+        ScreenId::Doctor => Box::<DoctorScreen>::default(),
+        ScreenId::Trash | ScreenId::Resolve | ScreenId::Auth | ScreenId::Admin => {
+            Box::new(PlaceholderScreen { id })
+        }
         #[cfg(feature = "ai")]
         ScreenId::Search | ScreenId::Chat | ScreenId::Wiki => Box::new(PlaceholderScreen { id }),
     }

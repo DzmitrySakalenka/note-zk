@@ -94,6 +94,7 @@ fn job_runner_public_api_is_reachable() {
         .kind(),
         JobKind::ScanVault
     );
+    assert_eq!(JobSpec::RebuildIndex.kind(), JobKind::RebuildIndex);
     for intent in [
         SyncIntent::DeviceStatus,
         SyncIntent::Bootstrap,

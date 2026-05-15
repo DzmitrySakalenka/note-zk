@@ -136,6 +136,7 @@ impl SyncScreen {
             JobResult::ScanOutcome(_)
             | JobResult::Status(_)
             | JobResult::Doctor(_)
+            | JobResult::RebuildIndex(_)
             | JobResult::Notes(_)
             | JobResult::NoteBody(_)
             | JobResult::TrashOutcome(_)

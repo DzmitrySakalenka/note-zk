@@ -171,6 +171,7 @@ impl NotesScreen {
             JobResult::ScanOutcome(_)
             | JobResult::Status(_)
             | JobResult::Doctor(_)
+            | JobResult::RebuildIndex(_)
             | JobResult::Sync(_)
             | JobResult::TrashOutcome(_)
             | JobResult::Error { .. }

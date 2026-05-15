@@ -15,8 +15,9 @@ use anyhow::{Context, Result};
 use tokio::runtime::Runtime;
 use zk_app::{
     BootstrapOutcome, DeviceId, DeviceSyncStatus, DoctorReport, EffectiveConfig, PullApplyOutcome,
-    PurgeOutcome, PurgeRequest, PushApplyOutcome, RegisterDeviceRequest, RestoreRequest,
-    RestoredItem, ScanOutcome, StatusSummary, SyncContext, SystemClock, TrashRequest, TrashedItem,
+    PurgeOutcome, PurgeRequest, PushApplyOutcome, RebuildOptions, RebuildOutcome,
+    RegisterDeviceRequest, RestoreRequest, RestoredItem, ScanOutcome, StatusSummary, SyncContext,
+    SystemClock, TrashRequest, TrashedItem,
 };
 use zk_domain::id::RelativePath;
 use zk_index::{ListedNote, NoteListQuery, NoteRepo};
@@ -233,6 +234,8 @@ pub enum JobSpec {
     StatusSummary,
     /// Runs `zk_app::doctor_report`.
     DoctorReport,
+    /// Runs `zk_app::rebuild_index`.
+    RebuildIndex,
     /// Lists a page of notes from the local index.
     ListNotes(NoteListRequest),
     /// Reads one note body preview from disk.
@@ -257,6 +260,7 @@ impl JobSpec {
             Self::ScanVault(_) => JobKind::ScanVault,
             Self::StatusSummary => JobKind::StatusSummary,
             Self::DoctorReport => JobKind::DoctorReport,
+            Self::RebuildIndex => JobKind::RebuildIndex,
             Self::ListNotes(_) => JobKind::ListNotes,
             Self::ReadNoteBody { .. } => JobKind::ReadNoteBody,
             Self::Sync(_) => JobKind::Sync,
@@ -275,6 +279,8 @@ pub enum JobKind {
     StatusSummary,
     /// Doctor report job.
     DoctorReport,
+    /// Local index rebuild job.
+    RebuildIndex,
     /// Paginated note-list job.
     ListNotes,
     /// Note body preview job.
@@ -329,6 +335,8 @@ pub enum JobResult {
     Status(StatusSummary),
     /// Doctor report completed successfully.
     Doctor(DoctorReport),
+    /// Local index rebuild completed successfully.
+    RebuildIndex(RebuildOutcome),
     /// Notes page completed successfully.
     Notes(NoteListResult),
     /// Note body preview completed successfully.
@@ -495,6 +503,18 @@ fn execute_job(
             Ok(JobResult::Doctor(
                 zk_app::doctor_report(&ctx.vault_root, &ctx.config, &connection)
                     .context("while attempting to generate doctor report from TUI job")?,
+            ))
+        }
+        JobSpec::RebuildIndex => {
+            let mut connection = open_job_connection(ctx)?;
+            Ok(JobResult::RebuildIndex(
+                zk_app::rebuild_index(
+                    &ctx.vault_root,
+                    &ctx.config,
+                    &mut connection,
+                    RebuildOptions::default(),
+                )
+                .context("while attempting to rebuild index from TUI job")?,
             ))
         }
         JobSpec::ListNotes(request) => run_list_notes_job(ctx, request),
