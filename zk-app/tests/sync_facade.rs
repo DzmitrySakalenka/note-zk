@@ -16,10 +16,13 @@ use zk_domain::{
     config::FolderPolicy,
     id::{ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     note::NoteRecord,
-    sync::SyncStatus,
-    sync_state::DeviceRecord,
+    sync::{PendingOperation, SyncStatus},
+    sync_state::{DeleteRecord, DeleteRecordTarget, DeviceRecord, NoteSyncState},
 };
-use zk_index::{DeviceRepo, NoteRepo, SyncStateRepo, UpsertNoteParams, ensure_schema, open_memory};
+use zk_index::{
+    DeleteRecordRepo, DeviceRepo, NoteRepo, SyncStateRepo, UpsertNoteParams, ensure_schema,
+    open_memory,
+};
 use zk_sync::{
     SyncError,
     bootstrap::RemoteBootstrapProbe,
@@ -106,6 +109,25 @@ fn insert_note(conn: &rusqlite::Connection, record: &NoteRecord) {
     .expect("note should be inserted");
 }
 
+fn note_sync_state(
+    note_id: &str,
+    sync_status: SyncStatus,
+    pending_operation: Option<PendingOperation>,
+) -> NoteSyncState {
+    NoteSyncState {
+        item_id: NoteId::new(note_id),
+        device_id: device_id(),
+        last_local_hash: Some(ContentHash::from_bytes(note_id.as_bytes())),
+        last_synced_hash: None,
+        last_synced_path: Some(RelativePath::new("notes/status.md")),
+        last_known_server_revision: Some(ServerRevision::new(3)),
+        sync_status,
+        last_sync_attempt_at: Some("2026-04-21T00:00:00Z".to_string()),
+        last_sync_error: None,
+        pending_operation,
+    }
+}
+
 fn write_vault_file(vault_root: &std::path::Path, relative_path: &str, bytes: &[u8]) {
     let absolute_path = vault_root.join(relative_path);
     if let Some(parent) = absolute_path.parent() {
@@ -149,6 +171,9 @@ fn get_device_sync_status_reports_absent_registered_and_cursor_states() {
         DeviceSyncStatus {
             registered: false,
             last_sync_cursor: None,
+            last_sync_at: None,
+            pending_push_count: 0,
+            conflict_count: 0,
         }
     );
 
@@ -160,6 +185,9 @@ fn get_device_sync_status_reports_absent_registered_and_cursor_states() {
         DeviceSyncStatus {
             registered: true,
             last_sync_cursor: None,
+            last_sync_at: Some("2026-04-22T18:07:33Z".to_string()),
+            pending_push_count: 0,
+            conflict_count: 0,
         }
     );
 
@@ -172,6 +200,61 @@ fn get_device_sync_status_reports_absent_registered_and_cursor_states() {
         DeviceSyncStatus {
             registered: true,
             last_sync_cursor: Some(42),
+            last_sync_at: Some("2026-04-22T18:07:33Z".to_string()),
+            pending_push_count: 0,
+            conflict_count: 0,
+        }
+    );
+}
+
+#[test]
+fn get_device_sync_status_reports_pending_push_and_conflict_counts() {
+    let connection = open_sync_connection();
+    let pending_note = base_note(
+        &NoteId::new("01TGTUI12PENDING000000001"),
+        "notes/status.md",
+        b"pending",
+    );
+    insert_note(&connection, &pending_note);
+    DeviceRepo::upsert_device(&connection, &device_record(Some(9))).expect("device should insert");
+    SyncStateRepo::upsert_note_sync_state(
+        &connection,
+        &note_sync_state(
+            "01TGTUI12PENDING000000001",
+            SyncStatus::PendingUpload,
+            Some(PendingOperation::Create),
+        ),
+    )
+    .expect("pending note state should insert");
+    SyncStateRepo::upsert_note_sync_state(
+        &connection,
+        &note_sync_state("01TGTUI12CONFLICT00000001", SyncStatus::Conflict, None),
+    )
+    .expect("conflict note state should insert");
+    DeleteRecordRepo::insert_delete_record(
+        &connection,
+        &DeleteRecord {
+            target: DeleteRecordTarget::Note(NoteId::new("01TGTUI12DELETE0000000001")),
+            original_path: RelativePath::new("notes/deleted.md"),
+            trashed_at: "2026-04-18T00:00:00Z".to_string(),
+            retention_until: "2026-04-19T00:00:00Z".to_string(),
+            deleted_at: Some("2026-04-20T00:00:00Z".to_string()),
+            delete_revision: None,
+        },
+    )
+    .expect("delete record should insert");
+
+    let status = get_device_sync_status(&connection, &device_id())
+        .expect("device status query should succeed");
+
+    assert_eq!(
+        status,
+        DeviceSyncStatus {
+            registered: true,
+            last_sync_cursor: Some(9),
+            last_sync_at: Some("2026-04-22T18:07:33Z".to_string()),
+            pending_push_count: 2,
+            conflict_count: 1,
         }
     );
 }

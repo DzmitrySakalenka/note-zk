@@ -21,7 +21,7 @@ use zk_tui::{
     },
     jobs::{
         JobContext, JobHandle, JobKind, JobResult, JobRunner, JobSpec, MockJob, NoteFilter,
-        NoteListRequest, ScanArgs,
+        NoteListRequest, ScanArgs, SyncIntent,
     },
 };
 
@@ -94,6 +94,15 @@ fn job_runner_public_api_is_reachable() {
         .kind(),
         JobKind::ScanVault
     );
+    for intent in [
+        SyncIntent::DeviceStatus,
+        SyncIntent::Bootstrap,
+        SyncIntent::Push,
+        SyncIntent::Pull,
+        SyncIntent::FullCycle,
+    ] {
+        assert_eq!(JobSpec::Sync(intent).kind(), JobKind::Sync);
+    }
 }
 
 #[test]

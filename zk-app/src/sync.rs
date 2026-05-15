@@ -7,7 +7,7 @@ use zk_domain::{
     id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath},
     sync_state::DeviceRecord,
 };
-use zk_index::{AssetRepo, DeviceRepo, NoteRepo};
+use zk_index::{AssetRepo, DeviceRepo, IndexError, NoteRepo};
 use zk_sync::{
     SyncError,
     bootstrap::{
@@ -25,6 +25,43 @@ use zk_vault::VaultRoot;
 
 use crate::{AppError, Clock, Result};
 
+const COUNT_PENDING_NOTE_PUSH_SQL: &str = r"
+SELECT COUNT(*)
+FROM note_sync_state AS state
+JOIN notes_index AS note ON note.note_id = state.note_id
+WHERE state.device_id = ?1
+  AND state.sync_status != 'conflict'
+  AND note.is_deleted = 0
+  AND (
+      state.pending_operation IS NOT NULL
+      OR state.sync_status IN ('modified_local', 'pending_upload', 'error')
+      OR state.last_synced_hash IS NULL
+      OR state.last_local_hash IS NOT state.last_synced_hash
+      OR state.last_synced_path IS NOT note.current_path
+  )
+";
+const COUNT_PENDING_ASSET_PUSH_SQL: &str = r"
+SELECT COUNT(*)
+FROM asset_sync_state AS state
+JOIN assets_index AS asset ON asset.asset_id = state.asset_id
+WHERE state.device_id = ?1
+  AND state.sync_status != 'conflict'
+  AND asset.is_deleted = 0
+  AND (
+      state.pending_operation IS NOT NULL
+      OR state.sync_status IN ('modified_local', 'pending_upload', 'error')
+      OR state.last_synced_hash IS NULL
+      OR state.last_local_hash IS NOT state.last_synced_hash
+      OR state.last_synced_path IS NOT asset.current_path
+  )
+";
+const COUNT_PENDING_DELETE_PUSH_SQL: &str =
+    "SELECT COUNT(*) FROM delete_records WHERE deleted_at IS NOT NULL AND delete_revision IS NULL";
+const COUNT_CONFLICT_NOTE_SQL: &str =
+    "SELECT COUNT(*) FROM note_sync_state WHERE device_id = ?1 AND sync_status = 'conflict'";
+const COUNT_CONFLICT_ASSET_SQL: &str =
+    "SELECT COUNT(*) FROM asset_sync_state WHERE device_id = ?1 AND sync_status = 'conflict'";
+
 /// Summary returned from the bootstrap facade entry point.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BootstrapOutcome {
@@ -35,12 +72,18 @@ pub enum BootstrapOutcome {
 }
 
 /// Local sync registration state for one device.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceSyncStatus {
     /// Whether the local device row already exists.
     pub registered: bool,
     /// Last remote event cursor applied by this device, when present.
     pub last_sync_cursor: Option<i64>,
+    /// Last local sync registration/update timestamp for this device.
+    pub last_sync_at: Option<String>,
+    /// Local items that appear to have push work pending.
+    pub pending_push_count: u32,
+    /// Local items currently marked as conflicts.
+    pub conflict_count: u32,
 }
 
 pub use zk_sync::{pull::PullApplyOutcome, push::PushApplyOutcome};
@@ -100,11 +143,98 @@ pub async fn register_device(
 /// Returns [`AppError`] when the local index query fails.
 pub fn get_device_sync_status(conn: &Connection, device_id: &DeviceId) -> Result<DeviceSyncStatus> {
     let device = DeviceRepo::get_device(conn, device_id)?;
+    let pending_push_count = count_pending_push_items(conn, device_id)?;
+    let conflict_count = add_status_counts(
+        query_status_count(
+            conn,
+            COUNT_CONFLICT_NOTE_SQL,
+            device_id,
+            "count conflict notes",
+        )?,
+        query_status_count(
+            conn,
+            COUNT_CONFLICT_ASSET_SQL,
+            device_id,
+            "count conflict assets",
+        )?,
+    )?;
 
     Ok(DeviceSyncStatus {
         registered: device.is_some(),
-        last_sync_cursor: device.and_then(|record| record.last_sync_cursor),
+        last_sync_cursor: device.as_ref().and_then(|record| record.last_sync_cursor),
+        last_sync_at: device.map(|record| record.last_seen_at),
+        pending_push_count,
+        conflict_count,
     })
+}
+
+fn count_pending_push_items(conn: &Connection, device_id: &DeviceId) -> Result<u32> {
+    let note_count = query_status_count(
+        conn,
+        COUNT_PENDING_NOTE_PUSH_SQL,
+        device_id,
+        "count pending note push items",
+    )?;
+    let asset_count = query_status_count(
+        conn,
+        COUNT_PENDING_ASSET_PUSH_SQL,
+        device_id,
+        "count pending asset push items",
+    )?;
+    let delete_count = query_unscoped_status_count(
+        conn,
+        COUNT_PENDING_DELETE_PUSH_SQL,
+        "count pending delete push items",
+    )?;
+
+    add_status_counts(add_status_counts(note_count, asset_count)?, delete_count)
+}
+
+fn query_status_count(
+    conn: &Connection,
+    sql: &str,
+    device_id: &DeviceId,
+    context: &str,
+) -> Result<u32> {
+    let count = conn
+        .query_row(sql, [device_id.as_str()], |row| row.get::<_, i64>(0))
+        .map_err(|source| {
+            AppError::Index(IndexError::Sqlite {
+                source,
+                context: context.to_string(),
+            })
+        })?;
+
+    checked_status_count(context, count)
+}
+
+fn query_unscoped_status_count(conn: &Connection, sql: &str, context: &str) -> Result<u32> {
+    let count = conn
+        .query_row(sql, [], |row| row.get::<_, i64>(0))
+        .map_err(|source| {
+            AppError::Index(IndexError::Sqlite {
+                source,
+                context: context.to_string(),
+            })
+        })?;
+
+    checked_status_count(context, count)
+}
+
+fn checked_status_count(context: &str, count: i64) -> Result<u32> {
+    u32::try_from(count).map_err(|_| {
+        AppError::Index(IndexError::Sqlite {
+            source: rusqlite::Error::IntegralValueOutOfRange(0, count),
+            context: context.to_string(),
+        })
+    })
+}
+
+fn add_status_counts(left: u32, right: u32) -> Result<u32> {
+    left.checked_add(right)
+        .ok_or(AppError::StatusCountOverflow {
+            field: "device_sync_status",
+        })
 }
 
 /// Plans local changes, pushes them, and applies the remote push response locally.

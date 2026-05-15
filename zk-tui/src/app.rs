@@ -20,7 +20,7 @@ use crate::{
     event::{AppEvent, BackgroundResult, EventLoop},
     jobs::{JobContext, JobResult, JobRunner, JobRunnerHandle, JobSpec},
     keymap::{GlobalKeyAction, KeyChord, global_action_for_key},
-    screens::{help::HelpScreen, notes::NotesScreen, overview::OverviewScreen},
+    screens::{help::HelpScreen, notes::NotesScreen, overview::OverviewScreen, sync::SyncScreen},
     terminal::TerminalGuard,
     theme::{Theme, ThemeKind},
     widgets::{
@@ -629,8 +629,8 @@ fn default_screen(id: ScreenId) -> Box<dyn Screen> {
     match id {
         ScreenId::Overview => Box::<OverviewScreen>::default(),
         ScreenId::Notes => Box::<NotesScreen>::default(),
-        ScreenId::Sync
-        | ScreenId::Doctor
+        ScreenId::Sync => Box::<SyncScreen>::default(),
+        ScreenId::Doctor
         | ScreenId::Trash
         | ScreenId::Resolve
         | ScreenId::Auth
