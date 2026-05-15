@@ -120,6 +120,37 @@ fn job_runner_public_api_is_reachable() {
         .kind(),
         JobKind::IssueDeviceToken
     );
+    assert_eq!(JobSpec::AdminBackupList.kind(), JobKind::AdminBackupList);
+    assert_eq!(
+        JobSpec::AdminBackupManifest {
+            backup_id: "01HZZZZZZZZZZZZZZZZZZZZZZZ".to_string(),
+        }
+        .kind(),
+        JobKind::AdminBackupManifest
+    );
+    assert_eq!(
+        JobSpec::AdminBackupTrigger.kind(),
+        JobKind::AdminBackupTrigger
+    );
+    assert_eq!(
+        JobSpec::AdminAiJobsList {
+            status: None,
+            limit: None,
+        }
+        .kind(),
+        JobKind::AdminAiJobsList
+    );
+    assert_eq!(
+        JobSpec::AdminAiCancel {
+            job_id: "01JAR5A3PJEZ3SKG67PN8N6S6S".to_string(),
+        }
+        .kind(),
+        JobKind::AdminAiCancel
+    );
+    assert_eq!(
+        JobSpec::AdminAiRecomputeVault.kind(),
+        JobKind::AdminAiRecomputeVault
+    );
     for intent in [
         SyncIntent::DeviceStatus,
         SyncIntent::Bootstrap,

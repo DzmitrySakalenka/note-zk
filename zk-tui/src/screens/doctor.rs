@@ -192,6 +192,12 @@ impl DoctorScreen {
             | JobResult::Conflicts(_)
             | JobResult::ConflictResolution(_)
             | JobResult::IssuedDeviceToken(_)
+            | JobResult::AdminBackups(_)
+            | JobResult::AdminBackupManifest(_)
+            | JobResult::AdminBackupTriggered(_)
+            | JobResult::AdminAiJobs(_)
+            | JobResult::AdminAiCancelled { .. }
+            | JobResult::AdminAiRecomputed(_)
             | JobResult::Sync(_)
             | JobResult::TrashOutcome(_)
             | JobResult::Error { .. }

@@ -1,5 +1,6 @@
 //! Built-in TUI screens and modal overlays.
 
+pub mod admin;
 pub mod auth;
 pub mod doctor;
 pub mod help;

@@ -21,9 +21,9 @@ use crate::{
     jobs::{JobContext, JobResult, JobRunner, JobRunnerHandle, JobSpec},
     keymap::{GlobalKeyAction, KeyChord, global_action_for_key},
     screens::{
-        auth::AuthScreen, doctor::DoctorScreen, help::HelpScreen, notes::NotesScreen,
-        overview::OverviewScreen, resolve_conflict::ResolveConflictScreen, sync::SyncScreen,
-        trash::TrashScreen,
+        admin::AdminScreen, auth::AuthScreen, doctor::DoctorScreen, help::HelpScreen,
+        notes::NotesScreen, overview::OverviewScreen, resolve_conflict::ResolveConflictScreen,
+        sync::SyncScreen, trash::TrashScreen,
     },
     terminal::TerminalGuard,
     theme::{Theme, ThemeKind},
@@ -657,16 +657,18 @@ fn default_screen(id: ScreenId) -> Box<dyn Screen> {
         ScreenId::Trash => Box::<TrashScreen>::default(),
         ScreenId::Resolve => Box::<ResolveConflictScreen>::default(),
         ScreenId::Auth => Box::<AuthScreen>::default(),
-        ScreenId::Admin => Box::new(PlaceholderScreen { id }),
+        ScreenId::Admin => Box::<AdminScreen>::default(),
         #[cfg(feature = "ai")]
         ScreenId::Search | ScreenId::Chat | ScreenId::Wiki => Box::new(PlaceholderScreen { id }),
     }
 }
 
+#[cfg(feature = "ai")]
 struct PlaceholderScreen {
     id: ScreenId,
 }
 
+#[cfg(feature = "ai")]
 impl Screen for PlaceholderScreen {
     fn title(&self) -> &str {
         self.id.title()

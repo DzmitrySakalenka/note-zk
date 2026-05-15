@@ -21,9 +21,15 @@ use zk_app::{
     RegisterDeviceRequest, RestoreRequest, RestoredItem, ScanOutcome, StatusSummary, SyncContext,
     SystemClock, TrashRequest, TrashedItem,
 };
-use zk_cli_core::auth::IssueDeviceTokenInput;
+use zk_cli_core::{
+    admin::{
+        AdminAiRecomputeRequest, AdminClient, BackupManifest, CancelResponse, ListBackupsResponse,
+        ListedJob, RecomputeResponse,
+    },
+    auth::IssueDeviceTokenInput,
+};
 use zk_domain::{
-    AuthScope, ResolveConflictRequest, ResolveConflictResponse, WireConflictResolution,
+    AuthScope, JobId, ResolveConflictRequest, ResolveConflictResponse, WireConflictResolution,
     WireItemType, id::RelativePath, sync::SyncStatus,
 };
 use zk_index::{AssetRepo, ListedNote, NoteListQuery, NoteRepo, SyncStateRepo};
@@ -36,6 +42,7 @@ const MOCK_CANCEL_POLL: Duration = Duration::from_millis(10);
 pub const NOTE_LIST_PAGE_SIZE: u32 = 200;
 const NOTE_BODY_PREVIEW_LINES: usize = 200;
 const CONFLICT_PREVIEW_LINES: usize = 200;
+const ADMIN_BACKUP_WAIT_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Immutable context cloned into the background worker at startup.
 #[derive(Debug, Clone)]
@@ -426,6 +433,29 @@ pub enum JobSpec {
     ResolveConflict(ResolveConflictIntent),
     /// Issues one device token through password-auth HTTP flow.
     IssueDeviceToken(IssueDeviceTokenIntent),
+    /// Lists completed and in-flight server backups.
+    AdminBackupList,
+    /// Loads one backup manifest.
+    AdminBackupManifest {
+        /// Full backup id to inspect.
+        backup_id: String,
+    },
+    /// Triggers one server-side backup and waits for its manifest.
+    AdminBackupTrigger,
+    /// Lists server-side AI jobs.
+    AdminAiJobsList {
+        /// Optional status filter accepted by the admin HTTP API.
+        status: Option<String>,
+        /// Optional maximum row count.
+        limit: Option<u32>,
+    },
+    /// Cancels one pending AI job.
+    AdminAiCancel {
+        /// AI job id to cancel.
+        job_id: String,
+    },
+    /// Enqueues one vault-scope AI recompute job.
+    AdminAiRecomputeVault,
     /// Runs one sync workflow.
     Sync(SyncIntent),
     /// Runs one trash, restore, or purge workflow.
@@ -449,6 +479,12 @@ impl JobSpec {
             Self::ListConflicts => JobKind::ListConflicts,
             Self::ResolveConflict(_) => JobKind::ResolveConflict,
             Self::IssueDeviceToken(_) => JobKind::IssueDeviceToken,
+            Self::AdminBackupList => JobKind::AdminBackupList,
+            Self::AdminBackupManifest { .. } => JobKind::AdminBackupManifest,
+            Self::AdminBackupTrigger => JobKind::AdminBackupTrigger,
+            Self::AdminAiJobsList { .. } => JobKind::AdminAiJobsList,
+            Self::AdminAiCancel { .. } => JobKind::AdminAiCancel,
+            Self::AdminAiRecomputeVault => JobKind::AdminAiRecomputeVault,
             Self::Sync(_) => JobKind::Sync,
             Self::TrashAction(_) => JobKind::TrashAction,
             Self::Mock(_) => JobKind::Mock,
@@ -477,6 +513,18 @@ pub enum JobKind {
     ResolveConflict,
     /// Device-token issuance job.
     IssueDeviceToken,
+    /// Admin backup list job.
+    AdminBackupList,
+    /// Admin backup manifest job.
+    AdminBackupManifest,
+    /// Admin backup trigger job.
+    AdminBackupTrigger,
+    /// Admin AI jobs list job.
+    AdminAiJobsList,
+    /// Admin AI job cancellation job.
+    AdminAiCancel,
+    /// Admin AI vault recompute job.
+    AdminAiRecomputeVault,
     /// Sync workflow job.
     Sync,
     /// Trash, restore, or purge job.
@@ -539,6 +587,23 @@ pub enum JobResult {
     ConflictResolution(ConflictResolutionOutcome),
     /// Device-token issuance completed successfully.
     IssuedDeviceToken(IssuedDeviceTokenOutcome),
+    /// Server backups list completed successfully.
+    AdminBackups(ListBackupsResponse),
+    /// Backup manifest load completed successfully.
+    AdminBackupManifest(BackupManifest),
+    /// Backup trigger-and-wait completed successfully.
+    AdminBackupTriggered(BackupManifest),
+    /// Server AI jobs list completed successfully.
+    AdminAiJobs(Vec<ListedJob>),
+    /// AI job cancellation request completed successfully.
+    AdminAiCancelled {
+        /// AI job id submitted for cancellation.
+        job_id: String,
+        /// Server cancellation response.
+        response: CancelResponse,
+    },
+    /// AI vault recompute request completed successfully.
+    AdminAiRecomputed(RecomputeResponse),
     /// Sync workflow completed successfully.
     Sync(SyncOutcome),
     /// Trash lifecycle workflow completed successfully.
@@ -720,6 +785,16 @@ fn execute_job(
         JobSpec::ListConflicts => run_list_conflicts_job(ctx),
         JobSpec::ResolveConflict(intent) => run_resolve_conflict_job(runtime, ctx, intent),
         JobSpec::IssueDeviceToken(intent) => run_issue_device_token_job(ctx, intent),
+        JobSpec::AdminBackupList => run_admin_backup_list_job(ctx),
+        JobSpec::AdminBackupManifest { backup_id } => {
+            run_admin_backup_manifest_job(ctx, &backup_id)
+        }
+        JobSpec::AdminBackupTrigger => run_admin_backup_trigger_job(ctx),
+        JobSpec::AdminAiJobsList { status, limit } => {
+            run_admin_ai_jobs_list_job(ctx, status.as_deref(), limit)
+        }
+        JobSpec::AdminAiCancel { job_id } => run_admin_ai_cancel_job(ctx, &job_id),
+        JobSpec::AdminAiRecomputeVault => run_admin_ai_recompute_vault_job(ctx),
         JobSpec::Sync(intent) => run_sync_job(runtime, ctx, intent),
         JobSpec::TrashAction(intent) => run_trash_job(ctx, intent),
         JobSpec::Mock(job) => Ok(run_mock_job(job, cancelled)),
@@ -931,6 +1006,85 @@ fn run_issue_device_token_job(
         plaintext: Zeroizing::new(issued.plaintext),
         created_at: issued.created_at.to_rfc3339(),
     }))
+}
+
+fn run_admin_backup_list_job(ctx: &JobContext) -> Result<JobResult> {
+    let client = admin_client_from_context(ctx)?;
+    let backups = client
+        .list_backups()
+        .context("while attempting to list admin backups from TUI job")?;
+
+    Ok(JobResult::AdminBackups(backups))
+}
+
+fn run_admin_backup_manifest_job(ctx: &JobContext, backup_id: &str) -> Result<JobResult> {
+    let client = admin_client_from_context(ctx)?;
+    let manifest = client
+        .get_manifest(backup_id)
+        .context("while attempting to load admin backup manifest from TUI job")?
+        .context("backup not found")?;
+
+    Ok(JobResult::AdminBackupManifest(manifest))
+}
+
+fn run_admin_backup_trigger_job(ctx: &JobContext) -> Result<JobResult> {
+    let client = admin_client_from_context(ctx)?;
+    let manifest = client
+        .trigger_backup_and_wait(ADMIN_BACKUP_WAIT_TIMEOUT)
+        .context("while attempting to trigger admin backup from TUI job")?;
+
+    Ok(JobResult::AdminBackupTriggered(manifest))
+}
+
+fn run_admin_ai_jobs_list_job(
+    ctx: &JobContext,
+    status: Option<&str>,
+    limit: Option<u32>,
+) -> Result<JobResult> {
+    let client = admin_client_from_context(ctx)?;
+    let jobs = client
+        .list_ai_jobs(status, limit)
+        .context("while attempting to list admin AI jobs from TUI job")?;
+
+    Ok(JobResult::AdminAiJobs(jobs))
+}
+
+fn run_admin_ai_cancel_job(ctx: &JobContext, job_id: &str) -> Result<JobResult> {
+    let client = admin_client_from_context(ctx)?;
+    let parsed_job_id = JobId::new(job_id).context("while attempting to parse admin AI job id")?;
+    let response = client
+        .cancel_ai_job(&parsed_job_id)
+        .context("while attempting to cancel admin AI job from TUI job")?;
+
+    Ok(JobResult::AdminAiCancelled {
+        job_id: job_id.to_string(),
+        response,
+    })
+}
+
+fn run_admin_ai_recompute_vault_job(ctx: &JobContext) -> Result<JobResult> {
+    let client = admin_client_from_context(ctx)?;
+    let response = client
+        .recompute_ai(&AdminAiRecomputeRequest::Vault)
+        .context("while attempting to enqueue admin AI vault recompute from TUI job")?;
+
+    Ok(JobResult::AdminAiRecomputed(response))
+}
+
+fn admin_client_from_context(ctx: &JobContext) -> Result<AdminClient> {
+    let server_url = ctx
+        .config
+        .sync
+        .server_url
+        .clone()
+        .context("server_url is required for admin screen")?;
+    let token_env = ctx.config.sync.bearer_token_env.clone();
+    let bearer_token = std::env::var(&token_env).map_err(|_| {
+        anyhow::anyhow!("environment variable {token_env} is required for admin screen")
+    })?;
+
+    AdminClient::new(server_url, bearer_token, token_env)
+        .context("while attempting to construct admin HTTP client for TUI job")
 }
 
 fn preview_note_file(vault_root: &Path, path: &RelativePath) -> String {
