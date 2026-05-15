@@ -215,6 +215,8 @@ impl TrashScreen {
                 push_toast(ctx, ToastSeverity::Warn, "trash action cancelled");
                 ScreenAction::Stay
             }
+            #[cfg(feature = "ai")]
+            JobResult::SemanticSearch(_) => ScreenAction::Stay,
             JobResult::Status(_)
             | JobResult::Doctor(_)
             | JobResult::RebuildIndex(_)

@@ -65,6 +65,11 @@ impl KeyChord {
         }
     }
 
+    #[cfg(feature = "ai")]
+    pub(crate) const fn code(self) -> KeyCode {
+        self.code
+    }
+
     /// Formats the chord using the key notation used by the TUI help screen.
     #[must_use]
     pub fn label(self) -> String {

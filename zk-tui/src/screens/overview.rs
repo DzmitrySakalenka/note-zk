@@ -137,6 +137,8 @@ impl OverviewScreen {
             JobResult::Status(summary) => {
                 self.state = OverviewState::Loaded(OverviewSnapshot::new(summary.clone(), ctx));
             }
+            #[cfg(feature = "ai")]
+            JobResult::SemanticSearch(_) => {}
             JobResult::Error { kind, error } if *kind == JobKind::StatusSummary => {
                 self.state = OverviewState::Error(error.to_string());
             }

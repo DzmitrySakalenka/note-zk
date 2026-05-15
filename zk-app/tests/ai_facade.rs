@@ -92,6 +92,40 @@ async fn connected_mode_returns_hits_from_http_transport() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn connected_search_outcome_reports_connected_mode() {
+    let server = MockServer::start().await;
+    let facade = AiFacade::new(AiFacadeDeps {
+        http: Some(Arc::new(http_transport(&server, "shared-token"))),
+        local_selector: None,
+        local_repo: None,
+        mode: ExecutionMode::Connected,
+        ..AiFacadeDeps::default()
+    })
+    .expect("AI facade should construct");
+
+    Mock::given(method("POST"))
+        .and(path("/search/semantic"))
+        .respond_with(single_remote_hit_response("connected hit"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let outcome = facade
+        .semantic_search_with_status(SemanticSearchRequest {
+            query: QUERY_TEXT.to_string(),
+            top_k: 1,
+            mode_override: None,
+        })
+        .await
+        .expect("connected semantic search should succeed");
+
+    assert_eq!(outcome.effective_mode, ExecutionMode::Connected);
+    assert_eq!(outcome.hits.len(), 1);
+    assert_eq!(outcome.hits[0].snippet, "connected hit");
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn hybrid_mode_falls_back_to_local_repo_when_http_fails() {
     let server = MockServer::start().await;
     let local_repo = seeded_local_repo().await;
@@ -123,6 +157,34 @@ async fn hybrid_mode_falls_back_to_local_repo_when_http_fails() {
     assert_eq!(hits[0].note_id, NoteId::new(NOTE_ID));
     assert_eq!(hits[0].chunk_id, ChunkId::new(FIRST_CHUNK_ID));
     assert_eq!(hits[0].snippet, "Exact semantic topic sentence.");
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn hybrid_search_outcome_reports_offline_after_probe_failure() {
+    let server = MockServer::start().await;
+    let local_repo = seeded_local_repo().await;
+    let facade = hybrid_facade(&server, local_repo);
+
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let outcome = facade
+        .semantic_search_with_status(SemanticSearchRequest {
+            query: QUERY_TEXT.to_string(),
+            top_k: 1,
+            mode_override: None,
+        })
+        .await
+        .expect("hybrid semantic search should use offline path");
+
+    assert_eq!(outcome.effective_mode, ExecutionMode::Offline);
+    assert_eq!(outcome.hits.len(), 1);
+    assert_eq!(outcome.hits[0].snippet, "Exact semantic topic sentence.");
     server.verify().await;
 }
 

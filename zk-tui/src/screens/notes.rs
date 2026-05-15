@@ -1,7 +1,5 @@
 //! Read-only note browser screen.
 
-use std::collections::VecDeque;
-
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
     Frame,
@@ -9,7 +7,6 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
 };
-use zk_domain::id::RelativePath;
 use zk_index::ListedNote;
 
 use crate::{
@@ -20,10 +17,10 @@ use crate::{
         JobKind, JobResult, JobSpec, NoteBodyResult, NoteFilter, NoteListRequest, NoteListResult,
     },
     keymap::KeyChord,
+    screens::body_preview::{BodyCache, BodyState},
     widgets::toast::{Toast, ToastSeverity},
 };
 
-const BODY_CACHE_CAPACITY: usize = 16;
 const DEFAULT_HALF_PAGE: usize = 5;
 const NOTES_BINDINGS: &[(KeyChord, &str)] = &[
     (KeyChord::char('j'), "next note"),
@@ -55,6 +52,7 @@ pub struct NotesScreen {
     list_error: Option<String>,
     body: BodyState,
     body_cache: BodyCache,
+    seeded_note: bool,
     filter_input: String,
     filter_draft: Option<String>,
     last_list_height: usize,
@@ -70,8 +68,9 @@ impl Default for NotesScreen {
             select_last_after_load: false,
             list_loading: false,
             list_error: None,
-            body: BodyState::Empty,
+            body: BodyState::default(),
             body_cache: BodyCache::default(),
+            seeded_note: false,
             filter_input: String::new(),
             filter_draft: None,
             last_list_height: DEFAULT_HALF_PAGE * 2,
@@ -79,28 +78,26 @@ impl Default for NotesScreen {
     }
 }
 
-#[derive(Default)]
-enum BodyState {
-    #[default]
-    Empty,
-    Loading(RelativePath),
-    Loaded {
-        preview: String,
-    },
-    Error(String),
-}
-
-#[derive(Default)]
-struct BodyCache {
-    entries: VecDeque<(RelativePath, String)>,
-}
-
 impl Screen for NotesScreen {
     fn title(&self) -> &'static str {
         "Notes"
     }
 
-    fn on_enter(&mut self, _ctx: &mut ScreenCtx) -> ScreenAction {
+    fn on_enter(&mut self, ctx: &mut ScreenCtx) -> ScreenAction {
+        if let Some(note) = ctx.pending_note_seed.take() {
+            self.request = NoteListRequest::default();
+            self.notes = vec![note];
+            self.selected = 0;
+            self.first_visible = 0;
+            self.select_last_after_load = false;
+            self.list_loading = false;
+            self.list_error = None;
+            self.seeded_note = true;
+            self.filter_input.clear();
+            self.filter_draft = None;
+            return self.load_selected_body();
+        }
+
         self.request_current_page()
     }
 
@@ -161,9 +158,11 @@ impl NotesScreen {
                 ScreenAction::Stay
             }
             JobResult::Error { kind, error } if *kind == JobKind::ReadNoteBody => {
-                self.body = BodyState::Error(error.to_string());
+                self.body.error(error.to_string());
                 ScreenAction::Stay
             }
+            #[cfg(feature = "ai")]
+            JobResult::SemanticSearch(_) => ScreenAction::Stay,
             JobResult::ScanOutcome(_)
             | JobResult::Status(_)
             | JobResult::Doctor(_)
@@ -202,7 +201,7 @@ impl NotesScreen {
         self.first_visible = 0;
 
         if self.notes.is_empty() {
-            self.body = BodyState::Empty;
+            self.body.empty();
             ScreenAction::Stay
         } else {
             self.load_selected_body()
@@ -210,17 +209,13 @@ impl NotesScreen {
     }
 
     fn handle_body_result(&mut self, result: &NoteBodyResult) {
-        let is_pending_path =
-            matches!(&self.body, BodyState::Loading(path) if path == &result.path);
-        if !is_pending_path {
+        if !self.body.is_loading_path(&result.path) {
             return;
         }
 
         self.body_cache
             .insert(result.path.clone(), result.preview.clone());
-        self.body = BodyState::Loaded {
-            preview: result.preview.clone(),
-        };
+        self.body.loaded(result.preview.clone());
     }
 
     fn handle_filter_key(&mut self, code: KeyCode) -> ScreenAction {
@@ -262,7 +257,14 @@ impl NotesScreen {
     ) -> ScreenAction {
         match (code, modifiers) {
             (KeyCode::Char('r'), KeyModifiers::NONE) => {
-                self.request.offset = 0;
+                if self.seeded_note {
+                    self.seeded_note = false;
+                    self.request = NoteListRequest::default();
+                    self.filter_input.clear();
+                    self.filter_draft = None;
+                } else {
+                    self.request.offset = 0;
+                }
                 self.selected = 0;
                 self.first_visible = 0;
                 self.request_current_page()
@@ -332,15 +334,15 @@ impl NotesScreen {
             .get(self.selected)
             .map(|note| note.current_path.clone())
         else {
-            self.body = BodyState::Empty;
+            self.body.empty();
             return ScreenAction::Stay;
         };
 
         if let Some(preview) = self.body_cache.get(&path) {
-            self.body = BodyState::Loaded { preview };
+            self.body.loaded(preview);
             ScreenAction::Stay
         } else {
-            self.body = BodyState::Loading(path.clone());
+            self.body.loading(path.clone());
             ScreenAction::EnqueueJob(JobSpec::ReadNoteBody { path })
         }
     }
@@ -429,21 +431,13 @@ impl NotesScreen {
     }
 
     fn preview_lines(&self) -> Vec<Line<'static>> {
-        match &self.body {
-            BodyState::Empty => vec![Line::from("No note selected")],
-            BodyState::Loading(_) => vec![Line::from("loading body...")],
-            BodyState::Loaded { preview } if preview.is_empty() => {
-                vec![Line::from("(empty body)")]
-            }
-            BodyState::Loaded { preview } => preview
-                .lines()
-                .map(|line| Line::from(line.to_string()))
-                .collect(),
-            BodyState::Error(error) => vec![Line::from(format!("Error: {error}"))],
-        }
+        self.body.notes_lines()
     }
 
     fn filter_label(&self) -> String {
+        if self.seeded_note {
+            return "focused search result".to_string();
+        }
         if let Some(draft) = &self.filter_draft {
             return format!("{draft}_");
         }
@@ -451,28 +445,6 @@ impl NotesScreen {
             "none".to_string()
         } else {
             self.filter_input.clone()
-        }
-    }
-}
-
-impl BodyCache {
-    fn get(&mut self, path: &RelativePath) -> Option<String> {
-        let index = self.entries.iter().position(|(cached, _)| cached == path)?;
-        let (path, preview) = self
-            .entries
-            .remove(index)
-            .expect("cache index should be in bounds");
-        self.entries.push_back((path, preview.clone()));
-        Some(preview)
-    }
-
-    fn insert(&mut self, path: RelativePath, preview: String) {
-        if let Some(index) = self.entries.iter().position(|(cached, _)| cached == &path) {
-            let _ = self.entries.remove(index);
-        }
-        self.entries.push_back((path, preview));
-        while self.entries.len() > BODY_CACHE_CAPACITY {
-            let _ = self.entries.pop_front();
         }
     }
 }

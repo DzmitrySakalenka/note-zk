@@ -219,6 +219,8 @@ impl AdminScreen {
                 push_toast(ctx, ToastSeverity::Warn, "admin action cancelled");
                 ScreenAction::Stay
             }
+            #[cfg(feature = "ai")]
+            JobResult::SemanticSearch(_) => ScreenAction::Stay,
             JobResult::ScanOutcome(_)
             | JobResult::Status(_)
             | JobResult::Doctor(_)
@@ -377,18 +379,7 @@ impl AdminScreen {
             JobKind::AdminAiJobsList | JobKind::AdminAiCancel | JobKind::AdminAiRecomputeVault => {
                 self.ai_jobs = AiJobsState::Error(display_error);
             }
-            JobKind::ScanVault
-            | JobKind::StatusSummary
-            | JobKind::DoctorReport
-            | JobKind::RebuildIndex
-            | JobKind::ListNotes
-            | JobKind::ReadNoteBody
-            | JobKind::ListConflicts
-            | JobKind::ResolveConflict
-            | JobKind::IssueDeviceToken
-            | JobKind::Sync
-            | JobKind::TrashAction
-            | JobKind::Mock => {}
+            _ => {}
         }
         push_toast(ctx, ToastSeverity::Error, admin_error_toast(error));
     }

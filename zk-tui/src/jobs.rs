@@ -13,8 +13,20 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+#[cfg(feature = "ai")]
+use serde::Deserialize;
 use tokio::runtime::Runtime;
 use zeroize::Zeroizing;
+#[cfg(feature = "ai")]
+use zk_ai::{
+    provider::{
+        LocalDevice, LocalEmbeddingsConfig, LocalEmbeddingsProvider, StubEmbeddingsProvider,
+    },
+    selector::{ProviderRegistry, ProviderSelector},
+    service::semantic_search::SearchHit,
+};
+#[cfg(feature = "ai")]
+use zk_app::{AiFacade, AiFacadeDeps, LocalEmbeddingsRepoHandle, SemanticSearchRequest};
 use zk_app::{
     BootstrapOutcome, DeviceId, DeviceSyncStatus, DoctorReport, EffectiveConfig, PullApplyOutcome,
     PurgeOutcome, PurgeRequest, PushApplyOutcome, RebuildOptions, RebuildOutcome,
@@ -32,12 +44,18 @@ use zk_domain::{
     AuthScope, JobId, ResolveConflictRequest, ResolveConflictResponse, WireConflictResolution,
     WireItemType, id::RelativePath, sync::SyncStatus,
 };
+#[cfg(feature = "ai")]
+use zk_domain::{EmbeddingModelId, ExecutionMode, ProviderId, ProviderSelectorPolicy};
 use zk_index::{AssetRepo, ListedNote, NoteListQuery, NoteRepo, SyncStateRepo};
 use zk_sync::HttpTransport;
 
 use crate::event::{AppEvent, AppEventSender, BackgroundResult};
 
 const MOCK_CANCEL_POLL: Duration = Duration::from_millis(10);
+#[cfg(feature = "ai")]
+const STUB_EMBEDDING_DIM: usize = 128;
+#[cfg(feature = "ai")]
+const VAULT_CONFIG_PATH: &str = ".zk/config.toml";
 /// Default page size for TUI note-list jobs.
 pub const NOTE_LIST_PAGE_SIZE: u32 = 200;
 const NOTE_BODY_PREVIEW_LINES: usize = 200;
@@ -239,6 +257,32 @@ pub struct NoteBodyResult {
     pub preview: String,
 }
 
+/// One semantic-search hit enriched with local note-list metadata.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq)]
+pub struct SemanticSearchResultItem {
+    /// Raw semantic-search hit returned by `zk-app`.
+    pub hit: SearchHit,
+    /// Display title from the local note index or a fallback label.
+    pub title: String,
+    /// Current local path when the note is present in the local index.
+    pub current_path: Option<RelativePath>,
+    /// Whether this note is currently in the configured trash tree.
+    pub is_trashed: bool,
+}
+
+/// Result payload for one semantic-search request.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq)]
+pub struct SemanticSearchResult {
+    /// Request that produced this result.
+    pub request: SemanticSearchRequest,
+    /// Effective backend mode that supplied the result set.
+    pub effective_mode: ExecutionMode,
+    /// Ranked search hits.
+    pub hits: Vec<SemanticSearchResultItem>,
+}
+
 /// Kind discriminator for local conflict rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictItemKind {
@@ -427,6 +471,12 @@ pub enum JobSpec {
         /// Vault-relative note path to read.
         path: RelativePath,
     },
+    /// Runs semantic search through the AI facade.
+    #[cfg(feature = "ai")]
+    SemanticSearch {
+        /// Search request to execute.
+        request: SemanticSearchRequest,
+    },
     /// Lists local items currently marked as sync conflicts.
     ListConflicts,
     /// Resolves one local sync conflict through the configured server.
@@ -476,6 +526,8 @@ impl JobSpec {
             Self::RebuildIndex => JobKind::RebuildIndex,
             Self::ListNotes(_) => JobKind::ListNotes,
             Self::ReadNoteBody { .. } => JobKind::ReadNoteBody,
+            #[cfg(feature = "ai")]
+            Self::SemanticSearch { .. } => JobKind::SemanticSearch,
             Self::ListConflicts => JobKind::ListConflicts,
             Self::ResolveConflict(_) => JobKind::ResolveConflict,
             Self::IssueDeviceToken(_) => JobKind::IssueDeviceToken,
@@ -507,6 +559,9 @@ pub enum JobKind {
     ListNotes,
     /// Note body preview job.
     ReadNoteBody,
+    /// Semantic search job.
+    #[cfg(feature = "ai")]
+    SemanticSearch,
     /// Local conflict-list job.
     ListConflicts,
     /// Explicit conflict-resolution job.
@@ -581,6 +636,9 @@ pub enum JobResult {
     Notes(NoteListResult),
     /// Note body preview completed successfully.
     NoteBody(NoteBodyResult),
+    /// Semantic search completed successfully.
+    #[cfg(feature = "ai")]
+    SemanticSearch(SemanticSearchResult),
     /// Local conflict list completed successfully.
     Conflicts(ConflictListResult),
     /// Explicit conflict resolution completed successfully.
@@ -782,6 +840,8 @@ fn execute_job(
         }
         JobSpec::ListNotes(request) => run_list_notes_job(ctx, request),
         JobSpec::ReadNoteBody { path } => run_read_note_body_job(ctx, path),
+        #[cfg(feature = "ai")]
+        JobSpec::SemanticSearch { request } => run_semantic_search_job(runtime, ctx, request),
         JobSpec::ListConflicts => run_list_conflicts_job(ctx),
         JobSpec::ResolveConflict(intent) => run_resolve_conflict_job(runtime, ctx, intent),
         JobSpec::IssueDeviceToken(intent) => run_issue_device_token_job(ctx, intent),
@@ -833,6 +893,80 @@ fn run_read_note_body_job(ctx: &JobContext, path: RelativePath) -> Result<JobRes
         .join("\n");
 
     Ok(JobResult::NoteBody(NoteBodyResult { path, preview }))
+}
+
+#[cfg(feature = "ai")]
+fn run_semantic_search_job(
+    runtime: &Runtime,
+    ctx: &JobContext,
+    request: SemanticSearchRequest,
+) -> Result<JobResult> {
+    let mode = request.mode_override.unwrap_or(ExecutionMode::Hybrid);
+    let repo = LocalEmbeddingsRepoHandle::new(open_job_connection(ctx)?);
+    let local_selector =
+        optional_local_selector(&ctx.vault_root)?.unwrap_or_else(|| stub_selector(mode));
+    let http = resolve_search_transport(
+        mode,
+        ctx.config.sync.server_url.as_ref(),
+        &ctx.config.sync.bearer_token_env,
+    )?;
+    let facade = AiFacade::new(AiFacadeDeps {
+        http,
+        local_selector: Some(local_selector),
+        local_repo: Some(repo),
+        mode,
+        ..AiFacadeDeps::default()
+    })
+    .context("while attempting to construct semantic search facade from TUI job")?;
+    let outcome = runtime
+        .block_on(facade.semantic_search_with_status(request.clone()))
+        .context("while attempting to run semantic search from TUI job")?;
+    let connection = open_job_connection(ctx)?;
+    let hits = enrich_semantic_hits(&connection, outcome.hits)?;
+
+    Ok(JobResult::SemanticSearch(SemanticSearchResult {
+        request,
+        effective_mode: outcome.effective_mode,
+        hits,
+    }))
+}
+
+#[cfg(feature = "ai")]
+fn enrich_semantic_hits(
+    connection: &rusqlite::Connection,
+    hits: Vec<SearchHit>,
+) -> Result<Vec<SemanticSearchResultItem>> {
+    hits.into_iter()
+        .map(|hit| semantic_result_item(connection, hit))
+        .collect()
+}
+
+#[cfg(feature = "ai")]
+fn semantic_result_item(
+    connection: &rusqlite::Connection,
+    hit: SearchHit,
+) -> Result<SemanticSearchResultItem> {
+    let note = NoteRepo::get_note(connection, &hit.note_id)
+        .context("while attempting to load semantic search note row from TUI job")?;
+    let metadata = NoteRepo::get_note_metadata(connection, &hit.note_id)
+        .context("while attempting to load semantic search note metadata from TUI job")?;
+    let title = metadata
+        .map(|metadata| metadata.title)
+        .filter(|title| !title.trim().is_empty())
+        .or_else(|| {
+            note.as_ref()
+                .and_then(|note| path_file_name(&note.current_path))
+        })
+        .unwrap_or_else(|| hit.note_id.to_string());
+    let current_path = note.as_ref().map(|note| note.current_path.clone());
+    let is_trashed = note.as_ref().is_some_and(|note| note.is_trashed);
+
+    Ok(SemanticSearchResultItem {
+        hit,
+        title,
+        current_path,
+        is_trashed,
+    })
 }
 
 fn run_list_conflicts_job(ctx: &JobContext) -> Result<JobResult> {
@@ -1085,6 +1219,197 @@ fn admin_client_from_context(ctx: &JobContext) -> Result<AdminClient> {
 
     AdminClient::new(server_url, bearer_token, token_env)
         .context("while attempting to construct admin HTTP client for TUI job")
+}
+
+#[cfg(feature = "ai")]
+fn resolve_search_transport(
+    mode: ExecutionMode,
+    server_url: Option<&url::Url>,
+    bearer_token_env: &str,
+) -> Result<Option<Arc<HttpTransport>>> {
+    match mode {
+        ExecutionMode::Connected => required_search_transport(server_url, bearer_token_env)
+            .map(Arc::new)
+            .map(Some),
+        ExecutionMode::Offline => Ok(None),
+        ExecutionMode::Hybrid => optional_search_transport(server_url, bearer_token_env)
+            .map(|transport| transport.map(Arc::new)),
+    }
+}
+
+#[cfg(feature = "ai")]
+fn required_search_transport(
+    server_url: Option<&url::Url>,
+    bearer_token_env: &str,
+) -> Result<HttpTransport> {
+    let server_url = server_url
+        .cloned()
+        .context("server_url is required for connected semantic search")?;
+    let bearer_token = std::env::var(bearer_token_env).map_err(|_| {
+        anyhow::anyhow!(
+            "environment variable {bearer_token_env} is required for connected semantic search"
+        )
+    })?;
+
+    HttpTransport::new(server_url, Some(bearer_token))
+        .context("while attempting to construct semantic search HTTP transport")
+}
+
+#[cfg(feature = "ai")]
+fn optional_search_transport(
+    server_url: Option<&url::Url>,
+    bearer_token_env: &str,
+) -> Result<Option<HttpTransport>> {
+    let Some(server_url) = server_url.cloned() else {
+        return Ok(None);
+    };
+    let Ok(bearer_token) = std::env::var(bearer_token_env) else {
+        return Ok(None);
+    };
+
+    HttpTransport::new(server_url, Some(bearer_token))
+        .map(Some)
+        .context("while attempting to construct semantic search HTTP transport")
+}
+
+#[cfg(feature = "ai")]
+fn optional_local_selector(vault_root: &Path) -> Result<Option<ProviderSelector>> {
+    let local_config = load_local_ai_config(vault_root)?;
+    let Some(local_config) = local_config.ai.and_then(|config| config.local) else {
+        return Ok(None);
+    };
+    let Some(model_dir) = local_config.model_dir.clone() else {
+        return Ok(None);
+    };
+    let provider_config = local_provider_config(vault_root, local_config, model_dir)?;
+
+    build_local_selector(provider_config).map(Some)
+}
+
+#[cfg(feature = "ai")]
+fn stub_selector(mode: ExecutionMode) -> ProviderSelector {
+    let stub_provider_id = provider_id("stub");
+    let mut registry = ProviderRegistry::new();
+
+    registry.register_embeddings(Arc::new(StubEmbeddingsProvider::new(STUB_EMBEDDING_DIM)));
+
+    ProviderSelector::new(
+        Arc::new(registry),
+        ProviderSelectorPolicy {
+            mode,
+            remote_provider: None,
+            local_provider: Some(stub_provider_id.clone()),
+            stub_provider: Some(stub_provider_id),
+        },
+    )
+}
+
+#[cfg(feature = "ai")]
+fn provider_id(value: &str) -> ProviderId {
+    value.parse().expect("hardcoded provider id should parse")
+}
+
+#[cfg(feature = "ai")]
+fn local_provider_config(
+    vault_root: &Path,
+    local_config: LocalAiConfig,
+    model_dir: PathBuf,
+) -> Result<LocalEmbeddingsConfig> {
+    let resolved_model_dir = if model_dir.is_absolute() {
+        model_dir
+    } else {
+        vault_root.join(model_dir)
+    };
+    let model_id = match local_config.model_id {
+        Some(model_id) => model_id,
+        None => derive_model_id(&resolved_model_dir)?,
+    };
+
+    Ok(LocalEmbeddingsConfig {
+        model_dir: resolved_model_dir,
+        model_id,
+        max_seq_len: local_config.max_seq_len,
+        max_batch_size: local_config.max_batch_size,
+        device: local_config.device,
+    })
+}
+
+#[cfg(feature = "ai")]
+fn build_local_selector(config: LocalEmbeddingsConfig) -> Result<ProviderSelector> {
+    let provider = LocalEmbeddingsProvider::from_config(config)
+        .context("while attempting to construct local embeddings provider for TUI job")?;
+    let mut registry = ProviderRegistry::new();
+
+    registry.register_embeddings(Arc::new(provider));
+
+    Ok(ProviderSelector::new(
+        Arc::new(registry),
+        ProviderSelectorPolicy {
+            mode: ExecutionMode::Offline,
+            remote_provider: None,
+            local_provider: None,
+            stub_provider: None,
+        },
+    ))
+}
+
+#[cfg(feature = "ai")]
+fn load_local_ai_config(vault_root: &Path) -> Result<AiVaultConfig> {
+    let config_path = vault_root.join(VAULT_CONFIG_PATH);
+    let raw = match fs::read_to_string(&config_path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(AiVaultConfig::default());
+        }
+        Err(error) => {
+            return Err(anyhow::Error::new(error).context(format!(
+                "while attempting to read local AI config at {}",
+                config_path.display()
+            )));
+        }
+    };
+
+    toml::from_str(&raw).with_context(|| {
+        format!(
+            "while attempting to parse local AI config at {}",
+            config_path.display()
+        )
+    })
+}
+
+#[cfg(feature = "ai")]
+fn derive_model_id(model_dir: &Path) -> Result<EmbeddingModelId> {
+    let Some(model_name) = model_dir.file_name().and_then(|name| name.to_str()) else {
+        anyhow::bail!("could not derive model_id from model directory; set [ai.local].model_id");
+    };
+    let model_id = format!("local/{model_name}");
+
+    model_id.parse().map_err(|error| {
+        anyhow::anyhow!("could not derive model_id '{model_id}': {error}; set [ai.local].model_id")
+    })
+}
+
+#[cfg(feature = "ai")]
+#[derive(Debug, Default, Deserialize)]
+struct AiVaultConfig {
+    ai: Option<AiConfigSection>,
+}
+
+#[cfg(feature = "ai")]
+#[derive(Debug, Deserialize)]
+struct AiConfigSection {
+    local: Option<LocalAiConfig>,
+}
+
+#[cfg(feature = "ai")]
+#[derive(Debug, Default, Deserialize)]
+struct LocalAiConfig {
+    model_dir: Option<PathBuf>,
+    model_id: Option<EmbeddingModelId>,
+    max_seq_len: Option<usize>,
+    max_batch_size: Option<usize>,
+    #[serde(default)]
+    device: LocalDevice,
 }
 
 fn preview_note_file(vault_root: &Path, path: &RelativePath) -> String {

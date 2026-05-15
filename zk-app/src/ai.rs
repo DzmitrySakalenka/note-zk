@@ -84,6 +84,15 @@ pub struct SemanticSearchRequest {
     pub mode_override: Option<ExecutionMode>,
 }
 
+/// Semantic-search hits plus the execution mode that produced them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SemanticSearchOutcome {
+    /// Search hits returned by the selected backend.
+    pub hits: Vec<SearchHit>,
+    /// Effective backend mode used for this request.
+    pub effective_mode: ExecutionMode,
+}
+
 /// Request for one server-backed chat turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatRequest {
@@ -209,9 +218,42 @@ impl AiFacade {
         &self,
         request: SemanticSearchRequest,
     ) -> AiResult<Vec<SearchHit>> {
+        self.semantic_search_with_status(request)
+            .await
+            .map(|outcome| outcome.hits)
+    }
+
+    /// Runs semantic search and reports the backend mode that supplied results.
+    ///
+    /// Hybrid mode reports [`ExecutionMode::Connected`] when the server path
+    /// succeeds and [`ExecutionMode::Offline`] when it falls back to the local
+    /// cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AiError`] when the selected transport, provider, or repository
+    /// cannot satisfy the request.
+    pub async fn semantic_search_with_status(
+        &self,
+        request: SemanticSearchRequest,
+    ) -> AiResult<SemanticSearchOutcome> {
         match request.mode_override.unwrap_or(self.mode) {
-            ExecutionMode::Connected => self.semantic_search_connected(&request).await,
-            ExecutionMode::Offline => self.semantic_search_offline(&request).await,
+            ExecutionMode::Connected => {
+                self.semantic_search_connected(&request)
+                    .await
+                    .map(|hits| SemanticSearchOutcome {
+                        hits,
+                        effective_mode: ExecutionMode::Connected,
+                    })
+            }
+            ExecutionMode::Offline => {
+                self.semantic_search_offline(&request)
+                    .await
+                    .map(|hits| SemanticSearchOutcome {
+                        hits,
+                        effective_mode: ExecutionMode::Offline,
+                    })
+            }
             ExecutionMode::Hybrid => self.semantic_search_hybrid(&request).await,
         }
     }
@@ -428,10 +470,15 @@ impl AiFacade {
     async fn semantic_search_hybrid(
         &self,
         request: &SemanticSearchRequest,
-    ) -> AiResult<Vec<SearchHit>> {
+    ) -> AiResult<SemanticSearchOutcome> {
         if self.probe_server().await {
             match self.semantic_search_connected(request).await {
-                Ok(hits) => return Ok(hits),
+                Ok(hits) => {
+                    return Ok(SemanticSearchOutcome {
+                        hits,
+                        effective_mode: ExecutionMode::Connected,
+                    });
+                }
                 Err(AiError::ProviderRequest(error)) => {
                     tracing::info!(
                         error = %error,
@@ -444,7 +491,12 @@ impl AiFacade {
             tracing::info!("ai: server unreachable; using local");
         }
 
-        self.semantic_search_offline(request).await
+        self.semantic_search_offline(request)
+            .await
+            .map(|hits| SemanticSearchOutcome {
+                hits,
+                effective_mode: ExecutionMode::Offline,
+            })
     }
 
     async fn probe_server(&self) -> bool {

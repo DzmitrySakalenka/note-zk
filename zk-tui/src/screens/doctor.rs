@@ -185,6 +185,8 @@ impl DoctorScreen {
                 self.rebuild_in_flight = false;
                 ScreenAction::Stay
             }
+            #[cfg(feature = "ai")]
+            JobResult::SemanticSearch(_) => ScreenAction::Stay,
             JobResult::ScanOutcome(_)
             | JobResult::Status(_)
             | JobResult::Notes(_)

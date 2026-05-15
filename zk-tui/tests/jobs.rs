@@ -14,6 +14,10 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 use zeroize::Zeroizing;
+#[cfg(feature = "ai")]
+use zk_app::SemanticSearchRequest;
+#[cfg(feature = "ai")]
+use zk_domain::ExecutionMode;
 use zk_domain::id::RelativePath;
 use zk_tui::{
     app::{App, Screen, ScreenAction, ScreenCtx},
@@ -160,6 +164,22 @@ fn job_runner_public_api_is_reachable() {
     ] {
         assert_eq!(JobSpec::Sync(intent).kind(), JobKind::Sync);
     }
+}
+
+#[cfg(feature = "ai")]
+#[test]
+fn semantic_search_job_kind_is_reachable() {
+    assert_eq!(
+        JobSpec::SemanticSearch {
+            request: SemanticSearchRequest {
+                query: "graph memory".to_string(),
+                top_k: 10,
+                mode_override: Some(ExecutionMode::Hybrid),
+            },
+        }
+        .kind(),
+        JobKind::SemanticSearch
+    );
 }
 
 #[test]

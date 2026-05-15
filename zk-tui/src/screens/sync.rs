@@ -133,6 +133,8 @@ impl SyncScreen {
                 self.push_event("sync cancelled");
                 ScreenAction::Stay
             }
+            #[cfg(feature = "ai")]
+            JobResult::SemanticSearch(_) => ScreenAction::Stay,
             JobResult::ScanOutcome(_)
             | JobResult::Status(_)
             | JobResult::Doctor(_)

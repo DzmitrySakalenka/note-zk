@@ -206,6 +206,41 @@ fn notes_filter_commit_builds_tag_request_and_survives_entry() {
 }
 
 #[test]
+fn notes_on_enter_consumes_search_seed_and_loads_body() {
+    let mut ctx = test_context();
+    ctx.pending_note_seed = Some(listed_note(
+        "01JAR5A3PJEZ3SKG67PN8N6S6S",
+        "Seeded",
+        "notes/seeded.md",
+        false,
+    ));
+    let mut screen = NotesScreen::default();
+
+    assert_read_body_action(&screen.on_enter(&mut ctx), "notes/seeded.md");
+    assert!(ctx.pending_note_seed.is_none());
+
+    let mut terminal = test_terminal();
+    draw_screen(&mut terminal, &mut screen, &ctx);
+
+    assert_snapshot!(rendered_rows(&terminal), @r###"
+┌Notes───────────────────────────────┐┌Preview─────────────────────────────────────────┐
+│Filter: focused search result       ││loading body...                                 │
+│                                    ││                                                │
+│>   Seeded -- notes/seeded.md       ││                                                │
+│                                    ││                                                │
+│                                    ││                                                │
+│                                    ││                                                │
+│                                    ││                                                │
+│                                    ││                                                │
+│                                    ││                                                │
+│                                    ││                                                │
+│                                    ││                                                │
+│                                    ││                                                │
+└────────────────────────────────────┘└────────────────────────────────────────────────┘
+"###);
+}
+
+#[test]
 fn notes_missing_editor_pushes_warning_toast() {
     static EDITOR_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

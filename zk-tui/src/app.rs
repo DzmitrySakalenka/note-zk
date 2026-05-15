@@ -15,6 +15,7 @@ use ratatui::{
 };
 use rusqlite::Connection;
 use zk_app::EffectiveConfig;
+use zk_index::ListedNote;
 
 use crate::{
     event::{AppEvent, BackgroundResult, EventLoop},
@@ -32,6 +33,9 @@ use crate::{
         toast::{Toast, ToastLine, ToastQueue, ToastSeverity},
     },
 };
+
+#[cfg(feature = "ai")]
+use crate::screens::search::SearchScreen;
 
 const EVENT_TICK: Duration = Duration::from_millis(250);
 
@@ -187,6 +191,8 @@ pub struct ScreenCtx {
     pub status_messages: StatusMessages,
     /// Optional background job runner handle.
     pub job_runner: Option<JobRunnerHandle>,
+    /// One-shot note seed consumed by the Notes screen when opened from Search.
+    pub pending_note_seed: Option<ListedNote>,
 }
 
 impl ScreenCtx {
@@ -202,6 +208,7 @@ impl ScreenCtx {
             theme: Arc::new(Theme::default()),
             status_messages: StatusMessages::default(),
             job_runner: None,
+            pending_note_seed: None,
         }
     }
 
@@ -659,7 +666,9 @@ fn default_screen(id: ScreenId) -> Box<dyn Screen> {
         ScreenId::Auth => Box::<AuthScreen>::default(),
         ScreenId::Admin => Box::<AdminScreen>::default(),
         #[cfg(feature = "ai")]
-        ScreenId::Search | ScreenId::Chat | ScreenId::Wiki => Box::new(PlaceholderScreen { id }),
+        ScreenId::Search => Box::<SearchScreen>::default(),
+        #[cfg(feature = "ai")]
+        ScreenId::Chat | ScreenId::Wiki => Box::new(PlaceholderScreen { id }),
     }
 }
 

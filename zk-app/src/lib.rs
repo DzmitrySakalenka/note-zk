@@ -108,6 +108,6 @@ pub use wiki::{
 pub use ai::{
     AiFacade, AiFacadeDeps, ChatChunk, ChatRequest, ConversationDetail, ConversationDto,
     ListConversationsParams, LocalEmbeddingsRepoHandle, MessageDto, RecomputeLocalSummary,
-    SemanticSearchRequest,
+    SemanticSearchOutcome, SemanticSearchRequest,
 };
 pub use write_policy::{ensure_writable, is_path_derived, is_path_immutable};
