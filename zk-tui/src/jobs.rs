@@ -1,7 +1,8 @@
 //! Background job runner for facade work that must stay off the render thread.
 
 use std::{
-    path::PathBuf,
+    fs,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -19,8 +20,11 @@ use zk_app::{
     RegisterDeviceRequest, RestoreRequest, RestoredItem, ScanOutcome, StatusSummary, SyncContext,
     SystemClock, TrashRequest, TrashedItem,
 };
-use zk_domain::id::RelativePath;
-use zk_index::{ListedNote, NoteListQuery, NoteRepo};
+use zk_domain::{
+    ResolveConflictRequest, ResolveConflictResponse, WireConflictResolution, WireItemType,
+    id::RelativePath, sync::SyncStatus,
+};
+use zk_index::{AssetRepo, ListedNote, NoteListQuery, NoteRepo, SyncStateRepo};
 use zk_sync::HttpTransport;
 
 use crate::event::{AppEvent, AppEventSender, BackgroundResult};
@@ -29,6 +33,7 @@ const MOCK_CANCEL_POLL: Duration = Duration::from_millis(10);
 /// Default page size for TUI note-list jobs.
 pub const NOTE_LIST_PAGE_SIZE: u32 = 200;
 const NOTE_BODY_PREVIEW_LINES: usize = 200;
+const CONFLICT_PREVIEW_LINES: usize = 200;
 
 /// Immutable context cloned into the background worker at startup.
 #[derive(Debug, Clone)]
@@ -225,6 +230,123 @@ pub struct NoteBodyResult {
     pub preview: String,
 }
 
+/// Kind discriminator for local conflict rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictItemKind {
+    /// Markdown note conflict.
+    Note,
+    /// Asset conflict.
+    Asset,
+}
+
+impl ConflictItemKind {
+    fn wire(self) -> WireItemType {
+        match self {
+            Self::Note => WireItemType::Note,
+            Self::Asset => WireItemType::Asset,
+        }
+    }
+
+    /// Returns a compact user-facing label.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Note => "note",
+            Self::Asset => "asset",
+        }
+    }
+}
+
+/// One conflict row rendered by the resolve-conflict screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictListItem {
+    /// Kind of conflicted item.
+    pub kind: ConflictItemKind,
+    /// Stable note or asset id.
+    pub item_id: String,
+    /// Display path or fallback item label.
+    pub path: String,
+    /// Display title or file name.
+    pub label: String,
+    /// Last sync conflict message, when recorded.
+    pub message: Option<String>,
+    /// Local-side preview text.
+    pub local_preview: String,
+    /// Remote-side preview text or unavailable explanation.
+    pub remote_preview: String,
+    /// Vault-relative local path used for editor opening.
+    pub local_path: Option<RelativePath>,
+    /// Vault-relative remote conflict-copy path used for editor diff opening.
+    pub remote_path: Option<RelativePath>,
+}
+
+/// Result payload for listing local sync conflicts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictListResult {
+    /// Conflicts currently marked in the local index.
+    pub conflicts: Vec<ConflictListItem>,
+}
+
+/// Explicit resolution strategy supported by the TUI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictResolutionStrategy {
+    /// Keep the local side and let a later push upload it.
+    KeepLocal,
+    /// Keep the remote side and wait for a later download/apply.
+    KeepRemote,
+}
+
+impl ConflictResolutionStrategy {
+    fn wire(self) -> WireConflictResolution {
+        match self {
+            Self::KeepLocal => WireConflictResolution::KeepLocal,
+            Self::KeepRemote => WireConflictResolution::KeepRemote,
+        }
+    }
+
+    /// Returns a compact user-facing label.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::KeepLocal => "keep-local",
+            Self::KeepRemote => "keep-remote",
+        }
+    }
+}
+
+/// Target selected for explicit conflict resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictResolutionTarget {
+    /// Kind of conflicted item.
+    pub kind: ConflictItemKind,
+    /// Stable note or asset id.
+    pub item_id: String,
+    /// Display path or fallback item label.
+    pub path: String,
+}
+
+/// Conflict-resolution work requested by a screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolveConflictIntent {
+    /// Target item to resolve.
+    pub target: ConflictResolutionTarget,
+    /// Selected winner strategy.
+    pub strategy: ConflictResolutionStrategy,
+}
+
+/// Result payload for one explicit conflict-resolution request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictResolutionOutcome {
+    /// Target item resolved.
+    pub target: ConflictResolutionTarget,
+    /// Strategy submitted to the server.
+    pub strategy: ConflictResolutionStrategy,
+    /// Whether the server accepted the request as a remote-side win.
+    pub accepted: bool,
+    /// Server revision returned for keep-remote, when present.
+    pub new_server_revision: Option<i64>,
+}
+
 /// Work item accepted by the background runner.
 #[derive(Debug, Clone)]
 pub enum JobSpec {
@@ -243,6 +365,10 @@ pub enum JobSpec {
         /// Vault-relative note path to read.
         path: RelativePath,
     },
+    /// Lists local items currently marked as sync conflicts.
+    ListConflicts,
+    /// Resolves one local sync conflict through the configured server.
+    ResolveConflict(ResolveConflictIntent),
     /// Runs one sync workflow.
     Sync(SyncIntent),
     /// Runs one trash, restore, or purge workflow.
@@ -263,6 +389,8 @@ impl JobSpec {
             Self::RebuildIndex => JobKind::RebuildIndex,
             Self::ListNotes(_) => JobKind::ListNotes,
             Self::ReadNoteBody { .. } => JobKind::ReadNoteBody,
+            Self::ListConflicts => JobKind::ListConflicts,
+            Self::ResolveConflict(_) => JobKind::ResolveConflict,
             Self::Sync(_) => JobKind::Sync,
             Self::TrashAction(_) => JobKind::TrashAction,
             Self::Mock(_) => JobKind::Mock,
@@ -285,6 +413,10 @@ pub enum JobKind {
     ListNotes,
     /// Note body preview job.
     ReadNoteBody,
+    /// Local conflict-list job.
+    ListConflicts,
+    /// Explicit conflict-resolution job.
+    ResolveConflict,
     /// Sync workflow job.
     Sync,
     /// Trash, restore, or purge job.
@@ -341,6 +473,10 @@ pub enum JobResult {
     Notes(NoteListResult),
     /// Note body preview completed successfully.
     NoteBody(NoteBodyResult),
+    /// Local conflict list completed successfully.
+    Conflicts(ConflictListResult),
+    /// Explicit conflict resolution completed successfully.
+    ConflictResolution(ConflictResolutionOutcome),
     /// Sync workflow completed successfully.
     Sync(SyncOutcome),
     /// Trash lifecycle workflow completed successfully.
@@ -519,6 +655,8 @@ fn execute_job(
         }
         JobSpec::ListNotes(request) => run_list_notes_job(ctx, request),
         JobSpec::ReadNoteBody { path } => run_read_note_body_job(ctx, path),
+        JobSpec::ListConflicts => run_list_conflicts_job(ctx),
+        JobSpec::ResolveConflict(intent) => run_resolve_conflict_job(runtime, ctx, intent),
         JobSpec::Sync(intent) => run_sync_job(runtime, ctx, intent),
         JobSpec::TrashAction(intent) => run_trash_job(ctx, intent),
         JobSpec::Mock(job) => Ok(run_mock_job(job, cancelled)),
@@ -557,6 +695,211 @@ fn run_read_note_body_job(ctx: &JobContext, path: RelativePath) -> Result<JobRes
         .join("\n");
 
     Ok(JobResult::NoteBody(NoteBodyResult { path, preview }))
+}
+
+fn run_list_conflicts_job(ctx: &JobContext) -> Result<JobResult> {
+    let connection = open_job_connection(ctx)?;
+    let mut conflicts = Vec::new();
+
+    for note_id in SyncStateRepo::list_notes_by_sync_status(&connection, SyncStatus::Conflict)
+        .context("while attempting to list conflicted notes from TUI job")?
+    {
+        let state = SyncStateRepo::get_note_sync_state(&connection, &note_id)
+            .context("while attempting to load conflicted note sync state from TUI job")?
+            .context("while attempting to find conflicted note sync state from TUI job")?;
+        let note = NoteRepo::get_note(&connection, &note_id)
+            .context("while attempting to load conflicted note row from TUI job")?;
+        let metadata = NoteRepo::get_note_metadata(&connection, &note_id)
+            .context("while attempting to load conflicted note metadata from TUI job")?;
+        let local_path = note
+            .as_ref()
+            .map(|record| record.current_path.clone())
+            .or_else(|| state.last_synced_path.clone());
+        let path = local_path
+            .as_ref()
+            .map_or_else(|| note_id.to_string(), |path| path.as_str().to_string());
+        let label = metadata
+            .map(|metadata| metadata.title)
+            .or_else(|| local_path.as_ref().and_then(path_file_name))
+            .unwrap_or_else(|| note_id.to_string());
+        let remote_path = local_path
+            .as_ref()
+            .and_then(|path| newest_conflict_copy(&ctx.vault_root, path));
+
+        conflicts.push(ConflictListItem {
+            kind: ConflictItemKind::Note,
+            item_id: note_id.to_string(),
+            path,
+            label,
+            message: state.last_sync_error,
+            local_preview: local_path.as_ref().map_or_else(
+                || "Local preview unavailable: path is missing from the local index.".to_string(),
+                |path| preview_note_file(&ctx.vault_root, path),
+            ),
+            remote_preview: remote_path.as_ref().map_or_else(
+                || "Remote preview unavailable: no conflict-copy file found.".to_string(),
+                |path| preview_note_file(&ctx.vault_root, path),
+            ),
+            local_path,
+            remote_path,
+        });
+    }
+
+    for asset_id in SyncStateRepo::list_assets_by_sync_status(&connection, SyncStatus::Conflict)
+        .context("while attempting to list conflicted assets from TUI job")?
+    {
+        let state = SyncStateRepo::get_asset_sync_state(&connection, &asset_id)
+            .context("while attempting to load conflicted asset sync state from TUI job")?
+            .context("while attempting to find conflicted asset sync state from TUI job")?;
+        let asset = AssetRepo::get_asset(&connection, &asset_id)
+            .context("while attempting to load conflicted asset row from TUI job")?;
+        let local_path = asset
+            .as_ref()
+            .map(|record| record.current_path.clone())
+            .or_else(|| state.last_synced_path.clone());
+        let path = local_path
+            .as_ref()
+            .map_or_else(|| asset_id.to_string(), |path| path.as_str().to_string());
+        let label = local_path
+            .as_ref()
+            .and_then(path_file_name)
+            .unwrap_or_else(|| asset_id.to_string());
+        let remote_path = local_path
+            .as_ref()
+            .and_then(|path| newest_conflict_copy(&ctx.vault_root, path));
+
+        conflicts.push(ConflictListItem {
+            kind: ConflictItemKind::Asset,
+            item_id: asset_id.to_string(),
+            path,
+            label,
+            message: state.last_sync_error,
+            local_preview: asset.as_ref().map_or_else(
+                || {
+                    "Local preview unavailable: asset row is missing from the local index."
+                        .to_string()
+                },
+                |asset| {
+                    format!(
+                        "Asset file\npath: {}\nsize: {} bytes\nmime: {}",
+                        asset.current_path.as_str(),
+                        asset.size_bytes,
+                        asset.mime_type.as_deref().unwrap_or("unknown")
+                    )
+                },
+            ),
+            remote_preview: remote_path.as_ref().map_or_else(
+                || "Remote preview unavailable for this asset conflict.".to_string(),
+                |path| format!("Remote conflict copy: {}", path.as_str()),
+            ),
+            local_path,
+            remote_path,
+        });
+    }
+
+    Ok(JobResult::Conflicts(ConflictListResult { conflicts }))
+}
+
+fn run_resolve_conflict_job(
+    runtime: &Runtime,
+    ctx: &JobContext,
+    intent: ResolveConflictIntent,
+) -> Result<JobResult> {
+    let connection = open_job_connection(ctx)?;
+    let settings = zk_cli_core::resolve_sync_settings(&ctx.config)
+        .context("while attempting to resolve sync settings for TUI conflict job")?;
+    let request = ResolveConflictRequest {
+        device_id: settings.device_id,
+        item_id: intent.target.item_id.clone(),
+        item_type: intent.target.kind.wire(),
+        resolution: intent.strategy.wire(),
+    };
+    let transport = HttpTransport::new(settings.server_url, Some(settings.bearer_token))
+        .context("while attempting to construct HTTP sync transport for TUI conflict job")?;
+    let response = runtime
+        .block_on(zk_app::sync::resolve_conflict(
+            &transport,
+            &connection,
+            &request,
+        ))
+        .context("while attempting to resolve sync conflict from TUI job")?;
+
+    Ok(JobResult::ConflictResolution(resolution_outcome(
+        intent, &response,
+    )))
+}
+
+fn resolution_outcome(
+    intent: ResolveConflictIntent,
+    response: &ResolveConflictResponse,
+) -> ConflictResolutionOutcome {
+    ConflictResolutionOutcome {
+        target: intent.target,
+        strategy: intent.strategy,
+        accepted: response.accepted,
+        new_server_revision: response.new_server_revision,
+    }
+}
+
+fn preview_note_file(vault_root: &Path, path: &RelativePath) -> String {
+    let absolute_path = vault_root.join(path.as_str());
+    if let Ok(document) = zk_vault::parse_note_file(&absolute_path) {
+        return capped_lines(&document.body_markdown, CONFLICT_PREVIEW_LINES);
+    }
+
+    fs::read_to_string(&absolute_path).map_or_else(
+        |error| format!("Preview unavailable: {error}"),
+        |content| capped_lines(&content, CONFLICT_PREVIEW_LINES),
+    )
+}
+
+fn capped_lines(content: &str, limit: usize) -> String {
+    content.lines().take(limit).collect::<Vec<_>>().join("\n")
+}
+
+fn path_file_name(path: &RelativePath) -> Option<String> {
+    Path::new(path.as_str())
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+}
+
+fn newest_conflict_copy(vault_root: &Path, local_path: &RelativePath) -> Option<RelativePath> {
+    let local = Path::new(local_path.as_str());
+    let parent = local.parent().unwrap_or_else(|| Path::new(""));
+    let stem = local.file_stem()?.to_string_lossy();
+    let extension = local.extension().map(|value| value.to_string_lossy());
+    let directory = vault_root.join(parent);
+    let mut matches = Vec::new();
+
+    for entry in fs::read_dir(directory).ok()? {
+        let entry = entry.ok()?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !is_conflict_copy_name(&name, &stem, extension.as_deref()) {
+            continue;
+        }
+
+        let relative = if parent.as_os_str().is_empty() {
+            PathBuf::from(&name)
+        } else {
+            parent.join(&name)
+        };
+        matches.push(relative.to_string_lossy().into_owned());
+    }
+
+    matches.sort_unstable();
+    matches.pop().map(|path| RelativePath::new(&path))
+}
+
+fn is_conflict_copy_name(name: &str, stem: &str, extension: Option<&str>) -> bool {
+    let prefix = format!("{stem}.conflict-remote-");
+    if !name.starts_with(&prefix) {
+        return false;
+    }
+
+    extension.map_or_else(
+        || Path::new(name).extension().is_none(),
+        |extension| name.ends_with(&format!(".{extension}")),
+    )
 }
 
 fn run_sync_job(runtime: &Runtime, ctx: &JobContext, intent: SyncIntent) -> Result<JobResult> {

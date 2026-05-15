@@ -85,6 +85,8 @@ pub use purge::{
     PurgeOutcome, PurgedItem, SkippedPurge, purge_expired, purge_item,
 };
 #[rustfmt::skip]
+pub use sync::resolve_conflict;
+#[rustfmt::skip]
 pub use retention::{
     Clock, ReconciliationStats, SystemClock, compute_retention_until, reconcile_delete_records,
 };

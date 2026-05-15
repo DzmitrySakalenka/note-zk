@@ -220,6 +220,8 @@ impl TrashScreen {
             | JobResult::RebuildIndex(_)
             | JobResult::Notes(_)
             | JobResult::NoteBody(_)
+            | JobResult::Conflicts(_)
+            | JobResult::ConflictResolution(_)
             | JobResult::Sync(_)
             | JobResult::Error { .. }
             | JobResult::Cancelled { .. }

@@ -2,12 +2,14 @@ use std::collections::BTreeMap;
 
 use rusqlite::Connection;
 use zk_domain::{
-    RegisterDeviceRequest, RegisterDeviceResponse, SyncPushRequest, WireOperation,
+    RegisterDeviceRequest, RegisterDeviceResponse, ResolveConflictRequest, ResolveConflictResponse,
+    SyncPushRequest, WireConflictResolution, WireItemType, WireOperation,
     config::FolderPolicy,
-    id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath},
-    sync_state::DeviceRecord,
+    id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
+    sync::SyncStatus,
+    sync_state::{AssetSyncState, DeviceRecord, NoteSyncState, SyncState},
 };
-use zk_index::{AssetRepo, DeviceRepo, IndexError, NoteRepo};
+use zk_index::{AssetRepo, DeviceRepo, IndexError, NoteRepo, SyncStateRepo};
 use zk_sync::{
     SyncError,
     bootstrap::{
@@ -166,6 +168,165 @@ pub fn get_device_sync_status(conn: &Connection, device_id: &DeviceId) -> Result
         pending_push_count,
         conflict_count,
     })
+}
+
+/// Resolves one locally tracked sync conflict through the remote transport.
+///
+/// The V1 server endpoint does not mutate remote rows. This facade records the
+/// user's choice locally so conflicted items leave the conflict list and the
+/// next sync workflow can continue from the selected state.
+///
+/// # Errors
+///
+/// Returns [`AppError`] when the local conflict row is missing, the item is not
+/// currently marked as a conflict, the transport call fails, or local
+/// sync-state persistence fails.
+pub async fn resolve_conflict(
+    transport: &dyn SyncTransport,
+    conn: &Connection,
+    request: &ResolveConflictRequest,
+) -> Result<ResolveConflictResponse> {
+    ensure_local_conflict_state(conn, request)?;
+    let response = transport.resolve_conflict(request).await?;
+    apply_conflict_resolution(conn, request, &response)?;
+    Ok(response)
+}
+
+fn ensure_local_conflict_state(conn: &Connection, request: &ResolveConflictRequest) -> Result<()> {
+    match request.item_type {
+        WireItemType::Note => {
+            let note_id = NoteId::new(&request.item_id);
+            let state = SyncStateRepo::get_note_sync_state(conn, &note_id)?
+                .ok_or_else(|| missing_conflict_item(request))?;
+            ensure_conflict_status(request, state.sync_status)
+        }
+        WireItemType::Asset => {
+            let asset_id = AssetId::new(&request.item_id);
+            let state = SyncStateRepo::get_asset_sync_state(conn, &asset_id)?
+                .ok_or_else(|| missing_conflict_item(request))?;
+            ensure_conflict_status(request, state.sync_status)
+        }
+    }
+}
+
+fn apply_conflict_resolution(
+    conn: &Connection,
+    request: &ResolveConflictRequest,
+    response: &ResolveConflictResponse,
+) -> Result<()> {
+    match request.item_type {
+        WireItemType::Note => {
+            let note_id = NoteId::new(&request.item_id);
+            let mut state = SyncStateRepo::get_note_sync_state(conn, &note_id)?
+                .ok_or_else(|| missing_conflict_item(request))?;
+            apply_note_resolution(&mut state, request, response)?;
+            SyncStateRepo::upsert_note_sync_state(conn, &state)?;
+        }
+        WireItemType::Asset => {
+            let asset_id = AssetId::new(&request.item_id);
+            let mut state = SyncStateRepo::get_asset_sync_state(conn, &asset_id)?
+                .ok_or_else(|| missing_conflict_item(request))?;
+            apply_asset_resolution(&mut state, request, response)?;
+            SyncStateRepo::upsert_asset_sync_state(conn, &state)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn apply_note_resolution(
+    state: &mut NoteSyncState,
+    request: &ResolveConflictRequest,
+    response: &ResolveConflictResponse,
+) -> Result<()> {
+    ensure_conflict_status(request, state.sync_status)?;
+    match request.resolution {
+        WireConflictResolution::KeepLocal => mark_keep_local(state),
+        WireConflictResolution::KeepRemote => mark_keep_remote(state, request, response)?,
+        WireConflictResolution::KeepBoth => return Err(unsupported_keep_both(request)),
+    }
+    Ok(())
+}
+
+fn apply_asset_resolution(
+    state: &mut AssetSyncState,
+    request: &ResolveConflictRequest,
+    response: &ResolveConflictResponse,
+) -> Result<()> {
+    ensure_conflict_status(request, state.sync_status)?;
+    match request.resolution {
+        WireConflictResolution::KeepLocal => mark_keep_local(state),
+        WireConflictResolution::KeepRemote => mark_keep_remote(state, request, response)?,
+        WireConflictResolution::KeepBoth => return Err(unsupported_keep_both(request)),
+    }
+    Ok(())
+}
+
+fn mark_keep_local<Id>(state: &mut SyncState<Id>) {
+    state.sync_status = SyncStatus::PendingUpload;
+    state.last_sync_error = None;
+}
+
+fn mark_keep_remote<Id>(
+    state: &mut SyncState<Id>,
+    request: &ResolveConflictRequest,
+    response: &ResolveConflictResponse,
+) -> Result<()> {
+    let revision = response
+        .new_server_revision
+        .ok_or_else(|| missing_remote_revision(request))?;
+    state.sync_status = SyncStatus::PendingDownload;
+    state.last_known_server_revision = Some(ServerRevision::new(revision));
+    state.pending_operation = None;
+    state.last_sync_error = None;
+    Ok(())
+}
+
+fn ensure_conflict_status(request: &ResolveConflictRequest, status: SyncStatus) -> Result<()> {
+    if status == SyncStatus::Conflict {
+        Ok(())
+    } else {
+        Err(AppError::InvariantViolation {
+            context: format!(
+                "{} {} is not marked as a conflict",
+                item_type_label(request.item_type),
+                request.item_id
+            ),
+        })
+    }
+}
+
+fn missing_conflict_item(request: &ResolveConflictRequest) -> AppError {
+    AppError::ItemNotFound {
+        target: format!("{} {}", item_type_label(request.item_type), request.item_id),
+    }
+}
+
+fn missing_remote_revision(request: &ResolveConflictRequest) -> AppError {
+    AppError::InvariantViolation {
+        context: format!(
+            "keep-remote resolution for {} {} did not return a server revision",
+            item_type_label(request.item_type),
+            request.item_id
+        ),
+    }
+}
+
+fn unsupported_keep_both(request: &ResolveConflictRequest) -> AppError {
+    AppError::InvariantViolation {
+        context: format!(
+            "keep-both is not supported for {} {}",
+            item_type_label(request.item_type),
+            request.item_id
+        ),
+    }
+}
+
+fn item_type_label(item_type: WireItemType) -> &'static str {
+    match item_type {
+        WireItemType::Note => "note",
+        WireItemType::Asset => "asset",
+    }
 }
 
 fn count_pending_push_items(conn: &Connection, device_id: &DeviceId) -> Result<u32> {

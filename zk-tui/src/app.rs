@@ -22,7 +22,7 @@ use crate::{
     keymap::{GlobalKeyAction, KeyChord, global_action_for_key},
     screens::{
         doctor::DoctorScreen, help::HelpScreen, notes::NotesScreen, overview::OverviewScreen,
-        sync::SyncScreen, trash::TrashScreen,
+        resolve_conflict::ResolveConflictScreen, sync::SyncScreen, trash::TrashScreen,
     },
     terminal::TerminalGuard,
     theme::{Theme, ThemeKind},
@@ -654,7 +654,8 @@ fn default_screen(id: ScreenId) -> Box<dyn Screen> {
         ScreenId::Sync => Box::<SyncScreen>::default(),
         ScreenId::Doctor => Box::<DoctorScreen>::default(),
         ScreenId::Trash => Box::<TrashScreen>::default(),
-        ScreenId::Resolve | ScreenId::Auth | ScreenId::Admin => Box::new(PlaceholderScreen { id }),
+        ScreenId::Resolve => Box::<ResolveConflictScreen>::default(),
+        ScreenId::Auth | ScreenId::Admin => Box::new(PlaceholderScreen { id }),
         #[cfg(feature = "ai")]
         ScreenId::Search | ScreenId::Chat | ScreenId::Wiki => Box::new(PlaceholderScreen { id }),
     }

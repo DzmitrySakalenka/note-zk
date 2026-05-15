@@ -9,10 +9,11 @@ use pollster::block_on;
 use tempfile::TempDir;
 use zk_app::{
     AppError, BootstrapOutcome, Clock, DeviceSyncStatus, SyncContext, bootstrap,
-    get_device_sync_status, plan_and_push, pull_and_apply, register_device,
+    get_device_sync_status, plan_and_push, pull_and_apply, register_device, resolve_conflict,
 };
 use zk_domain::{
-    RegisterDeviceRequest, RegisterDeviceResponse,
+    RegisterDeviceRequest, RegisterDeviceResponse, ResolveConflictRequest, ResolveConflictResponse,
+    WireConflictResolution, WireItemType,
     config::FolderPolicy,
     id::{ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     note::NoteRecord,
@@ -134,6 +135,101 @@ fn write_vault_file(vault_root: &std::path::Path, relative_path: &str, bytes: &[
         fs::create_dir_all(parent).expect("parent directory should create");
     }
     fs::write(absolute_path, bytes).expect("vault file should write");
+}
+
+#[test]
+fn resolve_conflict_keep_local_marks_note_pending_upload() {
+    let connection = open_sync_connection();
+    let note_id = "01TGUI15KEEPLOCAL0000001";
+    let note = base_note(&NoteId::new(note_id), "notes/conflict.md", b"local body");
+    insert_note(&connection, &note);
+
+    let mut state = note_sync_state(
+        note_id,
+        SyncStatus::Conflict,
+        Some(PendingOperation::Update),
+    );
+    state.last_sync_error = Some("server revision conflict".to_string());
+    SyncStateRepo::upsert_note_sync_state(&connection, &state)
+        .expect("conflict state should insert");
+
+    let request = ResolveConflictRequest {
+        device_id: device_id().to_string(),
+        item_id: note_id.to_string(),
+        item_type: WireItemType::Note,
+        resolution: WireConflictResolution::KeepLocal,
+    };
+    let transport = ResolveConflictTransport::new(ResolveConflictResponse {
+        accepted: false,
+        new_server_revision: None,
+    });
+
+    let response = block_on(resolve_conflict(&transport, &connection, &request))
+        .expect("keep-local resolution should succeed");
+
+    assert_eq!(
+        response,
+        ResolveConflictResponse {
+            accepted: false,
+            new_server_revision: None,
+        }
+    );
+    assert_eq!(transport.requests(), vec![request]);
+
+    let actual = SyncStateRepo::get_note_sync_state(&connection, &NoteId::new(note_id))
+        .expect("state query should succeed")
+        .expect("state should exist");
+    assert_eq!(actual.sync_status, SyncStatus::PendingUpload);
+    assert_eq!(actual.pending_operation, Some(PendingOperation::Update));
+    assert_eq!(
+        actual.last_known_server_revision,
+        state.last_known_server_revision
+    );
+    assert_eq!(actual.last_sync_error, None);
+}
+
+#[test]
+fn resolve_conflict_keep_remote_marks_note_pending_download() {
+    let connection = open_sync_connection();
+    let note_id = "01TGUI15KEEPREMOTE0000001";
+    let note = base_note(&NoteId::new(note_id), "notes/conflict.md", b"local body");
+    insert_note(&connection, &note);
+
+    let mut state = note_sync_state(
+        note_id,
+        SyncStatus::Conflict,
+        Some(PendingOperation::Update),
+    );
+    state.last_sync_error = Some("remote content conflicts with local changes".to_string());
+    SyncStateRepo::upsert_note_sync_state(&connection, &state)
+        .expect("conflict state should insert");
+
+    let request = ResolveConflictRequest {
+        device_id: device_id().to_string(),
+        item_id: note_id.to_string(),
+        item_type: WireItemType::Note,
+        resolution: WireConflictResolution::KeepRemote,
+    };
+    let transport = ResolveConflictTransport::new(ResolveConflictResponse {
+        accepted: true,
+        new_server_revision: Some(9),
+    });
+
+    let response = block_on(resolve_conflict(&transport, &connection, &request))
+        .expect("keep-remote resolution should succeed");
+
+    assert_eq!(response.new_server_revision, Some(9));
+
+    let actual = SyncStateRepo::get_note_sync_state(&connection, &NoteId::new(note_id))
+        .expect("state query should succeed")
+        .expect("state should exist");
+    assert_eq!(actual.sync_status, SyncStatus::PendingDownload);
+    assert_eq!(actual.pending_operation, None);
+    assert_eq!(
+        actual.last_known_server_revision,
+        Some(ServerRevision::new(9))
+    );
+    assert_eq!(actual.last_sync_error, None);
 }
 
 #[test]
@@ -449,6 +545,28 @@ struct ProbeTransport {
     counts: RemoteBootstrapProbe,
 }
 
+#[derive(Debug)]
+struct ResolveConflictTransport {
+    response: ResolveConflictResponse,
+    requests: std::sync::Mutex<Vec<ResolveConflictRequest>>,
+}
+
+impl ResolveConflictTransport {
+    fn new(response: ResolveConflictResponse) -> Self {
+        Self {
+            response,
+            requests: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn requests(&self) -> Vec<ResolveConflictRequest> {
+        self.requests
+            .lock()
+            .expect("request recorder should not be poisoned")
+            .clone()
+    }
+}
+
 impl ProbeTransport {
     fn new(note_count: u32, asset_count: u32) -> Self {
         Self {
@@ -458,6 +576,48 @@ impl ProbeTransport {
                 asset_count,
             },
         }
+    }
+}
+
+#[async_trait]
+impl SyncTransport for ResolveConflictTransport {
+    async fn register_device(
+        &self,
+        request: &RegisterDeviceRequest,
+    ) -> zk_sync::SyncResult<RegisterDeviceResponse> {
+        NoopTransport::new().register_device(request).await
+    }
+
+    async fn push(
+        &self,
+        request: &zk_domain::SyncPushRequest,
+    ) -> zk_sync::SyncResult<zk_domain::SyncPushResponse> {
+        NoopTransport::new().push(request).await
+    }
+
+    async fn pull(
+        &self,
+        request: &zk_domain::SyncPullRequest,
+    ) -> zk_sync::SyncResult<zk_domain::SyncPullResponse> {
+        NoopTransport::new().pull(request).await
+    }
+
+    async fn resolve_conflict(
+        &self,
+        request: &ResolveConflictRequest,
+    ) -> zk_sync::SyncResult<ResolveConflictResponse> {
+        self.requests
+            .lock()
+            .expect("request recorder should not be poisoned")
+            .push(request.clone());
+        Ok(self.response.clone())
+    }
+
+    async fn probe_remote_counts(
+        &self,
+        device_id: &DeviceId,
+    ) -> zk_sync::SyncResult<RemoteBootstrapProbe> {
+        NoopTransport::new().probe_remote_counts(device_id).await
     }
 }
 

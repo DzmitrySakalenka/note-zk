@@ -1,13 +1,8 @@
 //! Read-only note browser screen.
 
-use std::{collections::VecDeque, ffi::OsStr, io::stdout, path::Path, process::Command};
+use std::collections::VecDeque;
 
-use anyhow::{Context, Result, bail};
-use crossterm::{
-    event::{KeyCode, KeyEventKind, KeyModifiers},
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
+use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -19,6 +14,7 @@ use zk_index::ListedNote;
 
 use crate::{
     app::{Screen, ScreenAction, ScreenCtx},
+    editor,
     event::{AppEvent, BackgroundResult},
     jobs::{
         JobKind, JobResult, JobSpec, NoteBodyResult, NoteFilter, NoteListRequest, NoteListResult,
@@ -172,6 +168,8 @@ impl NotesScreen {
             | JobResult::Status(_)
             | JobResult::Doctor(_)
             | JobResult::RebuildIndex(_)
+            | JobResult::Conflicts(_)
+            | JobResult::ConflictResolution(_)
             | JobResult::Sync(_)
             | JobResult::TrashOutcome(_)
             | JobResult::Error { .. }
@@ -354,7 +352,7 @@ impl NotesScreen {
         };
 
         let absolute_path = ctx.vault_root.join(note.current_path.as_str());
-        if let Err(error) = run_editor(&editor, &absolute_path) {
+        if let Err(error) = editor::open_path(&editor, &absolute_path) {
             ctx.push_toast(Toast {
                 severity: ToastSeverity::Error,
                 text: error.to_string(),
@@ -488,30 +486,4 @@ fn parse_filter(input: &str) -> NoteFilter {
     } else {
         NoteFilter::Tag(tag.to_string())
     }
-}
-
-fn run_editor(editor: &OsStr, path: &Path) -> Result<()> {
-    suspend_terminal().context("while attempting to suspend TUI for editor")?;
-    let status_result = Command::new(editor)
-        .arg(path)
-        .status()
-        .context("while attempting to launch editor");
-    resume_terminal().context("while attempting to restore TUI after editor")?;
-    let status = status_result?;
-
-    if !status.success() {
-        bail!("editor exited with status {status}");
-    }
-    Ok(())
-}
-
-fn suspend_terminal() -> Result<()> {
-    disable_raw_mode().context("while attempting to disable terminal raw mode")?;
-    execute!(stdout(), LeaveAlternateScreen).context("while attempting to leave alternate screen")
-}
-
-fn resume_terminal() -> Result<()> {
-    execute!(stdout(), EnterAlternateScreen)
-        .context("while attempting to enter alternate screen")?;
-    enable_raw_mode().context("while attempting to enable terminal raw mode")
 }

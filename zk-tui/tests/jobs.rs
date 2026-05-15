@@ -20,8 +20,9 @@ use zk_tui::{
         AppEvent, AppEventSender, BackgroundResult, EventLoop, SystemClock, TerminalEventSource,
     },
     jobs::{
-        JobContext, JobHandle, JobKind, JobResult, JobRunner, JobSpec, MockJob, NoteFilter,
-        NoteListRequest, ScanArgs, SyncIntent,
+        ConflictItemKind, ConflictResolutionStrategy, ConflictResolutionTarget, JobContext,
+        JobHandle, JobKind, JobResult, JobRunner, JobSpec, MockJob, NoteFilter, NoteListRequest,
+        ResolveConflictIntent, ScanArgs, SyncIntent,
     },
 };
 
@@ -95,6 +96,19 @@ fn job_runner_public_api_is_reachable() {
         JobKind::ScanVault
     );
     assert_eq!(JobSpec::RebuildIndex.kind(), JobKind::RebuildIndex);
+    assert_eq!(JobSpec::ListConflicts.kind(), JobKind::ListConflicts);
+    assert_eq!(
+        JobSpec::ResolveConflict(ResolveConflictIntent {
+            target: ConflictResolutionTarget {
+                kind: ConflictItemKind::Note,
+                item_id: "01TUI15NOTE000000000001".to_string(),
+                path: "notes/conflict.md".to_string(),
+            },
+            strategy: ConflictResolutionStrategy::KeepLocal,
+        })
+        .kind(),
+        JobKind::ResolveConflict
+    );
     for intent in [
         SyncIntent::DeviceStatus,
         SyncIntent::Bootstrap,

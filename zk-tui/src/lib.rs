@@ -3,6 +3,7 @@
 //! Terminal UI crate for note-zk.
 
 pub mod app;
+mod editor;
 pub mod event;
 pub mod jobs;
 pub mod keymap;

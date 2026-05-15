@@ -139,6 +139,8 @@ impl SyncScreen {
             | JobResult::RebuildIndex(_)
             | JobResult::Notes(_)
             | JobResult::NoteBody(_)
+            | JobResult::Conflicts(_)
+            | JobResult::ConflictResolution(_)
             | JobResult::TrashOutcome(_)
             | JobResult::Error { .. }
             | JobResult::Cancelled { .. }
