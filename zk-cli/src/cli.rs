@@ -8,7 +8,7 @@ use zk_domain::ExecutionMode;
 
 /// Top-level command-line parser for the `zk-cli` binary.
 #[derive(Debug, Clone, Parser)]
-#[command(name = "zk-cli", arg_required_else_help = true)]
+#[command(name = "zk-cli", version, arg_required_else_help = true)]
 pub struct Cli {
     /// Phase 1 subcommand to execute.
     #[command(subcommand)]

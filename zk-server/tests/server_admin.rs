@@ -63,6 +63,23 @@ fn create_user(
     command.assert()
 }
 
+#[test]
+fn version_flag_exits_zero_and_prints_version() {
+    let harness = harness("server-version");
+
+    let output = command(&harness)
+        .arg("--version")
+        .output()
+        .expect("zk-server binary should run");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("zk-server {}\n", env!("CARGO_PKG_VERSION"))
+    );
+    assert!(output.stderr.is_empty());
+}
+
 fn user_count(database_path: &Path) -> u32 {
     let database = ServerDb::open(database_path).expect("server database should open");
 

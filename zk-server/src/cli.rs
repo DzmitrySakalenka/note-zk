@@ -6,7 +6,11 @@ use clap::{Args, Parser, Subcommand};
 
 /// Parsed `zk-server` command line.
 #[derive(Debug, Parser)]
-#[command(name = "zk-server", about = "Filesystem-first knowledge sync server")]
+#[command(
+    name = "zk-server",
+    version,
+    about = "Filesystem-first knowledge sync server"
+)]
 pub(crate) struct Cli {
     #[command(subcommand)]
     command: Option<Command>,

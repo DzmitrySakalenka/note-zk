@@ -96,11 +96,55 @@ pub fn resolve_sync_settings(
 pub fn resolve_vault_root(vault_path: Option<&Path>) -> Result<PathBuf, BootstrapError> {
     let vault_root = match vault_path {
         Some(vault_path) => vault_path.to_path_buf(),
-        None => std::env::current_dir().map_err(|source| {
-            BootstrapError::Argument(format!("failed to resolve current directory: {source}"))
-        })?,
+        None => current_dir_vault_root()?,
     };
 
+    validate_vault_root(vault_root)
+}
+
+/// Resolves the vault root from an explicit path, global `default_vault`, or
+/// the current working directory.
+///
+/// # Errors
+///
+/// Returns [`BootstrapError::Argument`] when the resolved path cannot be used
+/// as a vault directory, or [`BootstrapError::Bootstrap`] when global config
+/// loading fails.
+pub fn resolve_vault_root_with_global_default(
+    vault_path: Option<&Path>,
+) -> Result<PathBuf, BootstrapError> {
+    let vault_root = match vault_path {
+        Some(vault_path) => vault_path.to_path_buf(),
+        None => match global_default_vault_root()? {
+            Some(default_vault) => default_vault,
+            None => current_dir_vault_root()?,
+        },
+    };
+
+    validate_vault_root(vault_root)
+}
+
+fn current_dir_vault_root() -> Result<PathBuf, BootstrapError> {
+    std::env::current_dir().map_err(|source| {
+        BootstrapError::Argument(format!("failed to resolve current directory: {source}"))
+    })
+}
+
+fn global_default_vault_root() -> Result<Option<PathBuf>, BootstrapError> {
+    let global_config_path =
+        zk_app::resolve_default_global_config_path(zk_app::detect_platform(), &|name| {
+            std::env::var(name).ok()
+        })
+        .context("while attempting to resolve global config path")
+        .map_err(BootstrapError::Bootstrap)?;
+    let global_config = zk_app::config::load_global_config(&global_config_path)
+        .context("while attempting to load global config")
+        .map_err(BootstrapError::Bootstrap)?;
+
+    Ok(global_config.default_vault)
+}
+
+fn validate_vault_root(vault_root: PathBuf) -> Result<PathBuf, BootstrapError> {
     let metadata = fs::metadata(&vault_root).map_err(|source| {
         BootstrapError::Argument(format!(
             "vault path '{}' cannot be read: {source}",

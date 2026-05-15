@@ -57,6 +57,21 @@ fn e2e_cli_help_exits_zero_and_prints_to_stdout() {
 }
 
 #[test]
+fn e2e_cli_version_exits_zero_and_prints_version() {
+    let (_tempdir, _vault_root, home_root) = test_roots();
+
+    base_command(&home_root)
+        .arg("--version")
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains(format!(
+            "zk-cli {}",
+            env!("CARGO_PKG_VERSION")
+        )))
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
 fn e2e_doctor_help_mentions_header_conveys_severity() {
     let (_tempdir, _vault_root, home_root) = test_roots();
 

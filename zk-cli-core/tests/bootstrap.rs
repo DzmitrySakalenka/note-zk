@@ -11,7 +11,7 @@ use tempfile::TempDir;
 use url::Url;
 use zk_cli_core::{
     BootstrapError, CliOverrides, EffectiveConfig, load_effective_config, open_index_connection,
-    resolve_sync_settings, resolve_vault_root,
+    resolve_sync_settings, resolve_vault_root, resolve_vault_root_with_global_default,
 };
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -220,6 +220,49 @@ fn resolve_vault_root_returns_explicit_vault_path() {
 }
 
 #[test]
+fn resolve_vault_root_with_global_default_uses_global_default_when_cli_missing() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let vault_root = tempdir.path().join("global-vault");
+    std::fs::create_dir(&vault_root).expect("vault dir should be created");
+    let _env_guard = EnvGuard::new(tempdir.path());
+    write_global_config(
+        tempdir.path(),
+        &format!(
+            "default_vault = \"{}\"\n",
+            escape_toml_string(&vault_root.to_string_lossy())
+        ),
+    );
+
+    assert_eq!(
+        resolve_vault_root_with_global_default(None).expect("global default vault should resolve"),
+        vault_root
+    );
+}
+
+#[test]
+fn resolve_vault_root_with_global_default_prefers_explicit_vault() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let global_vault = tempdir.path().join("global-vault");
+    let explicit_vault = tempdir.path().join("explicit-vault");
+    std::fs::create_dir(&global_vault).expect("global vault dir should be created");
+    std::fs::create_dir(&explicit_vault).expect("explicit vault dir should be created");
+    let _env_guard = EnvGuard::new(tempdir.path());
+    write_global_config(
+        tempdir.path(),
+        &format!(
+            "default_vault = \"{}\"\n",
+            escape_toml_string(&global_vault.to_string_lossy())
+        ),
+    );
+
+    assert_eq!(
+        resolve_vault_root_with_global_default(Some(&explicit_vault))
+            .expect("explicit vault should resolve"),
+        explicit_vault
+    );
+}
+
+#[test]
 fn resolve_vault_root_returns_argument_error_for_missing_path() {
     assert!(matches!(
         resolve_vault_root(Some(Path::new("missing-vault"))),
@@ -270,4 +313,26 @@ fn open_index_connection_creates_parent_dirs_and_applies_schema() {
             .is_dir(),
         "database parent directory should be created"
     );
+}
+
+fn write_global_config(home_root: &Path, contents: &str) {
+    let path = global_config_path(home_root);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("global config parent should be created");
+    }
+    std::fs::write(path, contents).expect("global config should be written");
+}
+
+fn global_config_path(home_root: &Path) -> PathBuf {
+    let env = |name: &str| match name {
+        "APPDATA" | "HOME" => Some(home_root.to_string_lossy().to_string()),
+        _ => None,
+    };
+
+    zk_app::resolve_default_global_config_path(zk_app::detect_platform(), &env)
+        .expect("global config path should resolve")
+}
+
+fn escape_toml_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }

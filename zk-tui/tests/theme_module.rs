@@ -171,7 +171,26 @@ fn missing_theme_cli_argument_exits_before_tui_startup() {
         .expect("zk-tui binary should run");
 
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("--theme requires a value"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("a value is required for '--theme <THEME>'"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn version_cli_argument_exits_before_tui_startup() {
+    let output = Command::new(env!("CARGO_BIN_EXE_zk-tui"))
+        .arg("--version")
+        .output()
+        .expect("zk-tui binary should run");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("zk-tui {}\n", env!("CARGO_PKG_VERSION"))
+    );
+    assert!(output.stderr.is_empty());
 }
 
 fn render_theme_roles(kind: ThemeKind) -> String {
