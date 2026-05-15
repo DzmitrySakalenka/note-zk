@@ -4,7 +4,7 @@ use std::{
     any::Any,
     io,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, RecvError, SyncSender, TrySendError, sync_channel},
     },
@@ -63,6 +63,7 @@ pub struct EventLoop {
     rx: Receiver<AppEvent>,
     handle: Option<JoinHandle<()>>,
     shutdown: Arc<AtomicBool>,
+    tick: Arc<Mutex<Duration>>,
 }
 
 impl EventLoop {
@@ -85,6 +86,22 @@ impl EventLoop {
         self.tx.clone()
     }
 
+    /// Updates the render tick cadence used by the input worker.
+    pub fn set_tick_interval(&self, tick: Duration) {
+        match self.tick.lock() {
+            Ok(mut current) => *current = tick,
+            Err(error) => tracing::warn!(%error, "failed to update TUI tick interval"),
+        }
+    }
+
+    /// Returns the currently configured render tick cadence.
+    #[must_use]
+    pub fn tick_interval(&self) -> Duration {
+        self.tick
+            .lock()
+            .map_or_else(|_| Duration::from_millis(250), |current| *current)
+    }
+
     #[doc(hidden)]
     pub fn start_with_source<I, C>(input: I, clock: C, tick: Duration) -> Self
     where
@@ -94,10 +111,18 @@ impl EventLoop {
         let (tx, rx) = sync_channel(EVENT_CHANNEL_CAPACITY);
         let worker_tx = tx.clone();
         let shutdown = Arc::new(AtomicBool::new(false));
+        let tick = Arc::new(Mutex::new(tick));
         let worker_shutdown = Arc::clone(&shutdown);
+        let worker_tick = Arc::clone(&tick);
         let handle = thread::spawn(move || {
             let mut input = input;
-            run_worker(&mut input, &clock, &worker_tx, &worker_shutdown, tick);
+            run_worker(
+                &mut input,
+                &clock,
+                &worker_tx,
+                &worker_shutdown,
+                &worker_tick,
+            );
         });
 
         Self {
@@ -105,6 +130,7 @@ impl EventLoop {
             rx,
             handle: Some(handle),
             shutdown,
+            tick,
         }
     }
 
@@ -168,14 +194,20 @@ fn run_worker<I, C>(
     clock: &C,
     tx: &AppEventSender,
     shutdown: &Arc<AtomicBool>,
-    tick: Duration,
+    tick: &Arc<Mutex<Duration>>,
 ) where
     I: TerminalEventSource,
     C: Clock,
 {
-    let mut next_tick = clock.now() + tick;
+    let mut current_tick = tick_interval(tick);
+    let mut next_tick = clock.now() + current_tick;
 
     while !shutdown.load(Ordering::Acquire) {
+        let configured_tick = tick_interval(tick);
+        if configured_tick != current_tick {
+            current_tick = configured_tick;
+            next_tick = clock.now() + current_tick;
+        }
         let timeout = next_tick.saturating_duration_since(clock.now());
         let poll_result = input.poll(timeout);
 
@@ -193,7 +225,8 @@ fn run_worker<I, C>(
                 if !send_app_event(tx, AppEvent::Tick) {
                     break;
                 }
-                next_tick = clock.now() + tick;
+                current_tick = tick_interval(tick);
+                next_tick = clock.now() + current_tick;
             }
             Err(error) => {
                 tracing::warn!(%error, "failed to poll terminal input");
@@ -213,7 +246,12 @@ pub fn run_worker_for_test<I, C>(
     I: TerminalEventSource,
     C: Clock,
 {
-    run_worker(input, clock, tx, shutdown, tick);
+    run_worker(input, clock, tx, shutdown, &Arc::new(Mutex::new(tick)));
+}
+
+fn tick_interval(tick: &Arc<Mutex<Duration>>) -> Duration {
+    tick.lock()
+        .map_or_else(|_| Duration::from_millis(250), |current| *current)
 }
 
 fn read_and_dispatch<I>(input: &mut I, tx: &AppEventSender) -> bool

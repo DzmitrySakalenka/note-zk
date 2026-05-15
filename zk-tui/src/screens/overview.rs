@@ -138,7 +138,14 @@ impl OverviewScreen {
                 self.state = OverviewState::Loaded(OverviewSnapshot::new(summary.clone(), ctx));
             }
             #[cfg(feature = "ai")]
-            JobResult::SemanticSearch(_) => {}
+            JobResult::SemanticSearch(_)
+            | JobResult::ChatConversations(_)
+            | JobResult::ChatConversation(_)
+            | JobResult::ChatConversationCreated(_)
+            | JobResult::ChatConversationRenamed(_)
+            | JobResult::ChatConversationArchived(_)
+            | JobResult::ChatConversationDeleted(_)
+            | JobResult::ChatStreamDone(_) => {}
             JobResult::Error { kind, error } if *kind == JobKind::StatusSummary => {
                 self.state = OverviewState::Error(error.to_string());
             }

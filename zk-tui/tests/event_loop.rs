@@ -64,6 +64,21 @@ fn event_loop_public_api_is_reachable() {
     assert_sender_signature(EventLoop::sender);
 }
 
+#[test]
+fn event_loop_tick_interval_can_change_after_start() {
+    let event_loop = EventLoop::start_with_source(
+        ExitRecorderInput::default(),
+        SystemClock,
+        Duration::from_millis(250),
+    );
+
+    assert_eq!(event_loop.tick_interval(), Duration::from_millis(250));
+
+    event_loop.set_tick_interval(Duration::from_millis(50));
+
+    assert_eq!(event_loop.tick_interval(), Duration::from_millis(50));
+}
+
 #[derive(Clone)]
 struct ManualClock {
     now: Arc<Mutex<Instant>>,
@@ -148,6 +163,7 @@ impl TerminalEventSource for FakeInput {
     }
 }
 
+#[derive(Default)]
 struct ExitRecorderInput {
     dropped: Arc<AtomicBool>,
 }

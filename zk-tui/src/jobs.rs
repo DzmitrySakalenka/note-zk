@@ -1,6 +1,7 @@
 //! Background job runner for facade work that must stay off the render thread.
 
 use std::{
+    any::Any,
     fmt, fs,
     path::{Path, PathBuf},
     sync::{
@@ -14,6 +15,8 @@ use std::{
 
 use anyhow::{Context, Result};
 #[cfg(feature = "ai")]
+use futures::StreamExt;
+#[cfg(feature = "ai")]
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 use zeroize::Zeroizing;
@@ -26,7 +29,10 @@ use zk_ai::{
     service::semantic_search::SearchHit,
 };
 #[cfg(feature = "ai")]
-use zk_app::{AiFacade, AiFacadeDeps, LocalEmbeddingsRepoHandle, SemanticSearchRequest};
+use zk_app::{
+    AiFacade, AiFacadeDeps, ChatChunk, ChatRequest, ConversationDetail, ConversationDto,
+    ListConversationsParams, LocalEmbeddingsRepoHandle, SemanticSearchRequest,
+};
 use zk_app::{
     BootstrapOutcome, DeviceId, DeviceSyncStatus, DoctorReport, EffectiveConfig, PullApplyOutcome,
     PurgeOutcome, PurgeRequest, PushApplyOutcome, RebuildOptions, RebuildOutcome,
@@ -45,7 +51,9 @@ use zk_domain::{
     WireItemType, id::RelativePath, sync::SyncStatus,
 };
 #[cfg(feature = "ai")]
-use zk_domain::{EmbeddingModelId, ExecutionMode, ProviderId, ProviderSelectorPolicy};
+use zk_domain::{
+    Citation, ConversationId, EmbeddingModelId, ExecutionMode, ProviderId, ProviderSelectorPolicy,
+};
 use zk_index::{AssetRepo, ListedNote, NoteListQuery, NoteRepo, SyncStateRepo};
 use zk_sync::HttpTransport;
 
@@ -283,6 +291,70 @@ pub struct SemanticSearchResult {
     pub hits: Vec<SemanticSearchResultItem>,
 }
 
+/// Result payload for listing chat conversations.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatConversationListResult {
+    /// Conversations returned by the server.
+    pub conversations: Vec<ConversationDto>,
+}
+
+/// Result payload for loading one chat conversation.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChatConversationDetailResult {
+    /// Conversation metadata and messages returned by the server.
+    pub detail: ConversationDetail,
+}
+
+/// Result payload for creating one chat conversation.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatConversationCreatedResult {
+    /// Created conversation metadata.
+    pub conversation: ConversationDto,
+}
+
+/// Result payload for mutating one chat conversation.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatConversationMutationResult {
+    /// Conversation id targeted by the mutation.
+    pub conversation_id: ConversationId,
+    /// New title for rename mutations.
+    pub title: Option<String>,
+    /// Archive state for archive mutations.
+    pub archived: Option<bool>,
+}
+
+/// One streamed assistant text chunk.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatStreamDelta {
+    /// Conversation receiving the assistant response.
+    pub conversation_id: ConversationId,
+    /// Text delta emitted by the server stream.
+    pub text: String,
+}
+
+/// One streamed assistant citation.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChatStreamCitation {
+    /// Conversation receiving the citation.
+    pub conversation_id: ConversationId,
+    /// Citation emitted by the server stream.
+    pub citation: Citation,
+}
+
+/// Terminal event for a completed chat stream.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatStreamDone {
+    /// Conversation whose stream completed.
+    pub conversation_id: ConversationId,
+}
+
 /// Kind discriminator for local conflict rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictItemKind {
@@ -477,6 +549,66 @@ pub enum JobSpec {
         /// Search request to execute.
         request: SemanticSearchRequest,
     },
+    /// Lists server-side chat conversations.
+    #[cfg(feature = "ai")]
+    ChatListConversations {
+        /// Include archived conversations when true.
+        include_archived: bool,
+        /// Execution mode selected by the chat screen.
+        mode: ExecutionMode,
+    },
+    /// Loads one server-side chat conversation.
+    #[cfg(feature = "ai")]
+    ChatGetConversation {
+        /// Conversation id to load.
+        conversation_id: ConversationId,
+        /// Execution mode selected by the chat screen.
+        mode: ExecutionMode,
+    },
+    /// Creates one server-side chat conversation.
+    #[cfg(feature = "ai")]
+    ChatCreateConversation {
+        /// Optional initial title.
+        title: Option<String>,
+        /// Execution mode selected by the chat screen.
+        mode: ExecutionMode,
+    },
+    /// Renames one server-side chat conversation.
+    #[cfg(feature = "ai")]
+    ChatRenameConversation {
+        /// Conversation id to rename.
+        conversation_id: ConversationId,
+        /// New conversation title.
+        title: String,
+        /// Execution mode selected by the chat screen.
+        mode: ExecutionMode,
+    },
+    /// Archives or unarchives one server-side chat conversation.
+    #[cfg(feature = "ai")]
+    ChatArchiveConversation {
+        /// Conversation id to archive or unarchive.
+        conversation_id: ConversationId,
+        /// Requested archived state.
+        archived: bool,
+        /// Execution mode selected by the chat screen.
+        mode: ExecutionMode,
+    },
+    /// Deletes one server-side chat conversation.
+    #[cfg(feature = "ai")]
+    ChatDeleteConversation {
+        /// Conversation id to delete.
+        conversation_id: ConversationId,
+        /// Execution mode selected by the chat screen.
+        mode: ExecutionMode,
+    },
+    /// Streams one chat turn through the server.
+    #[cfg(feature = "ai")]
+    ChatStream {
+        /// Chat turn request.
+        request: ChatRequest,
+        /// Execution mode selected by the chat screen.
+        mode: ExecutionMode,
+    },
     /// Lists local items currently marked as sync conflicts.
     ListConflicts,
     /// Resolves one local sync conflict through the configured server.
@@ -528,6 +660,20 @@ impl JobSpec {
             Self::ReadNoteBody { .. } => JobKind::ReadNoteBody,
             #[cfg(feature = "ai")]
             Self::SemanticSearch { .. } => JobKind::SemanticSearch,
+            #[cfg(feature = "ai")]
+            Self::ChatListConversations { .. } => JobKind::ChatListConversations,
+            #[cfg(feature = "ai")]
+            Self::ChatGetConversation { .. } => JobKind::ChatGetConversation,
+            #[cfg(feature = "ai")]
+            Self::ChatCreateConversation { .. } => JobKind::ChatCreateConversation,
+            #[cfg(feature = "ai")]
+            Self::ChatRenameConversation { .. } => JobKind::ChatRenameConversation,
+            #[cfg(feature = "ai")]
+            Self::ChatArchiveConversation { .. } => JobKind::ChatArchiveConversation,
+            #[cfg(feature = "ai")]
+            Self::ChatDeleteConversation { .. } => JobKind::ChatDeleteConversation,
+            #[cfg(feature = "ai")]
+            Self::ChatStream { .. } => JobKind::ChatStream,
             Self::ListConflicts => JobKind::ListConflicts,
             Self::ResolveConflict(_) => JobKind::ResolveConflict,
             Self::IssueDeviceToken(_) => JobKind::IssueDeviceToken,
@@ -562,6 +708,27 @@ pub enum JobKind {
     /// Semantic search job.
     #[cfg(feature = "ai")]
     SemanticSearch,
+    /// Chat conversation list job.
+    #[cfg(feature = "ai")]
+    ChatListConversations,
+    /// Chat conversation detail job.
+    #[cfg(feature = "ai")]
+    ChatGetConversation,
+    /// Chat conversation creation job.
+    #[cfg(feature = "ai")]
+    ChatCreateConversation,
+    /// Chat conversation rename job.
+    #[cfg(feature = "ai")]
+    ChatRenameConversation,
+    /// Chat conversation archive job.
+    #[cfg(feature = "ai")]
+    ChatArchiveConversation,
+    /// Chat conversation delete job.
+    #[cfg(feature = "ai")]
+    ChatDeleteConversation,
+    /// Chat stream job.
+    #[cfg(feature = "ai")]
+    ChatStream,
     /// Local conflict-list job.
     ListConflicts,
     /// Explicit conflict-resolution job.
@@ -639,6 +806,27 @@ pub enum JobResult {
     /// Semantic search completed successfully.
     #[cfg(feature = "ai")]
     SemanticSearch(SemanticSearchResult),
+    /// Chat conversations loaded successfully.
+    #[cfg(feature = "ai")]
+    ChatConversations(ChatConversationListResult),
+    /// Chat conversation detail loaded successfully.
+    #[cfg(feature = "ai")]
+    ChatConversation(ChatConversationDetailResult),
+    /// Chat conversation created successfully.
+    #[cfg(feature = "ai")]
+    ChatConversationCreated(ChatConversationCreatedResult),
+    /// Chat conversation renamed successfully.
+    #[cfg(feature = "ai")]
+    ChatConversationRenamed(ChatConversationMutationResult),
+    /// Chat conversation archived or unarchived successfully.
+    #[cfg(feature = "ai")]
+    ChatConversationArchived(ChatConversationMutationResult),
+    /// Chat conversation deleted successfully.
+    #[cfg(feature = "ai")]
+    ChatConversationDeleted(ChatConversationMutationResult),
+    /// Chat stream completed successfully.
+    #[cfg(feature = "ai")]
+    ChatStreamDone(ChatStreamDone),
     /// Local conflict list completed successfully.
     Conflicts(ConflictListResult),
     /// Explicit conflict resolution completed successfully.
@@ -774,7 +962,7 @@ fn run_worker(
     while let Ok(message) = rx_job.recv() {
         match message {
             JobMessage::Run(job) => {
-                let result = run_queued_job(&runtime, ctx, job, shutdown);
+                let result = run_queued_job(&runtime, events, ctx, job, shutdown);
                 if !send_job_result(events, result) {
                     break;
                 }
@@ -786,6 +974,7 @@ fn run_worker(
 
 fn run_queued_job(
     runtime: &Runtime,
+    events: &AppEventSender,
     ctx: &JobContext,
     job: QueuedJob,
     shutdown: &AtomicBool,
@@ -795,7 +984,7 @@ fn run_queued_job(
         return JobResult::Cancelled { kind };
     }
 
-    match execute_job(runtime, ctx, job.spec, &job.cancelled) {
+    match execute_job(runtime, events, ctx, job.spec, &job.cancelled) {
         Ok(result) => result,
         Err(error) => JobResult::Error { kind, error },
     }
@@ -803,10 +992,14 @@ fn run_queued_job(
 
 fn execute_job(
     runtime: &Runtime,
+    events: &AppEventSender,
     ctx: &JobContext,
     spec: JobSpec,
     cancelled: &AtomicBool,
 ) -> Result<JobResult> {
+    #[cfg(not(feature = "ai"))]
+    let _ = events;
+
     match spec {
         JobSpec::ScanVault(_args) => Ok(JobResult::ScanOutcome(
             zk_app::scan_vault(&ctx.vault_root, &ctx.config)
@@ -842,6 +1035,41 @@ fn execute_job(
         JobSpec::ReadNoteBody { path } => run_read_note_body_job(ctx, path),
         #[cfg(feature = "ai")]
         JobSpec::SemanticSearch { request } => run_semantic_search_job(runtime, ctx, request),
+        #[cfg(feature = "ai")]
+        JobSpec::ChatListConversations {
+            include_archived,
+            mode,
+        } => run_chat_list_conversations_job(runtime, ctx, include_archived, mode),
+        #[cfg(feature = "ai")]
+        JobSpec::ChatGetConversation {
+            conversation_id,
+            mode,
+        } => run_chat_get_conversation_job(runtime, ctx, conversation_id, mode),
+        #[cfg(feature = "ai")]
+        JobSpec::ChatCreateConversation { title, mode } => {
+            run_chat_create_conversation_job(runtime, ctx, title, mode)
+        }
+        #[cfg(feature = "ai")]
+        JobSpec::ChatRenameConversation {
+            conversation_id,
+            title,
+            mode,
+        } => run_chat_rename_conversation_job(runtime, ctx, conversation_id, title, mode),
+        #[cfg(feature = "ai")]
+        JobSpec::ChatArchiveConversation {
+            conversation_id,
+            archived,
+            mode,
+        } => run_chat_archive_conversation_job(runtime, ctx, conversation_id, archived, mode),
+        #[cfg(feature = "ai")]
+        JobSpec::ChatDeleteConversation {
+            conversation_id,
+            mode,
+        } => run_chat_delete_conversation_job(runtime, ctx, conversation_id, mode),
+        #[cfg(feature = "ai")]
+        JobSpec::ChatStream { request, mode } => {
+            run_chat_stream_job(runtime, ctx, events, request, mode)
+        }
         JobSpec::ListConflicts => run_list_conflicts_job(ctx),
         JobSpec::ResolveConflict(intent) => run_resolve_conflict_job(runtime, ctx, intent),
         JobSpec::IssueDeviceToken(intent) => run_issue_device_token_job(ctx, intent),
@@ -967,6 +1195,200 @@ fn semantic_result_item(
         current_path,
         is_trashed,
     })
+}
+
+#[cfg(feature = "ai")]
+fn run_chat_list_conversations_job(
+    runtime: &Runtime,
+    ctx: &JobContext,
+    include_archived: bool,
+    mode: ExecutionMode,
+) -> Result<JobResult> {
+    let facade = chat_facade(ctx, mode)?;
+    let conversations = runtime
+        .block_on(facade.list_conversations(ListConversationsParams {
+            include_archived,
+            limit: None,
+            offset: None,
+        }))
+        .context("while attempting to list chat conversations from TUI job")?;
+
+    Ok(JobResult::ChatConversations(ChatConversationListResult {
+        conversations,
+    }))
+}
+
+#[cfg(feature = "ai")]
+fn run_chat_get_conversation_job(
+    runtime: &Runtime,
+    ctx: &JobContext,
+    conversation_id: ConversationId,
+    mode: ExecutionMode,
+) -> Result<JobResult> {
+    let facade = chat_facade(ctx, mode)?;
+    let detail = runtime
+        .block_on(facade.get_conversation(conversation_id))
+        .context("while attempting to load chat conversation from TUI job")?;
+
+    Ok(JobResult::ChatConversation(ChatConversationDetailResult {
+        detail,
+    }))
+}
+
+#[cfg(feature = "ai")]
+fn run_chat_create_conversation_job(
+    runtime: &Runtime,
+    ctx: &JobContext,
+    title: Option<String>,
+    mode: ExecutionMode,
+) -> Result<JobResult> {
+    let facade = chat_facade(ctx, mode)?;
+    let conversation = runtime
+        .block_on(facade.create_conversation(title))
+        .context("while attempting to create chat conversation from TUI job")?;
+
+    Ok(JobResult::ChatConversationCreated(
+        ChatConversationCreatedResult { conversation },
+    ))
+}
+
+#[cfg(feature = "ai")]
+fn run_chat_rename_conversation_job(
+    runtime: &Runtime,
+    ctx: &JobContext,
+    conversation_id: ConversationId,
+    title: String,
+    mode: ExecutionMode,
+) -> Result<JobResult> {
+    let facade = chat_facade(ctx, mode)?;
+    runtime
+        .block_on(facade.rename_conversation(conversation_id.clone(), title.clone()))
+        .context("while attempting to rename chat conversation from TUI job")?;
+
+    Ok(JobResult::ChatConversationRenamed(
+        ChatConversationMutationResult {
+            conversation_id,
+            title: Some(title),
+            archived: None,
+        },
+    ))
+}
+
+#[cfg(feature = "ai")]
+fn run_chat_archive_conversation_job(
+    runtime: &Runtime,
+    ctx: &JobContext,
+    conversation_id: ConversationId,
+    archived: bool,
+    mode: ExecutionMode,
+) -> Result<JobResult> {
+    let facade = chat_facade(ctx, mode)?;
+    runtime
+        .block_on(facade.archive_conversation(conversation_id.clone(), archived))
+        .context("while attempting to archive chat conversation from TUI job")?;
+
+    Ok(JobResult::ChatConversationArchived(
+        ChatConversationMutationResult {
+            conversation_id,
+            title: None,
+            archived: Some(archived),
+        },
+    ))
+}
+
+#[cfg(feature = "ai")]
+fn run_chat_delete_conversation_job(
+    runtime: &Runtime,
+    ctx: &JobContext,
+    conversation_id: ConversationId,
+    mode: ExecutionMode,
+) -> Result<JobResult> {
+    let facade = chat_facade(ctx, mode)?;
+    runtime
+        .block_on(facade.delete_conversation(conversation_id.clone()))
+        .context("while attempting to delete chat conversation from TUI job")?;
+
+    Ok(JobResult::ChatConversationDeleted(
+        ChatConversationMutationResult {
+            conversation_id,
+            title: None,
+            archived: None,
+        },
+    ))
+}
+
+#[cfg(feature = "ai")]
+fn run_chat_stream_job(
+    runtime: &Runtime,
+    ctx: &JobContext,
+    events: &AppEventSender,
+    request: ChatRequest,
+    mode: ExecutionMode,
+) -> Result<JobResult> {
+    let conversation_id = request.conversation_id.clone();
+    let facade = chat_facade(ctx, mode)?;
+    let mut stream = runtime
+        .block_on(facade.chat(request))
+        .context("while attempting to open chat stream from TUI job")?;
+
+    runtime
+        .block_on(async {
+            while let Some(chunk) = stream.next().await {
+                match chunk.context("while attempting to read chat stream from TUI job")? {
+                    ChatChunk::Delta { text } => {
+                        send_chat_payload(
+                            events,
+                            ChatStreamDelta {
+                                conversation_id: conversation_id.clone(),
+                                text,
+                            },
+                        )?;
+                    }
+                    ChatChunk::Citation(citation) => {
+                        send_chat_payload(
+                            events,
+                            ChatStreamCitation {
+                                conversation_id: conversation_id.clone(),
+                                citation,
+                            },
+                        )?;
+                    }
+                    ChatChunk::Done { .. } => {}
+                }
+            }
+
+            Ok::<(), anyhow::Error>(())
+        })
+        .context("while attempting to stream chat from TUI job")?;
+
+    Ok(JobResult::ChatStreamDone(ChatStreamDone {
+        conversation_id,
+    }))
+}
+
+#[cfg(feature = "ai")]
+fn send_chat_payload(events: &AppEventSender, payload: impl Any + Send + 'static) -> Result<()> {
+    if send_background_payload(events, payload) {
+        Ok(())
+    } else {
+        anyhow::bail!("TUI event channel disconnected while streaming chat")
+    }
+}
+
+#[cfg(feature = "ai")]
+fn chat_facade(ctx: &JobContext, mode: ExecutionMode) -> Result<AiFacade> {
+    let http = resolve_chat_transport(
+        mode,
+        ctx.config.sync.server_url.as_ref(),
+        &ctx.config.sync.bearer_token_env,
+    )?;
+
+    AiFacade::new(AiFacadeDeps {
+        http,
+        mode,
+        ..AiFacadeDeps::default()
+    })
+    .context("while attempting to construct chat facade from TUI job")
 }
 
 fn run_list_conflicts_job(ctx: &JobContext) -> Result<JobResult> {
@@ -1219,6 +1641,55 @@ fn admin_client_from_context(ctx: &JobContext) -> Result<AdminClient> {
 
     AdminClient::new(server_url, bearer_token, token_env)
         .context("while attempting to construct admin HTTP client for TUI job")
+}
+
+#[cfg(feature = "ai")]
+fn resolve_chat_transport(
+    mode: ExecutionMode,
+    server_url: Option<&url::Url>,
+    bearer_token_env: &str,
+) -> Result<Option<Arc<HttpTransport>>> {
+    match mode {
+        ExecutionMode::Connected => required_chat_transport(server_url, bearer_token_env)
+            .map(Arc::new)
+            .map(Some),
+        ExecutionMode::Offline => Ok(None),
+        ExecutionMode::Hybrid => optional_chat_transport(server_url, bearer_token_env)
+            .map(|transport| transport.map(Arc::new)),
+    }
+}
+
+#[cfg(feature = "ai")]
+fn required_chat_transport(
+    server_url: Option<&url::Url>,
+    bearer_token_env: &str,
+) -> Result<HttpTransport> {
+    let server_url = server_url
+        .cloned()
+        .context("server_url is required for connected chat")?;
+    let bearer_token = std::env::var(bearer_token_env).map_err(|_| {
+        anyhow::anyhow!("environment variable {bearer_token_env} is required for connected chat")
+    })?;
+
+    HttpTransport::new(server_url, Some(bearer_token))
+        .context("while attempting to construct chat HTTP transport")
+}
+
+#[cfg(feature = "ai")]
+fn optional_chat_transport(
+    server_url: Option<&url::Url>,
+    bearer_token_env: &str,
+) -> Result<Option<HttpTransport>> {
+    let Some(server_url) = server_url.cloned() else {
+        return Ok(None);
+    };
+    let Ok(bearer_token) = std::env::var(bearer_token_env) else {
+        return Ok(None);
+    };
+
+    HttpTransport::new(server_url, Some(bearer_token))
+        .map(Some)
+        .context("while attempting to construct chat HTTP transport")
 }
 
 #[cfg(feature = "ai")]
@@ -1644,11 +2115,15 @@ fn run_mock_job(job: MockJob, cancelled: &AtomicBool) -> JobResult {
 }
 
 fn send_job_result(events: &AppEventSender, result: JobResult) -> bool {
-    let event = AppEvent::Background(BackgroundResult::new(Box::new(result)));
+    send_background_payload(events, result)
+}
+
+fn send_background_payload(events: &AppEventSender, payload: impl Any + Send + 'static) -> bool {
+    let event = AppEvent::Background(BackgroundResult::new(Box::new(payload)));
     match events.try_send(event) {
         Ok(()) => true,
         Err(TrySendError::Full(_event)) => {
-            tracing::warn!("TUI event channel is full; dropping job result");
+            tracing::warn!("TUI event channel is full; dropping background payload");
             true
         }
         Err(TrySendError::Disconnected(_event)) => {

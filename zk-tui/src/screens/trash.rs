@@ -216,7 +216,14 @@ impl TrashScreen {
                 ScreenAction::Stay
             }
             #[cfg(feature = "ai")]
-            JobResult::SemanticSearch(_) => ScreenAction::Stay,
+            JobResult::SemanticSearch(_)
+            | JobResult::ChatConversations(_)
+            | JobResult::ChatConversation(_)
+            | JobResult::ChatConversationCreated(_)
+            | JobResult::ChatConversationRenamed(_)
+            | JobResult::ChatConversationArchived(_)
+            | JobResult::ChatConversationDeleted(_)
+            | JobResult::ChatStreamDone(_) => ScreenAction::Stay,
             JobResult::Status(_)
             | JobResult::Doctor(_)
             | JobResult::RebuildIndex(_)

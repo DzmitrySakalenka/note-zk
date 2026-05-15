@@ -15,6 +15,7 @@ pub mod widgets;
 // TG-TUI-003 wires the dependency surface before the modules consume it.
 use anyhow as _;
 use crossterm as _;
+use futures as _;
 use ratatui as _;
 use serde as _;
 use serde_json as _;

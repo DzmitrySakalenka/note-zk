@@ -15,10 +15,10 @@ use ratatui::{
 };
 use zeroize::Zeroizing;
 #[cfg(feature = "ai")]
-use zk_app::SemanticSearchRequest;
-#[cfg(feature = "ai")]
-use zk_domain::ExecutionMode;
+use zk_app::{ChatRequest, SemanticSearchRequest};
 use zk_domain::id::RelativePath;
+#[cfg(feature = "ai")]
+use zk_domain::{ConversationId, ExecutionMode};
 use zk_tui::{
     app::{App, Screen, ScreenAction, ScreenCtx},
     event::{
@@ -182,6 +182,111 @@ fn semantic_search_job_kind_is_reachable() {
     );
 }
 
+#[cfg(feature = "ai")]
+#[test]
+fn chat_job_kinds_are_reachable() {
+    let conversation_id = ConversationId::new("01JAR5A3PJEZ3SKG67PN8N6S6S");
+
+    assert_eq!(
+        JobSpec::ChatListConversations {
+            include_archived: false,
+            mode: ExecutionMode::Hybrid,
+        }
+        .kind(),
+        JobKind::ChatListConversations
+    );
+    assert_eq!(
+        JobSpec::ChatGetConversation {
+            conversation_id: conversation_id.clone(),
+            mode: ExecutionMode::Hybrid,
+        }
+        .kind(),
+        JobKind::ChatGetConversation
+    );
+    assert_eq!(
+        JobSpec::ChatStream {
+            request: chat_request(conversation_id),
+            mode: ExecutionMode::Connected,
+        }
+        .kind(),
+        JobKind::ChatStream
+    );
+}
+
+#[cfg(feature = "ai")]
+#[tokio::test(flavor = "current_thread")]
+async fn runner_streams_chat_chunks_from_mock_server() {
+    use serde_json::json;
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{body_json, header, method, path},
+    };
+
+    const TOKEN_ENV: &str = "CARGO_MANIFEST_DIR";
+    const CONVERSATION_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S6S";
+    const NOTE_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S6N";
+    const CHUNK_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S6C";
+
+    let expected_token = std::env::var(TOKEN_ENV).expect("cargo should set manifest dir");
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/ai/chat"))
+        .and(header("authorization", format!("Bearer {expected_token}")))
+        .and(body_json(json!({
+            "conversation_id": CONVERSATION_ID,
+            "user_query": "hello",
+            "top_k": 8,
+            "stream": true,
+        })))
+        .respond_with(ResponseTemplate::new(200).append_header("content-type", "text/event-stream").set_body_string(format!(
+            "event: delta\ndata: {{\"text\":\"hello \"}}\n\n\
+             event: delta\ndata: {{\"text\":\"from \"}}\n\n\
+             event: delta\ndata: {{\"text\":\"stub\"}}\n\n\
+             event: citation\ndata: {{\"note_id\":\"{NOTE_ID}\",\"chunk_id\":\"{CHUNK_ID}\",\"similarity\":0.91,\"snippet\":\"source text\",\"ordinal\":1}}\n\n\
+             event: done\ndata: {{\"finish_reason\":\"stop\",\"usage\":{{\"input_tokens\":1,\"output_tokens\":1}}}}\n\n"
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let (tx, rx) = sync_channel(EVENT_CHANNEL_CAPACITY);
+    let mut config = zk_app::EffectiveConfig {
+        vault_path: std::path::PathBuf::from("/vault"),
+        ..zk_app::EffectiveConfig::default()
+    };
+    config.sync.server_url = Some(server.uri().parse().expect("mock server URL should parse"));
+    config.sync.bearer_token_env = TOKEN_ENV.to_string();
+    let runner = JobRunner::start(
+        tx,
+        JobContext::new(config, std::path::PathBuf::from("/vault")),
+    );
+
+    runner.enqueue(JobSpec::ChatStream {
+        request: chat_request(ConversationId::new(CONVERSATION_ID)),
+        mode: ExecutionMode::Connected,
+    });
+
+    let mut deltas = Vec::new();
+    let mut citations = Vec::new();
+    let mut done = None;
+    while done.is_none() {
+        match recv_background_payload(&rx, Duration::from_secs(1)) {
+            ChatPayload::Delta(delta) => deltas.push(delta.text),
+            ChatPayload::Citation(citation) => citations.push(citation.citation),
+            ChatPayload::Done(stream_done) => done = Some(stream_done),
+        }
+    }
+
+    assert_eq!(deltas, ["hello ", "from ", "stub"]);
+    assert_eq!(citations.len(), 1);
+    assert_eq!(citations[0].note_id.as_str(), NOTE_ID);
+    assert_eq!(
+        done.expect("stream should finish").conversation_id.as_str(),
+        CONVERSATION_ID
+    );
+    server.verify().await;
+}
+
 #[test]
 fn runner_reads_note_body_preview_from_disk() {
     let temp = tempfile::tempdir().expect("temp dir should create");
@@ -332,6 +437,50 @@ fn recv_job_result(rx: &Receiver<AppEvent>, timeout: Duration) -> JobResult {
     downcast_job_result(result)
 }
 
+#[cfg(feature = "ai")]
+fn recv_background_payload(rx: &Receiver<AppEvent>, timeout: Duration) -> ChatPayload {
+    let event = rx
+        .recv_timeout(timeout)
+        .unwrap_or_else(|error| match error {
+            RecvTimeoutError::Timeout => panic!("timed out waiting for chat payload"),
+            RecvTimeoutError::Disconnected => panic!("job event channel disconnected"),
+        });
+
+    let AppEvent::Background(result) = event else {
+        panic!("expected background chat payload");
+    };
+    let payload = result.into_payload();
+    if payload.is::<zk_tui::jobs::ChatStreamDelta>() {
+        return ChatPayload::Delta(
+            *payload
+                .downcast::<zk_tui::jobs::ChatStreamDelta>()
+                .expect("chat delta should downcast"),
+        );
+    }
+    if payload.is::<zk_tui::jobs::ChatStreamCitation>() {
+        return ChatPayload::Citation(
+            *payload
+                .downcast::<zk_tui::jobs::ChatStreamCitation>()
+                .expect("chat citation should downcast"),
+        );
+    }
+
+    let job_result = *payload
+        .downcast::<JobResult>()
+        .expect("chat terminal payload should downcast to JobResult");
+    let JobResult::ChatStreamDone(done) = job_result else {
+        panic!("expected chat stream done result");
+    };
+    ChatPayload::Done(done)
+}
+
+#[cfg(feature = "ai")]
+enum ChatPayload {
+    Delta(zk_tui::jobs::ChatStreamDelta),
+    Citation(zk_tui::jobs::ChatStreamCitation),
+    Done(zk_tui::jobs::ChatStreamDone),
+}
+
 fn downcast_job_result(result: BackgroundResult) -> JobResult {
     let Ok(result) = result.into_payload().downcast::<JobResult>() else {
         panic!("background payload should downcast to JobResult");
@@ -373,4 +522,14 @@ fn rendered_rows(terminal: &Terminal<TestBackend>) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(feature = "ai")]
+fn chat_request(conversation_id: ConversationId) -> ChatRequest {
+    ChatRequest {
+        conversation_id,
+        user_query: "hello".to_string(),
+        top_k: 8,
+        stream: true,
+    }
 }

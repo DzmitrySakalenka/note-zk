@@ -35,9 +35,15 @@ use crate::{
 };
 
 #[cfg(feature = "ai")]
+use crate::jobs::JobKind;
+#[cfg(feature = "ai")]
 use crate::screens::search::SearchScreen;
+#[cfg(feature = "ai")]
+use crate::screens::{chat::ChatScreen, chat::chat_error_hint};
 
 const EVENT_TICK: Duration = Duration::from_millis(250);
+#[cfg(feature = "ai")]
+const ACTIVE_STREAM_TICK: Duration = Duration::from_millis(50);
 
 /// A synchronous screen owned by the top-level app router.
 pub trait Screen {
@@ -310,6 +316,8 @@ pub struct App {
     current: ScreenId,
     modal: Option<Box<dyn Screen>>,
     ctx: ScreenCtx,
+    #[cfg(feature = "ai")]
+    chat_stream_active: bool,
 }
 
 impl App {
@@ -342,6 +350,8 @@ impl App {
             current: ScreenId::all()[0],
             modal: None,
             ctx,
+            #[cfg(feature = "ai")]
+            chat_stream_active: false,
         }
     }
 
@@ -374,6 +384,8 @@ impl App {
             if !self.handle_event(event) {
                 return Ok(());
             }
+            #[cfg(feature = "ai")]
+            events.set_tick_interval(self.desired_tick_interval());
 
             terminal
                 .draw(|frame| self.render(frame))
@@ -533,6 +545,10 @@ impl App {
                 true
             }
             ScreenAction::EnqueueJob(spec) => {
+                #[cfg(feature = "ai")]
+                if spec.kind() == JobKind::ChatStream {
+                    self.chat_stream_active = true;
+                }
                 if let Some(job_runner) = &self.ctx.job_runner {
                     let _handle = job_runner.enqueue(spec);
                 }
@@ -553,10 +569,38 @@ impl App {
     }
 
     fn handle_background_result(&mut self, result: &BackgroundResult) {
-        let Some(JobResult::Error { error, .. }) = result.downcast_ref::<JobResult>() else {
+        let Some(job_result) = result.downcast_ref::<JobResult>() else {
+            #[cfg(feature = "ai")]
+            self.handle_chat_stream_payload(result);
             return;
         };
 
+        #[cfg(feature = "ai")]
+        match job_result {
+            JobResult::ChatStreamDone(_)
+            | JobResult::Cancelled {
+                kind: JobKind::ChatStream,
+            } => {
+                self.chat_stream_active = false;
+                return;
+            }
+            JobResult::Error { kind, error } if is_chat_kind(*kind) => {
+                if *kind == JobKind::ChatStream {
+                    self.chat_stream_active = false;
+                }
+                self.ctx.push_toast(Toast {
+                    severity: ToastSeverity::Error,
+                    text: chat_error_hint(error.to_string()),
+                    ttl: 3,
+                });
+                return;
+            }
+            _ => {}
+        }
+
+        let JobResult::Error { error, .. } = job_result else {
+            return;
+        };
         self.ctx.push_toast(Toast {
             severity: ToastSeverity::Error,
             text: error.to_string(),
@@ -653,6 +697,28 @@ impl App {
     fn available_screen_ids(&self) -> &[ScreenId] {
         &ScreenId::all()[..self.screens.len()]
     }
+
+    #[cfg(feature = "ai")]
+    fn desired_tick_interval(&self) -> Duration {
+        if self.chat_stream_active {
+            ACTIVE_STREAM_TICK
+        } else {
+            EVENT_TICK
+        }
+    }
+
+    #[cfg(feature = "ai")]
+    fn handle_chat_stream_payload(&mut self, result: &BackgroundResult) {
+        if result
+            .downcast_ref::<crate::jobs::ChatStreamDelta>()
+            .is_some()
+            || result
+                .downcast_ref::<crate::jobs::ChatStreamCitation>()
+                .is_some()
+        {
+            self.chat_stream_active = true;
+        }
+    }
 }
 
 fn default_screen(id: ScreenId) -> Box<dyn Screen> {
@@ -668,8 +734,24 @@ fn default_screen(id: ScreenId) -> Box<dyn Screen> {
         #[cfg(feature = "ai")]
         ScreenId::Search => Box::<SearchScreen>::default(),
         #[cfg(feature = "ai")]
-        ScreenId::Chat | ScreenId::Wiki => Box::new(PlaceholderScreen { id }),
+        ScreenId::Chat => Box::<ChatScreen>::default(),
+        #[cfg(feature = "ai")]
+        ScreenId::Wiki => Box::new(PlaceholderScreen { id }),
     }
+}
+
+#[cfg(feature = "ai")]
+fn is_chat_kind(kind: JobKind) -> bool {
+    matches!(
+        kind,
+        JobKind::ChatListConversations
+            | JobKind::ChatGetConversation
+            | JobKind::ChatCreateConversation
+            | JobKind::ChatRenameConversation
+            | JobKind::ChatArchiveConversation
+            | JobKind::ChatDeleteConversation
+            | JobKind::ChatStream
+    )
 }
 
 #[cfg(feature = "ai")]
