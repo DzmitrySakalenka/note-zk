@@ -22,7 +22,7 @@ use crate::{
     keymap::{GlobalKeyAction, KeyChord, global_action_for_key},
     screens::{
         doctor::DoctorScreen, help::HelpScreen, notes::NotesScreen, overview::OverviewScreen,
-        sync::SyncScreen,
+        sync::SyncScreen, trash::TrashScreen,
     },
     terminal::TerminalGuard,
     theme::{Theme, ThemeKind},
@@ -58,6 +58,11 @@ pub trait Screen {
     /// Returns screen-local key bindings for the help overlay.
     fn keybindings(&self) -> &'static [(KeyChord, &'static str)] {
         &[]
+    }
+
+    /// Returns whether this screen wants to receive a key before global routing.
+    fn captures_global_key(&self, _key: KeyChord) -> bool {
+        false
     }
 }
 
@@ -438,6 +443,11 @@ impl App {
             return self.dispatch_event(&event);
         }
 
+        if key.kind != KeyEventKind::Release && self.current_screen_captures_global_key(key) {
+            let event = AppEvent::Key(key);
+            return self.dispatch_event(&event);
+        }
+
         let Some(action) = global_action_for_key(key) else {
             let event = AppEvent::Key(key);
             return self.dispatch_event(&event);
@@ -623,6 +633,15 @@ impl App {
             .position(|screen_id| *screen_id == self.current)
     }
 
+    fn current_screen_captures_global_key(&self, key: crossterm::event::KeyEvent) -> bool {
+        let Some(index) = self.current_index() else {
+            return false;
+        };
+        self.screens
+            .get(index)
+            .is_some_and(|screen| screen.captures_global_key(KeyChord::from_key_event(key)))
+    }
+
     fn available_screen_ids(&self) -> &[ScreenId] {
         &ScreenId::all()[..self.screens.len()]
     }
@@ -634,9 +653,8 @@ fn default_screen(id: ScreenId) -> Box<dyn Screen> {
         ScreenId::Notes => Box::<NotesScreen>::default(),
         ScreenId::Sync => Box::<SyncScreen>::default(),
         ScreenId::Doctor => Box::<DoctorScreen>::default(),
-        ScreenId::Trash | ScreenId::Resolve | ScreenId::Auth | ScreenId::Admin => {
-            Box::new(PlaceholderScreen { id })
-        }
+        ScreenId::Trash => Box::<TrashScreen>::default(),
+        ScreenId::Resolve | ScreenId::Auth | ScreenId::Admin => Box::new(PlaceholderScreen { id }),
         #[cfg(feature = "ai")]
         ScreenId::Search | ScreenId::Chat | ScreenId::Wiki => Box::new(PlaceholderScreen { id }),
     }

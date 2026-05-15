@@ -5,3 +5,4 @@ pub mod help;
 pub mod notes;
 pub mod overview;
 pub mod sync;
+pub mod trash;
