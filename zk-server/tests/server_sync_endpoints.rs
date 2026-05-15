@@ -409,19 +409,26 @@ async fn sync_resolve_conflict_keep_remote_returns_current_revision() {
 }
 
 #[tokio::test]
-async fn sync_resolve_conflict_keep_local_returns_not_accepted() {
+async fn sync_resolve_conflict_keep_local_returns_current_revision() {
     let harness = authenticated_harness();
+    seed_note(&harness.state, "note-a", 6);
 
     let response = build_router(harness.state)
         .oneshot(authenticated_post_json(
             "/sync/resolve-conflict",
-            &resolve_body("note-missing", "keep_local"),
+            &resolve_body("note-a", "keep_local"),
         ))
         .await
         .expect("resolve request should succeed");
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response_json(response).await, json!({"accepted": false}));
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "accepted": true,
+            "new_server_revision": 6
+        })
+    );
 }
 
 #[tokio::test]

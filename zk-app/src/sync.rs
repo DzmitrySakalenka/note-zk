@@ -32,7 +32,7 @@ SELECT COUNT(*)
 FROM note_sync_state AS state
 JOIN notes_index AS note ON note.note_id = state.note_id
 WHERE state.device_id = ?1
-  AND state.sync_status != 'conflict'
+  AND state.sync_status NOT IN ('conflict', 'pending_download')
   AND note.is_deleted = 0
   AND (
       state.pending_operation IS NOT NULL
@@ -47,7 +47,7 @@ SELECT COUNT(*)
 FROM asset_sync_state AS state
 JOIN assets_index AS asset ON asset.asset_id = state.asset_id
 WHERE state.device_id = ?1
-  AND state.sync_status != 'conflict'
+  AND state.sync_status NOT IN ('conflict', 'pending_download')
   AND asset.is_deleted = 0
   AND (
       state.pending_operation IS NOT NULL
@@ -63,6 +63,11 @@ const COUNT_CONFLICT_NOTE_SQL: &str =
     "SELECT COUNT(*) FROM note_sync_state WHERE device_id = ?1 AND sync_status = 'conflict'";
 const COUNT_CONFLICT_ASSET_SQL: &str =
     "SELECT COUNT(*) FROM asset_sync_state WHERE device_id = ?1 AND sync_status = 'conflict'";
+
+struct LocalBaseline {
+    content_hash: ContentHash,
+    path: RelativePath,
+}
 
 /// Summary returned from the bootstrap facade entry point.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,16 +222,18 @@ fn apply_conflict_resolution(
     match request.item_type {
         WireItemType::Note => {
             let note_id = NoteId::new(&request.item_id);
+            let baseline = note_local_baseline(conn, &note_id, request)?;
             let mut state = SyncStateRepo::get_note_sync_state(conn, &note_id)?
                 .ok_or_else(|| missing_conflict_item(request))?;
-            apply_note_resolution(&mut state, request, response)?;
+            apply_note_resolution(&mut state, &baseline, request, response)?;
             SyncStateRepo::upsert_note_sync_state(conn, &state)?;
         }
         WireItemType::Asset => {
             let asset_id = AssetId::new(&request.item_id);
+            let baseline = asset_local_baseline(conn, &asset_id, request)?;
             let mut state = SyncStateRepo::get_asset_sync_state(conn, &asset_id)?
                 .ok_or_else(|| missing_conflict_item(request))?;
-            apply_asset_resolution(&mut state, request, response)?;
+            apply_asset_resolution(&mut state, &baseline, request, response)?;
             SyncStateRepo::upsert_asset_sync_state(conn, &state)?;
         }
     }
@@ -236,13 +243,14 @@ fn apply_conflict_resolution(
 
 fn apply_note_resolution(
     state: &mut NoteSyncState,
+    baseline: &LocalBaseline,
     request: &ResolveConflictRequest,
     response: &ResolveConflictResponse,
 ) -> Result<()> {
     ensure_conflict_status(request, state.sync_status)?;
     match request.resolution {
-        WireConflictResolution::KeepLocal => mark_keep_local(state),
-        WireConflictResolution::KeepRemote => mark_keep_remote(state, request, response)?,
+        WireConflictResolution::KeepLocal => mark_keep_local(state, baseline, request, response)?,
+        WireConflictResolution::KeepRemote => mark_keep_remote(state, baseline, request, response)?,
         WireConflictResolution::KeepBoth => return Err(unsupported_keep_both(request)),
     }
     Ok(())
@@ -250,36 +258,88 @@ fn apply_note_resolution(
 
 fn apply_asset_resolution(
     state: &mut AssetSyncState,
+    baseline: &LocalBaseline,
     request: &ResolveConflictRequest,
     response: &ResolveConflictResponse,
 ) -> Result<()> {
     ensure_conflict_status(request, state.sync_status)?;
     match request.resolution {
-        WireConflictResolution::KeepLocal => mark_keep_local(state),
-        WireConflictResolution::KeepRemote => mark_keep_remote(state, request, response)?,
+        WireConflictResolution::KeepLocal => mark_keep_local(state, baseline, request, response)?,
+        WireConflictResolution::KeepRemote => mark_keep_remote(state, baseline, request, response)?,
         WireConflictResolution::KeepBoth => return Err(unsupported_keep_both(request)),
     }
     Ok(())
 }
 
-fn mark_keep_local<Id>(state: &mut SyncState<Id>) {
+fn mark_keep_local<Id>(
+    state: &mut SyncState<Id>,
+    baseline: &LocalBaseline,
+    request: &ResolveConflictRequest,
+    response: &ResolveConflictResponse,
+) -> Result<()> {
+    let revision = accepted_server_revision(request, response)?;
+    state.last_local_hash = Some(baseline.content_hash.clone());
+    state.last_synced_path = Some(baseline.path.clone());
+    state.last_known_server_revision = Some(revision);
     state.sync_status = SyncStatus::PendingUpload;
     state.last_sync_error = None;
+    Ok(())
 }
 
 fn mark_keep_remote<Id>(
     state: &mut SyncState<Id>,
+    baseline: &LocalBaseline,
     request: &ResolveConflictRequest,
     response: &ResolveConflictResponse,
 ) -> Result<()> {
-    let revision = response
-        .new_server_revision
-        .ok_or_else(|| missing_remote_revision(request))?;
+    let revision = accepted_server_revision(request, response)?;
+    state.last_local_hash = Some(baseline.content_hash.clone());
+    state.last_synced_hash = Some(baseline.content_hash.clone());
+    state.last_synced_path = Some(baseline.path.clone());
     state.sync_status = SyncStatus::PendingDownload;
-    state.last_known_server_revision = Some(ServerRevision::new(revision));
+    state.last_known_server_revision = Some(revision);
     state.pending_operation = None;
     state.last_sync_error = None;
     Ok(())
+}
+
+fn note_local_baseline(
+    conn: &Connection,
+    note_id: &NoteId,
+    request: &ResolveConflictRequest,
+) -> Result<LocalBaseline> {
+    let note = NoteRepo::get_note(conn, note_id)?.ok_or_else(|| missing_conflict_item(request))?;
+    Ok(LocalBaseline {
+        content_hash: note.content_hash,
+        path: note.current_path,
+    })
+}
+
+fn asset_local_baseline(
+    conn: &Connection,
+    asset_id: &AssetId,
+    request: &ResolveConflictRequest,
+) -> Result<LocalBaseline> {
+    let asset =
+        AssetRepo::get_asset(conn, asset_id)?.ok_or_else(|| missing_conflict_item(request))?;
+    Ok(LocalBaseline {
+        content_hash: asset.content_hash,
+        path: asset.current_path,
+    })
+}
+
+fn accepted_server_revision(
+    request: &ResolveConflictRequest,
+    response: &ResolveConflictResponse,
+) -> Result<ServerRevision> {
+    if !response.accepted {
+        return Err(unaccepted_resolution(request));
+    }
+
+    response
+        .new_server_revision
+        .map(ServerRevision::new)
+        .ok_or_else(|| missing_resolution_revision(request))
 }
 
 fn ensure_conflict_status(request: &ResolveConflictRequest, status: SyncStatus) -> Result<()> {
@@ -302,10 +362,20 @@ fn missing_conflict_item(request: &ResolveConflictRequest) -> AppError {
     }
 }
 
-fn missing_remote_revision(request: &ResolveConflictRequest) -> AppError {
+fn unaccepted_resolution(request: &ResolveConflictRequest) -> AppError {
     AppError::InvariantViolation {
         context: format!(
-            "keep-remote resolution for {} {} did not return a server revision",
+            "{} {} resolution was not accepted by the server",
+            item_type_label(request.item_type),
+            request.item_id
+        ),
+    }
+}
+
+fn missing_resolution_revision(request: &ResolveConflictRequest) -> AppError {
+    AppError::InvariantViolation {
+        context: format!(
+            "{} {} resolution did not return a server revision",
             item_type_label(request.item_type),
             request.item_id
         ),

@@ -22,7 +22,7 @@ pub(super) async fn resolve_conflict(
     service::validate_device_id(&body.device_id)?;
 
     match body.resolution {
-        WireConflictResolution::KeepRemote => {
+        WireConflictResolution::KeepLocal | WireConflictResolution::KeepRemote => {
             let item_type = body.item_type;
             let item_id = body.item_id.clone();
             let blocking_state = state.clone();
@@ -36,10 +36,6 @@ pub(super) async fn resolve_conflict(
                 new_server_revision: Some(server_revision),
             }))
         }
-        WireConflictResolution::KeepLocal => Ok(Json(ResolveConflictResponse {
-            accepted: false,
-            new_server_revision: None,
-        })),
         WireConflictResolution::KeepBoth => Err(ApiError::from(ServerError::InvalidRequest(
             "keep_both is not supported in v1".to_string(),
         ))),

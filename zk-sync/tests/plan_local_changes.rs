@@ -8,7 +8,7 @@ use zk_domain::{
     id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     note::NoteRecord,
     sync::{PendingOperation, SyncStatus},
-    sync_state::{DeleteRecord, DeleteRecordTarget, NoteSyncState},
+    sync_state::{AssetSyncState, DeleteRecord, DeleteRecordTarget, NoteSyncState},
 };
 use zk_index::{
     AssetRepo, DeleteRecordRepo, NoteRepo, SyncStateRepo, UpsertNoteParams, ensure_schema,
@@ -240,6 +240,73 @@ fn planner_skips_items_in_conflict_state() {
         },
     )
     .expect("conflict sync-state should be inserted");
+
+    let planned = plan_local_changes(&PlannerContext {
+        conn: &connection,
+        device_id: &device_id(),
+        clock: &fixed_clock(),
+        trash_dir: &trash_dir(),
+    })
+    .expect("planner should succeed");
+
+    assert!(planned.is_empty());
+}
+
+#[test]
+fn planner_skips_note_pending_download_even_when_local_hash_differs() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    let note_id = NoteId::new("01TG11004DOWNLOADNOTE0001");
+    let note = base_note(&note_id, "notes/download.md", b"local loser body");
+    insert_note(&connection, &note);
+    SyncStateRepo::upsert_note_sync_state(
+        &connection,
+        &NoteSyncState {
+            last_local_hash: Some(note.content_hash.clone()),
+            last_synced_hash: Some(ContentHash::from_bytes(b"old remote body")),
+            last_synced_path: Some(note.current_path.clone()),
+            last_known_server_revision: Some(ServerRevision::new(12)),
+            sync_status: SyncStatus::PendingDownload,
+            pending_operation: None,
+            ..base_note_sync_state(&note_id, "notes/download.md")
+        },
+    )
+    .expect("pending-download sync-state should be inserted");
+
+    let planned = plan_local_changes(&PlannerContext {
+        conn: &connection,
+        device_id: &device_id(),
+        clock: &fixed_clock(),
+        trash_dir: &trash_dir(),
+    })
+    .expect("planner should succeed");
+
+    assert!(planned.is_empty());
+}
+
+#[test]
+fn planner_skips_asset_pending_download_even_when_local_hash_differs() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    let asset_id = AssetId::new("01TG11004DOWNLOADASSET001");
+    let asset = base_asset(&asset_id, "assets/download.png", b"local loser bytes");
+    AssetRepo::upsert_asset(&connection, &asset).expect("asset should be inserted");
+    SyncStateRepo::upsert_asset_sync_state(
+        &connection,
+        &AssetSyncState {
+            item_id: asset_id,
+            device_id: device_id(),
+            last_local_hash: Some(asset.content_hash.clone()),
+            last_synced_hash: Some(ContentHash::from_bytes(b"old remote bytes")),
+            last_synced_path: Some(asset.current_path.clone()),
+            last_known_server_revision: Some(ServerRevision::new(13)),
+            sync_status: SyncStatus::PendingDownload,
+            last_sync_attempt_at: Some("2026-04-02T00:00:00Z".to_string()),
+            last_sync_error: None,
+            pending_operation: None,
+        },
+    )
+    .expect("pending-download sync-state should be inserted");
 
     let planned = plan_local_changes(&PlannerContext {
         conn: &connection,

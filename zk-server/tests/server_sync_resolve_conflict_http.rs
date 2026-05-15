@@ -225,10 +225,12 @@ async fn keep_remote_missing_note_returns_not_found() {
 }
 
 #[tokio::test]
-async fn keep_local_is_acknowledged_without_lookup_or_event() {
+async fn keep_local_existing_note_returns_current_revision_without_event() {
     let harness = build_harness();
+    seed_note(&harness.state, "note-a", 6);
+
     let response = test_router(harness.state.clone())
-        .oneshot(resolve_request("note-missing", "note", "keep_local"))
+        .oneshot(resolve_request("note-a", "note", "keep_local"))
         .await
         .expect("resolve request should succeed");
 
@@ -236,7 +238,8 @@ async fn keep_local_is_acknowledged_without_lookup_or_event() {
     assert_eq!(
         response_json(response).await,
         json!({
-            "accepted": false
+            "accepted": true,
+            "new_server_revision": 6
         })
     );
 
@@ -244,11 +247,46 @@ async fn keep_local_is_acknowledged_without_lookup_or_event() {
         .state
         .db()
         .with_conn(|connection| {
-            assert_eq!(SyncEventsRepo::list_since(connection, 0, 10)?.len(), 0);
+            assert_eq!(SyncEventsRepo::list_since(connection, 0, 10)?.len(), 1);
 
             Ok(())
         })
         .expect("event log should be readable");
+}
+
+#[tokio::test]
+async fn keep_local_existing_asset_returns_current_revision() {
+    let harness = build_harness();
+    seed_asset(&harness.state, "asset-a", 7);
+
+    let response = test_router(harness.state)
+        .oneshot(resolve_request("asset-a", "asset", "keep_local"))
+        .await
+        .expect("resolve request should succeed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "accepted": true,
+            "new_server_revision": 7
+        })
+    );
+}
+
+#[tokio::test]
+async fn keep_local_missing_note_returns_not_found() {
+    let harness = build_harness();
+    let response = test_router(harness.state)
+        .oneshot(resolve_request("note-missing", "note", "keep_local"))
+        .await
+        .expect("resolve request should succeed");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        response_json(response).await,
+        json!({"error": {"code": "not_found", "message": "note not found"}})
+    );
 }
 
 #[tokio::test]

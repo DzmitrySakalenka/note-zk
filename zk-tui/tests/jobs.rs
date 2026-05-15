@@ -329,6 +329,81 @@ async fn runner_streams_chat_chunks_from_mock_server() {
 
 #[cfg(feature = "ai")]
 #[tokio::test(flavor = "current_thread")]
+async fn runner_does_not_drop_chat_stream_done_when_event_channel_fills() {
+    use serde_json::json;
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{body_json, header, method, path},
+    };
+
+    const TOKEN_ENV: &str = "CARGO_MANIFEST_DIR";
+    const CONVERSATION_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S6S";
+
+    let expected_token = std::env::var(TOKEN_ENV).expect("cargo should set manifest dir");
+    let body = (0..(EVENT_CHANNEL_CAPACITY + 4))
+        .map(|index| format!("event: delta\ndata: {{\"text\":\"chunk-{index};\"}}\n\n"))
+        .chain(std::iter::once(
+            "event: done\ndata: {\"finish_reason\":\"stop\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\n\n"
+                .to_string(),
+        ))
+        .collect::<String>();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/ai/chat"))
+        .and(header("authorization", format!("Bearer {expected_token}")))
+        .and(body_json(json!({
+            "conversation_id": CONVERSATION_ID,
+            "user_query": "hello",
+            "top_k": 8,
+            "stream": true,
+        })))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", "text/event-stream")
+                .set_body_string(body),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let (tx, rx) = sync_channel(EVENT_CHANNEL_CAPACITY);
+    let mut config = zk_app::EffectiveConfig {
+        vault_path: std::path::PathBuf::from("/vault"),
+        ..zk_app::EffectiveConfig::default()
+    };
+    config.sync.server_url = Some(server.uri().parse().expect("mock server URL should parse"));
+    config.sync.bearer_token_env = TOKEN_ENV.to_string();
+    let runner = JobRunner::start(
+        tx,
+        JobContext::new(config, std::path::PathBuf::from("/vault")),
+    );
+
+    runner.enqueue(JobSpec::ChatStream {
+        request: chat_request(ConversationId::new(CONVERSATION_ID)),
+        mode: ExecutionMode::Connected,
+    });
+    thread::sleep(Duration::from_millis(100));
+
+    let mut deltas = Vec::new();
+    let mut done = None;
+    while done.is_none() {
+        match recv_background_payload(&rx, Duration::from_secs(1)) {
+            ChatPayload::Delta(delta) => deltas.push(delta.text),
+            ChatPayload::Citation(_citation) => panic!("unexpected citation payload"),
+            ChatPayload::Done(stream_done) => done = Some(stream_done),
+        }
+    }
+
+    assert_eq!(deltas.len(), EVENT_CHANNEL_CAPACITY + 4);
+    assert_eq!(
+        done.expect("stream should finish").conversation_id.as_str(),
+        CONVERSATION_ID
+    );
+    server.verify().await;
+}
+
+#[cfg(feature = "ai")]
+#[tokio::test(flavor = "current_thread")]
 async fn runner_enqueues_wiki_ingest_by_path_from_mock_server() {
     use serde_json::json;
     use wiremock::{

@@ -19,6 +19,7 @@ use zk_tui::{
         JobResult, JobSpec, WikiIngestRequest, WikiIngestResult, WikiJobsResult, WikiLintRequest,
         WikiLintResult,
     },
+    keymap::KeyChord,
     screens::wiki::WikiScreen,
 };
 
@@ -345,6 +346,39 @@ fn wiki_lint_folder_request_uses_folder_scope() {
             path: RelativePath::new("wiki/entities")
         }
     );
+}
+
+#[test]
+fn wiki_jobs_tab_does_not_capture_global_shortcuts() {
+    let mut ctx = test_context();
+    let mut screen = WikiScreen::default();
+    screen.handle_event(&key(KeyCode::Char('3')), &mut ctx);
+
+    assert!(!screen.captures_global_key(KeyChord::char('q')));
+    assert!(!screen.captures_global_key(KeyChord::char('?')));
+    assert!(!screen.captures_global_key(KeyChord::char('t')));
+    assert!(!screen.captures_global_key(KeyChord::char('1')));
+    assert!(!screen.captures_global_key(KeyChord::new(KeyCode::Char('c'), KeyModifiers::CONTROL,)));
+}
+
+#[test]
+fn wiki_lint_controls_do_not_capture_global_shortcuts_until_folder_is_focused() {
+    let mut ctx = test_context();
+    let mut screen = WikiScreen::default();
+    screen.handle_event(&key(KeyCode::Char('2')), &mut ctx);
+
+    assert!(!screen.captures_global_key(KeyChord::char('q')));
+    assert!(!screen.captures_global_key(KeyChord::char('?')));
+    assert!(!screen.captures_global_key(KeyChord::char('t')));
+    assert!(!screen.captures_global_key(KeyChord::char('1')));
+
+    screen.handle_event(&key(KeyCode::Char('f')), &mut ctx);
+
+    assert!(screen.captures_global_key(KeyChord::char('q')));
+    assert!(screen.captures_global_key(KeyChord::char('?')));
+    assert!(screen.captures_global_key(KeyChord::char('t')));
+    assert!(screen.captures_global_key(KeyChord::char('1')));
+    assert!(!screen.captures_global_key(KeyChord::new(KeyCode::Char('c'), KeyModifiers::CONTROL,)));
 }
 
 fn wiki_ingest_event(pages: Vec<NoteId>) -> AppEvent {

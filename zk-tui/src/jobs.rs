@@ -7,7 +7,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, Sender, TrySendError},
+        mpsc::{self, Receiver, Sender},
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -2451,13 +2451,9 @@ fn send_job_result(events: &AppEventSender, result: JobResult) -> bool {
 
 fn send_background_payload(events: &AppEventSender, payload: impl Any + Send + 'static) -> bool {
     let event = AppEvent::Background(BackgroundResult::new(Box::new(payload)));
-    match events.try_send(event) {
+    match events.send(event) {
         Ok(()) => true,
-        Err(TrySendError::Full(_event)) => {
-            tracing::warn!("TUI event channel is full; dropping background payload");
-            true
-        }
-        Err(TrySendError::Disconnected(_event)) => {
+        Err(_event) => {
             tracing::warn!("TUI event channel disconnected; stopping job runner");
             false
         }

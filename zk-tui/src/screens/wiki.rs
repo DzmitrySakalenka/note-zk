@@ -214,10 +214,7 @@ impl Screen for WikiScreen {
     }
 
     fn captures_global_key(&self, key: KeyChord) -> bool {
-        matches!(
-            key.code(),
-            KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Enter | KeyCode::Esc
-        )
+        self.text_input_focused() && captures_text_key(key)
     }
 }
 
@@ -543,6 +540,11 @@ impl WikiScreen {
         }
     }
 
+    fn text_input_focused(&self) -> bool {
+        matches!(self.tab, WikiTab::Ingest)
+            || matches!(self.tab, WikiTab::Lint) && self.lint.folder_focused
+    }
+
     fn selected_job(&self) -> Option<&WikiJobStatus> {
         self.jobs.jobs.get(self.jobs.selected)
     }
@@ -774,6 +776,24 @@ impl WikiScreen {
             "idle".to_string()
         }
     }
+}
+
+fn captures_text_key(key: KeyChord) -> bool {
+    matches!(
+        key,
+        key if key == KeyChord::char('q')
+            || key == KeyChord::char('t')
+            || key == KeyChord::char('?')
+            || key == KeyChord::char('1')
+            || key == KeyChord::char('2')
+            || key == KeyChord::char('3')
+            || key == KeyChord::char('4')
+            || key == KeyChord::char('5')
+            || key == KeyChord::char('6')
+            || key == KeyChord::char('7')
+            || key == KeyChord::char('8')
+            || key == KeyChord::char('9')
+    )
 }
 
 fn is_wiki_kind(kind: JobKind) -> bool {

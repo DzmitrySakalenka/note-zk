@@ -175,6 +175,10 @@ fn plan_note_change(
         return Ok(None);
     }
 
+    if state.sync_status == SyncStatus::PendingDownload {
+        return Ok(None);
+    }
+
     if state.last_synced_hash.is_none() && state.last_known_server_revision.is_none() {
         return Ok(Some(note_planned_operation(note, PlannedOp::Create, None)));
     }
@@ -251,6 +255,10 @@ fn plan_asset_change(
     };
 
     if state.sync_status == SyncStatus::Conflict {
+        return Ok(None);
+    }
+
+    if state.sync_status == SyncStatus::PendingDownload {
         return Ok(None);
     }
 

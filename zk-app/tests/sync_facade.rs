@@ -160,8 +160,8 @@ fn resolve_conflict_keep_local_marks_note_pending_upload() {
         resolution: WireConflictResolution::KeepLocal,
     };
     let transport = ResolveConflictTransport::new(ResolveConflictResponse {
-        accepted: false,
-        new_server_revision: None,
+        accepted: true,
+        new_server_revision: Some(9),
     });
 
     let response = block_on(resolve_conflict(&transport, &connection, &request))
@@ -170,8 +170,8 @@ fn resolve_conflict_keep_local_marks_note_pending_upload() {
     assert_eq!(
         response,
         ResolveConflictResponse {
-            accepted: false,
-            new_server_revision: None,
+            accepted: true,
+            new_server_revision: Some(9),
         }
     );
     assert_eq!(transport.requests(), vec![request]);
@@ -183,9 +183,55 @@ fn resolve_conflict_keep_local_marks_note_pending_upload() {
     assert_eq!(actual.pending_operation, Some(PendingOperation::Update));
     assert_eq!(
         actual.last_known_server_revision,
+        Some(ServerRevision::new(9))
+    );
+    assert_eq!(actual.last_local_hash, Some(note.content_hash.clone()));
+    assert_eq!(actual.last_synced_hash, state.last_synced_hash);
+    assert_eq!(actual.last_synced_path, Some(note.current_path.clone()));
+    assert_eq!(actual.last_sync_error, None);
+}
+
+#[test]
+fn resolve_conflict_keep_local_rejects_server_noop_and_preserves_conflict() {
+    let connection = open_sync_connection();
+    let note_id = "01TGUI15KEEPLOCALNOOP0001";
+    let note = base_note(&NoteId::new(note_id), "notes/conflict.md", b"local body");
+    insert_note(&connection, &note);
+
+    let mut state = note_sync_state(
+        note_id,
+        SyncStatus::Conflict,
+        Some(PendingOperation::Update),
+    );
+    state.last_sync_error = Some("server revision conflict".to_string());
+    SyncStateRepo::upsert_note_sync_state(&connection, &state)
+        .expect("conflict state should insert");
+
+    let request = ResolveConflictRequest {
+        device_id: device_id().to_string(),
+        item_id: note_id.to_string(),
+        item_type: WireItemType::Note,
+        resolution: WireConflictResolution::KeepLocal,
+    };
+    let transport = ResolveConflictTransport::new(ResolveConflictResponse {
+        accepted: false,
+        new_server_revision: None,
+    });
+
+    let error = block_on(resolve_conflict(&transport, &connection, &request))
+        .expect_err("server no-op should not resolve a local conflict");
+    assert!(matches!(error, AppError::InvariantViolation { .. }));
+
+    let actual = SyncStateRepo::get_note_sync_state(&connection, &NoteId::new(note_id))
+        .expect("state query should succeed")
+        .expect("state should exist");
+    assert_eq!(actual.sync_status, SyncStatus::Conflict);
+    assert_eq!(actual.pending_operation, state.pending_operation);
+    assert_eq!(
+        actual.last_known_server_revision,
         state.last_known_server_revision
     );
-    assert_eq!(actual.last_sync_error, None);
+    assert_eq!(actual.last_sync_error, state.last_sync_error);
 }
 
 #[test]
@@ -225,6 +271,9 @@ fn resolve_conflict_keep_remote_marks_note_pending_download() {
         .expect("state should exist");
     assert_eq!(actual.sync_status, SyncStatus::PendingDownload);
     assert_eq!(actual.pending_operation, None);
+    assert_eq!(actual.last_local_hash, Some(note.content_hash.clone()));
+    assert_eq!(actual.last_synced_hash, Some(note.content_hash.clone()));
+    assert_eq!(actual.last_synced_path, Some(note.current_path.clone()));
     assert_eq!(
         actual.last_known_server_revision,
         Some(ServerRevision::new(9))
@@ -296,6 +345,49 @@ fn get_device_sync_status_reports_absent_registered_and_cursor_states() {
         DeviceSyncStatus {
             registered: true,
             last_sync_cursor: Some(42),
+            last_sync_at: Some("2026-04-22T18:07:33Z".to_string()),
+            pending_push_count: 0,
+            conflict_count: 0,
+        }
+    );
+}
+
+#[test]
+fn get_device_sync_status_excludes_pending_download_from_pending_push_count() {
+    let connection = open_sync_connection();
+    let pending_download = base_note(
+        &NoteId::new("01TGTUI12DOWNLOAD00000001"),
+        "notes/download.md",
+        b"local loser",
+    );
+    insert_note(&connection, &pending_download);
+    DeviceRepo::upsert_device(&connection, &device_record(Some(9))).expect("device should insert");
+    SyncStateRepo::upsert_note_sync_state(
+        &connection,
+        &NoteSyncState {
+            last_local_hash: Some(pending_download.content_hash.clone()),
+            last_synced_hash: Some(ContentHash::from_bytes(b"old remote body")),
+            last_synced_path: Some(pending_download.current_path.clone()),
+            last_known_server_revision: Some(ServerRevision::new(12)),
+            sync_status: SyncStatus::PendingDownload,
+            pending_operation: None,
+            ..note_sync_state(
+                "01TGTUI12DOWNLOAD00000001",
+                SyncStatus::PendingDownload,
+                None,
+            )
+        },
+    )
+    .expect("pending download state should insert");
+
+    let status = get_device_sync_status(&connection, &device_id())
+        .expect("device status query should succeed");
+
+    assert_eq!(
+        status,
+        DeviceSyncStatus {
+            registered: true,
+            last_sync_cursor: Some(9),
             last_sync_at: Some("2026-04-22T18:07:33Z".to_string()),
             pending_push_count: 0,
             conflict_count: 0,
