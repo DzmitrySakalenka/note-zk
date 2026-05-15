@@ -5,7 +5,7 @@ use zk_domain::{
     id::{ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     note::NoteRecord,
 };
-use zk_index::{NoteRepo, UpsertNoteParams, ensure_schema, open_memory};
+use zk_index::{NoteListQuery, NoteRepo, UpsertNoteParams, ensure_schema, open_memory};
 
 fn sample_note_id() -> NoteId {
     NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YMP")
@@ -44,6 +44,43 @@ fn insert_sample_note(conn: &rusqlite::Connection) {
         },
     )
     .expect("sample note should be inserted");
+}
+
+#[derive(Clone, Copy)]
+struct NoteFixture<'a> {
+    note_id: &'a str,
+    path: &'a str,
+    title: &'a str,
+    tags: &'a [&'a str],
+    is_trashed: bool,
+}
+
+fn insert_note(conn: &rusqlite::Connection, fixture: NoteFixture<'_>) {
+    let note_id = NoteId::new(fixture.note_id);
+    let path = RelativePath::new(fixture.path);
+    let hash = ContentHash::from_bytes(format!("{note_id}:{path}").as_bytes());
+    NoteRepo::upsert_note(
+        conn,
+        UpsertNoteParams {
+            note_id: &note_id,
+            path: &path,
+            title: fixture.title,
+            content_hash: &hash,
+            frontmatter_json: "{}",
+            created_at: "2026-04-05T09:00:00Z",
+            updated_at: "2026-04-05T09:00:00Z",
+            trashed_at: fixture.is_trashed.then_some("2026-04-06T09:00:00Z"),
+            is_trashed: fixture.is_trashed,
+        },
+    )
+    .expect("note should insert");
+
+    let tag_values = fixture
+        .tags
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    NoteRepo::replace_tags(conn, &note_id, &tag_values).expect("tags should replace");
 }
 
 #[test]
@@ -343,6 +380,187 @@ fn list_notes_returns_all_rows_in_deterministic_order() {
     assert_eq!(notes.len(), 2);
     assert_eq!(notes[0].current_path, second_path);
     assert_eq!(notes[1], sample_note_record());
+}
+
+#[test]
+fn list_notes_page_returns_title_path_and_trash_state() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    insert_note(
+        &connection,
+        NoteFixture {
+            note_id: "01HZ3KQBFG9T2R5XJ4N8VW6YPA",
+            path: "notes/alpha.md",
+            title: "Alpha",
+            tags: &[],
+            is_trashed: false,
+        },
+    );
+    insert_note(
+        &connection,
+        NoteFixture {
+            note_id: "01HZ3KQBFG9T2R5XJ4N8VW6YPB",
+            path: "trash/beta.md",
+            title: "Beta",
+            tags: &[],
+            is_trashed: true,
+        },
+    );
+
+    let notes = NoteRepo::list_notes_page(
+        &connection,
+        &NoteListQuery {
+            limit: 1,
+            offset: 1,
+            text_filter: None,
+            tag_filter: None,
+        },
+    )
+    .expect("page query should succeed");
+
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].title, "Beta");
+    assert_eq!(notes[0].current_path.as_str(), "trash/beta.md");
+    assert!(notes[0].is_trashed);
+}
+
+#[test]
+fn list_notes_page_filters_by_case_insensitive_title_or_path_substring() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    insert_note(
+        &connection,
+        NoteFixture {
+            note_id: "01HZ3KQBFG9T2R5XJ4N8VW6YPC",
+            path: "notes/rust.md",
+            title: "Systems Notes",
+            tags: &[],
+            is_trashed: false,
+        },
+    );
+    insert_note(
+        &connection,
+        NoteFixture {
+            note_id: "01HZ3KQBFG9T2R5XJ4N8VW6YPD",
+            path: "archive/sqlite.md",
+            title: "Database Internals",
+            tags: &[],
+            is_trashed: false,
+        },
+    );
+
+    let notes = NoteRepo::list_notes_page(
+        &connection,
+        &NoteListQuery {
+            limit: 200,
+            offset: 0,
+            text_filter: Some("SQL".to_string()),
+            tag_filter: None,
+        },
+    )
+    .expect("filtered query should succeed");
+
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].current_path.as_str(), "archive/sqlite.md");
+}
+
+#[test]
+fn list_notes_page_filters_by_exact_tag() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    insert_note(
+        &connection,
+        NoteFixture {
+            note_id: "01HZ3KQBFG9T2R5XJ4N8VW6YPE",
+            path: "notes/rust.md",
+            title: "Rust",
+            tags: &["systems"],
+            is_trashed: false,
+        },
+    );
+    insert_note(
+        &connection,
+        NoteFixture {
+            note_id: "01HZ3KQBFG9T2R5XJ4N8VW6YPF",
+            path: "notes/sqlite.md",
+            title: "SQLite",
+            tags: &["database"],
+            is_trashed: false,
+        },
+    );
+
+    let notes = NoteRepo::list_notes_page(
+        &connection,
+        &NoteListQuery {
+            limit: 200,
+            offset: 0,
+            text_filter: None,
+            tag_filter: Some("database".to_string()),
+        },
+    )
+    .expect("tag query should succeed");
+
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].title, "SQLite");
+}
+
+#[test]
+fn list_notes_page_excludes_deleted_rows_and_keeps_trashed_rows() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    insert_note(
+        &connection,
+        NoteFixture {
+            note_id: "01HZ3KQBFG9T2R5XJ4N8VW6YPG",
+            path: "notes/live.md",
+            title: "Live",
+            tags: &[],
+            is_trashed: false,
+        },
+    );
+    insert_note(
+        &connection,
+        NoteFixture {
+            note_id: "01HZ3KQBFG9T2R5XJ4N8VW6YPH",
+            path: "trash/old.md",
+            title: "Old",
+            tags: &[],
+            is_trashed: true,
+        },
+    );
+    let deleted_id = NoteId::new("01HZ3KQBFG9T2R5XJ4N8VW6YPJ");
+    insert_note(
+        &connection,
+        NoteFixture {
+            note_id: deleted_id.as_str(),
+            path: "notes/deleted.md",
+            title: "Deleted",
+            tags: &[],
+            is_trashed: false,
+        },
+    );
+    NoteRepo::mark_deleted(&connection, &deleted_id, "2026-05-01T00:00:00Z")
+        .expect("delete marker should write");
+
+    let notes = NoteRepo::list_notes_page(
+        &connection,
+        &NoteListQuery {
+            limit: 200,
+            offset: 0,
+            text_filter: None,
+            tag_filter: None,
+        },
+    )
+    .expect("page query should succeed");
+
+    assert_eq!(notes.len(), 2);
+    assert!(notes.iter().any(|note| note.title == "Live"));
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.title == "Old" && note.is_trashed)
+    );
+    assert!(!notes.iter().any(|note| note.title == "Deleted"));
 }
 
 #[test]

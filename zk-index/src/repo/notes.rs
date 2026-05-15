@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, ToSql, params_from_iter};
 use zk_domain::{
     id::{ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     note::NoteRecord,
@@ -135,6 +135,19 @@ const SELECT_NOTES_BY_TAG: &str =
 const SELECT_NOTE_METADATA_BY_ID: &str =
     "SELECT title, frontmatter_json FROM notes_index WHERE note_id = ?1 LIMIT 1";
 const COUNT_NOTES_SQL: &str = "SELECT COUNT(*) FROM notes_index";
+const LIST_NOTES_PAGE_SELECT: &str = r"
+SELECT
+    notes_index.note_id,
+    notes_index.title,
+    notes_index.current_path,
+    notes_index.is_trashed
+FROM notes_index
+WHERE notes_index.is_deleted = 0
+";
+const LIST_NOTES_PAGE_ORDER: &str = r"
+ORDER BY notes_index.current_path ASC
+LIMIT ? OFFSET ?
+";
 const SAVEPOINT_REPLACE_TAGS: &str = "note_repo_replace_tags";
 const SAVEPOINT_REPLACE_ALIASES: &str = "note_repo_replace_aliases";
 
@@ -170,6 +183,32 @@ pub struct UpsertNoteParams<'a> {
     /// Timestamp when the note entered trash, if applicable.
     pub trashed_at: Option<&'a str>,
     /// Whether the current note path is inside the trash tree.
+    pub is_trashed: bool,
+}
+
+/// Query parameters for paginated note-list views.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteListQuery {
+    /// Maximum number of rows to return.
+    pub limit: u32,
+    /// Number of matching rows to skip.
+    pub offset: u32,
+    /// Optional case-insensitive substring filter over title and path.
+    pub text_filter: Option<String>,
+    /// Optional exact tag filter.
+    pub tag_filter: Option<String>,
+}
+
+/// Lightweight note row for list UIs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedNote {
+    /// Stable note identifier.
+    pub note_id: NoteId,
+    /// Effective title stored in the local index.
+    pub title: String,
+    /// Current vault-relative note path.
+    pub current_path: RelativePath,
+    /// Whether this row is currently in the configured trash tree.
     pub is_trashed: bool,
 }
 
@@ -390,6 +429,75 @@ impl NoteRepo {
             })
     }
 
+    /// Lists note rows for paginated read-only browsers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError`] if the query fails or row decoding is invalid.
+    pub fn list_notes_page(
+        conn: &Connection,
+        query: &NoteListQuery,
+    ) -> Result<Vec<ListedNote>, IndexError> {
+        let mut sql = String::from(LIST_NOTES_PAGE_SELECT);
+        let mut params: Vec<Box<dyn ToSql>> = Vec::new();
+
+        if let Some(filter) = query
+            .text_filter
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let pattern = like_pattern(filter);
+            sql.push_str(
+                "AND (LOWER(notes_index.title) LIKE ? ESCAPE '\\' \
+                 OR LOWER(notes_index.current_path) LIKE ? ESCAPE '\\')\n",
+            );
+            params.push(Box::new(pattern.clone()));
+            params.push(Box::new(pattern));
+        }
+
+        if let Some(tag) = query
+            .tag_filter
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            sql.push_str(
+                "AND EXISTS (
+                    SELECT 1
+                    FROM note_tags
+                    WHERE note_tags.note_id = notes_index.note_id
+                      AND LOWER(note_tags.tag) = LOWER(?)
+                )\n",
+            );
+            params.push(Box::new(tag.to_string()));
+        }
+
+        sql.push_str(LIST_NOTES_PAGE_ORDER);
+        params.push(Box::new(i64::from(query.limit)));
+        params.push(Box::new(i64::from(query.offset)));
+
+        let mut statement = conn.prepare(&sql).map_err(|source| IndexError::Sqlite {
+            source,
+            context: "prepare paginated list notes query".to_string(),
+        })?;
+        let rows = statement
+            .query_map(
+                params_from_iter(params.iter().map(Box::as_ref)),
+                decode_listed_note,
+            )
+            .map_err(|source| IndexError::Sqlite {
+                source,
+                context: "list paginated notes".to_string(),
+            })?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|source| IndexError::Sqlite {
+                source,
+                context: "decode paginated notes".to_string(),
+            })
+    }
+
     /// Replaces the full tag set for one note atomically.
     ///
     /// # Errors
@@ -544,6 +652,34 @@ fn decode_note_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteRecord> {
         last_editor_device_id: row.get::<_, Option<String>>(9)?.map(DeviceId::from),
         server_revision: ServerRevision::new(server_revision),
     })
+}
+
+fn decode_listed_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<ListedNote> {
+    let note_id = row.get::<_, String>(0)?;
+    let current_path = row.get::<_, String>(2)?;
+
+    Ok(ListedNote {
+        note_id: NoteId::from(note_id),
+        title: row.get(1)?,
+        current_path: RelativePath::new(&current_path),
+        is_trashed: row.get::<_, i64>(3)? != 0,
+    })
+}
+
+fn like_pattern(filter: &str) -> String {
+    let mut pattern = String::with_capacity(filter.len() + 2);
+    pattern.push('%');
+    for character in filter.to_lowercase().chars() {
+        match character {
+            '%' | '_' | '\\' => {
+                pattern.push('\\');
+                pattern.push(character);
+            }
+            other => pattern.push(other),
+        }
+    }
+    pattern.push('%');
+    pattern
 }
 
 fn with_savepoint<T, F>(

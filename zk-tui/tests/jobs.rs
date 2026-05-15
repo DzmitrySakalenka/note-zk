@@ -1,7 +1,7 @@
 #![allow(unused_crate_dependencies)]
 
 use std::{
-    io,
+    fs, io,
     sync::mpsc::{Receiver, RecvTimeoutError, sync_channel},
     thread,
     time::{Duration, Instant},
@@ -13,12 +13,16 @@ use ratatui::{
     layout::Rect,
     widgets::{Paragraph, Widget},
 };
+use zk_domain::id::RelativePath;
 use zk_tui::{
     app::{App, Screen, ScreenAction, ScreenCtx},
     event::{
         AppEvent, AppEventSender, BackgroundResult, EventLoop, SystemClock, TerminalEventSource,
     },
-    jobs::{JobContext, JobHandle, JobKind, JobResult, JobRunner, JobSpec, MockJob, ScanArgs},
+    jobs::{
+        JobContext, JobHandle, JobKind, JobResult, JobRunner, JobSpec, MockJob, NoteFilter,
+        NoteListRequest, ScanArgs,
+    },
 };
 
 const WIDTH: u16 = 64;
@@ -68,12 +72,64 @@ fn job_runner_public_api_is_reachable() {
     assert_cancel_signature(JobHandle::cancel);
     assert_eq!(JobSpec::StatusSummary.kind(), JobKind::StatusSummary);
     assert_eq!(
+        JobSpec::ListNotes(NoteListRequest {
+            limit: 200,
+            offset: 0,
+            filter: NoteFilter::All,
+        })
+        .kind(),
+        JobKind::ListNotes
+    );
+    assert_eq!(
+        JobSpec::ReadNoteBody {
+            path: RelativePath::new("notes/a.md"),
+        }
+        .kind(),
+        JobKind::ReadNoteBody
+    );
+    assert_eq!(
         JobSpec::ScanVault(ScanArgs {
             include_trashed: true,
         })
         .kind(),
         JobKind::ScanVault
     );
+}
+
+#[test]
+fn runner_reads_note_body_preview_from_disk() {
+    let temp = tempfile::tempdir().expect("temp dir should create");
+    let notes_dir = temp.path().join("notes");
+    fs::create_dir_all(&notes_dir).expect("notes dir should create");
+    let body = (1..=205)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(
+        notes_dir.join("long.md"),
+        format!("---\nid: 01HZ3KQBFG9T2R5XJ4N8VW6YPA\ntitle: Long\n---\n{body}\n"),
+    )
+    .expect("note should write");
+
+    let (tx, rx) = sync_channel(EVENT_CHANNEL_CAPACITY);
+    let config = zk_app::EffectiveConfig {
+        vault_path: temp.path().to_path_buf(),
+        ..zk_app::EffectiveConfig::default()
+    };
+    let runner = JobRunner::start(tx, JobContext::new(config, temp.path().to_path_buf()));
+
+    runner.enqueue(JobSpec::ReadNoteBody {
+        path: RelativePath::new("notes/long.md"),
+    });
+
+    let JobResult::NoteBody(result) = recv_job_result(&rx, Duration::from_secs(1)) else {
+        panic!("expected note body result");
+    };
+
+    assert_eq!(result.path.as_str(), "notes/long.md");
+    assert_eq!(result.preview.lines().count(), 200);
+    assert!(result.preview.contains("line 200"));
+    assert!(!result.preview.contains("line 201"));
 }
 
 #[test]

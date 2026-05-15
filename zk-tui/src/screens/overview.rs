@@ -142,6 +142,8 @@ impl OverviewScreen {
             }
             JobResult::ScanOutcome(_)
             | JobResult::Doctor(_)
+            | JobResult::Notes(_)
+            | JobResult::NoteBody(_)
             | JobResult::Sync(_)
             | JobResult::TrashOutcome(_)
             | JobResult::Error { .. }

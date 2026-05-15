@@ -76,14 +76,7 @@ fn toasts_render_and_expire_in_fifo_order() {
     let mut terminal = test_terminal();
 
     draw(&mut terminal, &mut app);
-    assert_snapshot!(rendered_rows(&terminal), @r###"
-Overview Stub
-
-
-
-info: indexed 3 notes
-[1/1] Overview Stub AI: disabled | server: none    ?:help q:quit
-"###);
+    assert_initial_toast_snapshot(&rendered_rows(&terminal));
 
     assert!(app.handle_event(AppEvent::Tick));
     draw(&mut terminal, &mut app);
@@ -96,6 +89,30 @@ info: indexed 3 notes
     let after_two_ticks = rendered_rows(&terminal);
     assert!(!after_two_ticks.contains("sync complete"));
     assert!(after_two_ticks.contains("warn: remote is behind"));
+}
+
+#[cfg(not(feature = "ai"))]
+fn assert_initial_toast_snapshot(output: &str) {
+    assert_snapshot!(output, @r###"
+Overview Stub
+
+
+
+info: indexed 3 notes
+[1/1] Overview Stub AI: disabled | server: none    ?:help q:quit
+"###);
+}
+
+#[cfg(feature = "ai")]
+fn assert_initial_toast_snapshot(output: &str) {
+    assert_snapshot!(output, @r###"
+Overview Stub
+
+
+
+info: indexed 3 notes
+[1/1] Overview Stub AI: enabled | server: none     ?:help q:quit
+"###);
 }
 
 #[test]

@@ -27,8 +27,6 @@ use zk_ai as _;
 use zk_app as _;
 use zk_cli_core as _;
 use zk_domain as _;
-#[cfg(feature = "ai")]
 use zk_index as _;
 use zk_sync as _;
-#[cfg(feature = "ai")]
 use zk_vault as _;

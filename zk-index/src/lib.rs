@@ -16,8 +16,8 @@ pub use error::IndexError;
 pub use input::{AssetInput, NoteInput};
 pub use migration::ensure_schema;
 pub use repo::{
-    AssetRepo, ChunksRepo, DeleteRecordRepo, DeviceRepo, EmbeddingsRepo, LinkRepo,
-    NoteIndexedMetadata, NoteRepo, SourcesRepo, SyncStateRepo, SyncedAssetStateInput,
-    SyncedNoteStateInput, TopHit, UpsertNoteParams,
+    AssetRepo, ChunksRepo, DeleteRecordRepo, DeviceRepo, EmbeddingsRepo, LinkRepo, ListedNote,
+    NoteIndexedMetadata, NoteListQuery, NoteRepo, SourcesRepo, SyncStateRepo,
+    SyncedAssetStateInput, SyncedNoteStateInput, TopHit, UpsertNoteParams,
 };
 pub use rescan::{RebuildStats, rebuild_index, rebuild_index_in_transaction};

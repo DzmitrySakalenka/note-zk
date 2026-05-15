@@ -18,11 +18,16 @@ use zk_app::{
     PurgeOutcome, PurgeRequest, PushApplyOutcome, RegisterDeviceRequest, RestoreRequest,
     RestoredItem, ScanOutcome, StatusSummary, SyncContext, SystemClock, TrashRequest, TrashedItem,
 };
+use zk_domain::id::RelativePath;
+use zk_index::{ListedNote, NoteListQuery, NoteRepo};
 use zk_sync::HttpTransport;
 
 use crate::event::{AppEvent, AppEventSender, BackgroundResult};
 
 const MOCK_CANCEL_POLL: Duration = Duration::from_millis(10);
+/// Default page size for TUI note-list jobs.
+pub const NOTE_LIST_PAGE_SIZE: u32 = 200;
+const NOTE_BODY_PREVIEW_LINES: usize = 200;
 
 /// Immutable context cloned into the background worker at startup.
 #[derive(Debug, Clone)]
@@ -168,6 +173,57 @@ pub struct ScanArgs {
     pub include_trashed: bool,
 }
 
+/// Note-list filter requested by the Notes screen.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum NoteFilter {
+    /// No filter.
+    #[default]
+    All,
+    /// Case-insensitive substring filter over title and path.
+    Text(String),
+    /// Exact tag filter.
+    Tag(String),
+}
+
+/// Arguments for a paginated note-list job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteListRequest {
+    /// Maximum number of rows to return.
+    pub limit: u32,
+    /// Number of matching rows to skip.
+    pub offset: u32,
+    /// Current list filter.
+    pub filter: NoteFilter,
+}
+
+impl Default for NoteListRequest {
+    fn default() -> Self {
+        Self {
+            limit: NOTE_LIST_PAGE_SIZE,
+            offset: 0,
+            filter: NoteFilter::All,
+        }
+    }
+}
+
+/// Result payload for a paginated note-list job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteListResult {
+    /// Request that produced this result.
+    pub request: NoteListRequest,
+    /// Listed note rows.
+    pub notes: Vec<ListedNote>,
+}
+
+/// Result payload for a note body preview job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteBodyResult {
+    /// Vault-relative note path that was read.
+    pub path: RelativePath,
+    /// Markdown body preview capped to the first 200 lines.
+    pub preview: String,
+}
+
 /// Work item accepted by the background runner.
 #[derive(Debug, Clone)]
 pub enum JobSpec {
@@ -177,6 +233,13 @@ pub enum JobSpec {
     StatusSummary,
     /// Runs `zk_app::doctor_report`.
     DoctorReport,
+    /// Lists a page of notes from the local index.
+    ListNotes(NoteListRequest),
+    /// Reads one note body preview from disk.
+    ReadNoteBody {
+        /// Vault-relative note path to read.
+        path: RelativePath,
+    },
     /// Runs one sync workflow.
     Sync(SyncIntent),
     /// Runs one trash, restore, or purge workflow.
@@ -194,6 +257,8 @@ impl JobSpec {
             Self::ScanVault(_) => JobKind::ScanVault,
             Self::StatusSummary => JobKind::StatusSummary,
             Self::DoctorReport => JobKind::DoctorReport,
+            Self::ListNotes(_) => JobKind::ListNotes,
+            Self::ReadNoteBody { .. } => JobKind::ReadNoteBody,
             Self::Sync(_) => JobKind::Sync,
             Self::TrashAction(_) => JobKind::TrashAction,
             Self::Mock(_) => JobKind::Mock,
@@ -210,6 +275,10 @@ pub enum JobKind {
     StatusSummary,
     /// Doctor report job.
     DoctorReport,
+    /// Paginated note-list job.
+    ListNotes,
+    /// Note body preview job.
+    ReadNoteBody,
     /// Sync workflow job.
     Sync,
     /// Trash, restore, or purge job.
@@ -260,6 +329,10 @@ pub enum JobResult {
     Status(StatusSummary),
     /// Doctor report completed successfully.
     Doctor(DoctorReport),
+    /// Notes page completed successfully.
+    Notes(NoteListResult),
+    /// Note body preview completed successfully.
+    NoteBody(NoteBodyResult),
     /// Sync workflow completed successfully.
     Sync(SyncOutcome),
     /// Trash lifecycle workflow completed successfully.
@@ -424,10 +497,46 @@ fn execute_job(
                     .context("while attempting to generate doctor report from TUI job")?,
             ))
         }
+        JobSpec::ListNotes(request) => run_list_notes_job(ctx, request),
+        JobSpec::ReadNoteBody { path } => run_read_note_body_job(ctx, path),
         JobSpec::Sync(intent) => run_sync_job(runtime, ctx, intent),
         JobSpec::TrashAction(intent) => run_trash_job(ctx, intent),
         JobSpec::Mock(job) => Ok(run_mock_job(job, cancelled)),
     }
+}
+
+fn run_list_notes_job(ctx: &JobContext, request: NoteListRequest) -> Result<JobResult> {
+    let connection = open_job_connection(ctx)?;
+    let query = NoteListQuery {
+        limit: request.limit,
+        offset: request.offset,
+        text_filter: match &request.filter {
+            NoteFilter::Text(value) => Some(value.clone()),
+            NoteFilter::All | NoteFilter::Tag(_) => None,
+        },
+        tag_filter: match &request.filter {
+            NoteFilter::Tag(value) => Some(value.clone()),
+            NoteFilter::All | NoteFilter::Text(_) => None,
+        },
+    };
+    let notes = NoteRepo::list_notes_page(&connection, &query)
+        .context("while attempting to list notes from TUI job")?;
+
+    Ok(JobResult::Notes(NoteListResult { request, notes }))
+}
+
+fn run_read_note_body_job(ctx: &JobContext, path: RelativePath) -> Result<JobResult> {
+    let absolute_path = ctx.vault_root.join(path.as_str());
+    let document = zk_vault::parse_note_file(&absolute_path)
+        .context("while attempting to read note body from TUI job")?;
+    let preview = document
+        .body_markdown
+        .lines()
+        .take(NOTE_BODY_PREVIEW_LINES)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(JobResult::NoteBody(NoteBodyResult { path, preview }))
 }
 
 fn run_sync_job(runtime: &Runtime, ctx: &JobContext, intent: SyncIntent) -> Result<JobResult> {

@@ -28,15 +28,16 @@ zk-ai = { version = "0.1.0", path = "../zk-ai", optional = true }
 zk-app = { version = "0.1.0", path = "../zk-app" }
 zk-cli-core = { version = "0.1.0", path = "../zk-cli-core" }
 zk-domain = { version = "0.1.0", path = "../zk-domain" }
-zk-index = { version = "0.1.0", path = "../zk-index", optional = true }
+zk-index = { version = "0.1.0", path = "../zk-index" }
 zk-sync = { version = "0.1.0", path = "../zk-sync" }
-zk-vault = { version = "0.1.0", path = "../zk-vault", optional = true }
+zk-vault = { version = "0.1.0", path = "../zk-vault" }
 
 [features]
 default = []
-ai = ["dep:zk-ai", "dep:zk-index", "dep:zk-vault", "zk-app/ai"]
+ai = ["dep:zk-ai", "zk-app/ai"]
 ai-local = ["ai"]
 test-stub-ai = ["ai"]
 
 [dev-dependencies]
 insta = "1.47.2"
+tempfile = "3.27.0"
