@@ -201,6 +201,61 @@ async fn list_lint_findings_decodes_server_response() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn list_wiki_jobs_keeps_only_ingest_and_lint_rows() {
+    let server = MockServer::start().await;
+    let facade = connected_facade(&server);
+
+    Mock::given(method("GET"))
+        .and(path("/admin/ai/jobs"))
+        .and(query_param("limit", "50"))
+        .and(header("authorization", "Bearer shared-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            job_json_with_kind("recompute_vault", "done"),
+            job_json_with_kind("ingest_source", "pending"),
+            job_json_with_kind("lint_wiki", "failed")
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let jobs = facade
+        .list_wiki_jobs(Some(50))
+        .await
+        .expect("wiki jobs should decode");
+
+    assert_eq!(jobs.len(), 2);
+    assert_eq!(jobs[0].kind, "ingest_source");
+    assert_eq!(jobs[0].status, AiJobStatus::Pending);
+    assert_eq!(jobs[1].kind, "lint_wiki");
+    assert_eq!(jobs[1].status, AiJobStatus::Failed);
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cancel_job_posts_admin_cancel_request() {
+    let server = MockServer::start().await;
+    let facade = connected_facade(&server);
+
+    Mock::given(method("POST"))
+        .and(path(format!("/admin/ai/cancel/{JOB_ID}")))
+        .and(header("authorization", "Bearer shared-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "cancelled": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let cancelled = facade
+        .cancel_job(JobId::new(JOB_ID).expect("job id should parse"))
+        .await
+        .expect("job cancellation should decode");
+
+    assert!(cancelled);
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn server_unauthorized_response_maps_to_auth_error() {
     let server = MockServer::start().await;
     let facade = connected_facade(&server);
@@ -320,6 +375,8 @@ async fn job_status_returns_current_status_and_last_error() {
         JobId::new(JOB_ID).expect("job id should parse")
     );
     assert_eq!(status.status, AiJobStatus::Failed);
+    assert_eq!(status.kind, "ingest_source");
+    assert_eq!(status.attempts, 1);
     assert_eq!(status.last_error.as_deref(), Some("provider unavailable"));
     server.verify().await;
 }
@@ -371,9 +428,13 @@ fn http_transport(server: &MockServer, token: &str) -> HttpTransport {
 }
 
 fn job_json(status: &str) -> serde_json::Value {
+    job_json_with_kind("lint_wiki", status)
+}
+
+fn job_json_with_kind(kind: &str, status: &str) -> serde_json::Value {
     json!({
         "job_id": JOB_ID,
-        "kind": "lint_wiki",
+        "kind": kind,
         "status": status,
         "attempts": 0,
         "last_error": null,

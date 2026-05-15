@@ -105,10 +105,20 @@ pub struct WikiLintFinding {
 pub struct WikiJobStatus {
     /// Stable job identifier.
     pub job_id: JobId,
+    /// Server job kind name.
+    pub kind: String,
     /// Current job status.
     pub status: AiJobStatus,
+    /// Number of failed attempts recorded by the server.
+    pub attempts: u32,
     /// Terminal failure detail, when the server has one.
     pub last_error: Option<String>,
+    /// Time when the job was enqueued, encoded by the server.
+    pub enqueued_at: String,
+    /// Time when the job was most recently claimed, encoded by the server.
+    pub started_at: Option<String>,
+    /// Time when the job reached a terminal state, encoded by the server.
+    pub finished_at: Option<String>,
 }
 
 /// V1 wiki lint rule identifiers.
@@ -218,6 +228,22 @@ impl WikiFacade {
         Ok(response.findings)
     }
 
+    /// Lists recent server-side wiki ingest and lint jobs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when HTTP transport is missing, the remote
+    /// request fails, or the server response cannot be decoded.
+    pub async fn list_wiki_jobs(&self, limit: Option<u32>) -> AppResult<Vec<WikiJobStatus>> {
+        let response: Vec<ListedJob> = self.get_json_with_retry(&jobs_path(limit)).await?;
+
+        Ok(response
+            .into_iter()
+            .filter(|job| is_wiki_job_kind(&job.kind))
+            .map(WikiJobStatus::from)
+            .collect())
+    }
+
     /// Returns the current status for one remote AI job.
     ///
     /// # Errors
@@ -226,6 +252,20 @@ impl WikiFacade {
     /// request fails, or the job is not listed.
     pub async fn job_status(&self, job_id: JobId) -> AppResult<WikiJobStatus> {
         self.get_job(&job_id).await
+    }
+
+    /// Requests cancellation for one pending AI job.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when HTTP transport is missing, the remote
+    /// request fails, or the server response cannot be decoded.
+    pub async fn cancel_job(&self, job_id: JobId) -> AppResult<bool> {
+        let response: CancelResponse = self
+            .post_json_with_retry(&cancel_path(&job_id), &json!({}))
+            .await?;
+
+        Ok(response.cancelled)
     }
 
     /// Polls the remote job list until the requested job reaches a terminal status.
@@ -302,8 +342,13 @@ impl WikiFacade {
 
         Ok(WikiJobStatus {
             job_id: job.job_id,
+            kind: job.kind,
             status: job.status,
+            attempts: job.attempts,
             last_error: job.last_error,
+            enqueued_at: job.enqueued_at,
+            started_at: job.started_at,
+            finished_at: job.finished_at,
         })
     }
 
@@ -405,8 +450,33 @@ struct FindingsResponse {
 #[derive(Debug, Deserialize)]
 struct ListedJob {
     job_id: JobId,
+    kind: String,
     status: AiJobStatus,
+    attempts: u32,
     last_error: Option<String>,
+    enqueued_at: String,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+}
+
+impl From<ListedJob> for WikiJobStatus {
+    fn from(job: ListedJob) -> Self {
+        Self {
+            job_id: job.job_id,
+            kind: job.kind,
+            status: job.status,
+            attempts: job.attempts,
+            last_error: job.last_error,
+            enqueued_at: job.enqueued_at,
+            started_at: job.started_at,
+            finished_at: job.finished_at,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct CancelResponse {
+    cancelled: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -438,8 +508,23 @@ fn findings_path(job_id: &JobId, limit: Option<u32>) -> String {
     }
 }
 
+fn jobs_path(limit: Option<u32>) -> String {
+    match limit {
+        Some(limit) => format!("{JOBS_PATH}?limit={limit}"),
+        None => JOBS_PATH.to_string(),
+    }
+}
+
 fn job_path(job_id: &JobId) -> String {
     format!("{JOBS_PATH}/{job_id}")
+}
+
+fn cancel_path(job_id: &JobId) -> String {
+    format!("/admin/ai/cancel/{job_id}")
+}
+
+fn is_wiki_job_kind(kind: &str) -> bool {
+    matches!(kind, "ingest_source" | "lint_wiki")
 }
 
 fn should_retry(status: u16, attempt: u8) -> bool {

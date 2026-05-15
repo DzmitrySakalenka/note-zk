@@ -145,7 +145,12 @@ impl OverviewScreen {
             | JobResult::ChatConversationRenamed(_)
             | JobResult::ChatConversationArchived(_)
             | JobResult::ChatConversationDeleted(_)
-            | JobResult::ChatStreamDone(_) => {}
+            | JobResult::ChatStreamDone(_)
+            | JobResult::WikiIngest(_)
+            | JobResult::WikiLint(_)
+            | JobResult::WikiJobs(_)
+            | JobResult::WikiJob(_)
+            | JobResult::WikiCancelled(_) => {}
             JobResult::Error { kind, error } if *kind == JobKind::StatusSummary => {
                 self.state = OverviewState::Error(error.to_string());
             }

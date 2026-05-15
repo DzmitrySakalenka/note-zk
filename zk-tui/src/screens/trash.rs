@@ -223,7 +223,12 @@ impl TrashScreen {
             | JobResult::ChatConversationRenamed(_)
             | JobResult::ChatConversationArchived(_)
             | JobResult::ChatConversationDeleted(_)
-            | JobResult::ChatStreamDone(_) => ScreenAction::Stay,
+            | JobResult::ChatStreamDone(_)
+            | JobResult::WikiIngest(_)
+            | JobResult::WikiLint(_)
+            | JobResult::WikiJobs(_)
+            | JobResult::WikiJob(_)
+            | JobResult::WikiCancelled(_) => ScreenAction::Stay,
             JobResult::Status(_)
             | JobResult::Doctor(_)
             | JobResult::RebuildIndex(_)

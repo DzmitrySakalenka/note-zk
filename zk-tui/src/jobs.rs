@@ -30,8 +30,10 @@ use zk_ai::{
 };
 #[cfg(feature = "ai")]
 use zk_app::{
-    AiFacade, AiFacadeDeps, ChatChunk, ChatRequest, ConversationDetail, ConversationDto,
-    ListConversationsParams, LocalEmbeddingsRepoHandle, SemanticSearchRequest,
+    AiFacade, AiFacadeDeps, AiJobStatus, ChatChunk, ChatRequest, ConversationDetail,
+    ConversationDto, ListConversationsParams, LocalEmbeddingsRepoHandle, LocalWikiIndexHandle,
+    SemanticSearchRequest, WikiFacade, WikiFacadeDeps, WikiJobStatus, WikiLintFinding,
+    WikiLintScope,
 };
 use zk_app::{
     BootstrapOutcome, DeviceId, DeviceSyncStatus, DoctorReport, EffectiveConfig, PullApplyOutcome,
@@ -53,6 +55,7 @@ use zk_domain::{
 #[cfg(feature = "ai")]
 use zk_domain::{
     Citation, ConversationId, EmbeddingModelId, ExecutionMode, ProviderId, ProviderSelectorPolicy,
+    id::NoteId,
 };
 use zk_index::{AssetRepo, ListedNote, NoteListQuery, NoteRepo, SyncStateRepo};
 use zk_sync::HttpTransport;
@@ -69,6 +72,10 @@ pub const NOTE_LIST_PAGE_SIZE: u32 = 200;
 const NOTE_BODY_PREVIEW_LINES: usize = 200;
 const CONFLICT_PREVIEW_LINES: usize = 200;
 const ADMIN_BACKUP_WAIT_TIMEOUT: Duration = Duration::from_secs(600);
+#[cfg(feature = "ai")]
+const WIKI_JOB_WAIT_TIMEOUT: Duration = Duration::from_secs(60);
+#[cfg(feature = "ai")]
+const WIKI_JOB_LIST_LIMIT: u32 = 100;
 
 /// Immutable context cloned into the background worker at startup.
 #[derive(Debug, Clone)]
@@ -289,6 +296,78 @@ pub struct SemanticSearchResult {
     pub effective_mode: ExecutionMode,
     /// Ranked search hits.
     pub hits: Vec<SemanticSearchResultItem>,
+}
+
+/// Request payload for wiki source ingestion.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiIngestRequest {
+    /// Source note id or vault-relative path typed by the operator.
+    pub source: String,
+    /// Whether the runner should poll until the server job reaches terminal status.
+    pub wait: bool,
+}
+
+/// Result payload for wiki source ingestion.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiIngestResult {
+    /// Source text typed by the operator.
+    pub source: String,
+    /// Resolved source note id submitted to the server.
+    pub source_note_id: NoteId,
+    /// Server-side AI job id.
+    pub job_id: JobId,
+    /// Current or terminal status returned by the server.
+    pub status: AiJobStatus,
+    /// Terminal error detail, when the server has one.
+    pub last_error: Option<String>,
+    /// Locally known wiki pages using this source.
+    pub pages: Vec<NoteId>,
+}
+
+/// Request payload for wiki lint.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiLintRequest {
+    /// Scope to lint.
+    pub scope: WikiLintScope,
+    /// Whether the runner should poll until the server job reaches terminal status.
+    pub wait: bool,
+}
+
+/// Result payload for wiki lint.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiLintResult {
+    /// Scope that was linted.
+    pub scope: WikiLintScope,
+    /// Server-side AI job id.
+    pub job_id: JobId,
+    /// Current or terminal status returned by the server.
+    pub status: AiJobStatus,
+    /// Terminal error detail, when the server has one.
+    pub last_error: Option<String>,
+    /// Findings returned for this lint job.
+    pub findings: Vec<WikiLintFinding>,
+}
+
+/// Result payload for listing wiki jobs.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiJobsResult {
+    /// Recent wiki ingest and lint jobs.
+    pub jobs: Vec<WikiJobStatus>,
+}
+
+/// Result payload for cancelling one wiki job.
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiCancelResult {
+    /// Server-side AI job id submitted for cancellation.
+    pub job_id: JobId,
+    /// Whether the server transitioned the job to cancelled.
+    pub cancelled: bool,
 }
 
 /// Result payload for listing chat conversations.
@@ -609,6 +688,27 @@ pub enum JobSpec {
         /// Execution mode selected by the chat screen.
         mode: ExecutionMode,
     },
+    /// Enqueues wiki ingest for one source note.
+    #[cfg(feature = "ai")]
+    WikiIngest(WikiIngestRequest),
+    /// Enqueues wiki lint for a vault or folder scope.
+    #[cfg(feature = "ai")]
+    WikiLint(WikiLintRequest),
+    /// Lists recent wiki ingest and lint jobs.
+    #[cfg(feature = "ai")]
+    WikiJobsList,
+    /// Loads one wiki job status.
+    #[cfg(feature = "ai")]
+    WikiJobStatus {
+        /// Server-side AI job id to inspect.
+        job_id: String,
+    },
+    /// Cancels one pending wiki job.
+    #[cfg(feature = "ai")]
+    WikiCancelJob {
+        /// Server-side AI job id to cancel.
+        job_id: String,
+    },
     /// Lists local items currently marked as sync conflicts.
     ListConflicts,
     /// Resolves one local sync conflict through the configured server.
@@ -674,6 +774,16 @@ impl JobSpec {
             Self::ChatDeleteConversation { .. } => JobKind::ChatDeleteConversation,
             #[cfg(feature = "ai")]
             Self::ChatStream { .. } => JobKind::ChatStream,
+            #[cfg(feature = "ai")]
+            Self::WikiIngest(_) => JobKind::WikiIngest,
+            #[cfg(feature = "ai")]
+            Self::WikiLint(_) => JobKind::WikiLint,
+            #[cfg(feature = "ai")]
+            Self::WikiJobsList => JobKind::WikiJobsList,
+            #[cfg(feature = "ai")]
+            Self::WikiJobStatus { .. } => JobKind::WikiJobStatus,
+            #[cfg(feature = "ai")]
+            Self::WikiCancelJob { .. } => JobKind::WikiCancelJob,
             Self::ListConflicts => JobKind::ListConflicts,
             Self::ResolveConflict(_) => JobKind::ResolveConflict,
             Self::IssueDeviceToken(_) => JobKind::IssueDeviceToken,
@@ -729,6 +839,21 @@ pub enum JobKind {
     /// Chat stream job.
     #[cfg(feature = "ai")]
     ChatStream,
+    /// Wiki ingest job.
+    #[cfg(feature = "ai")]
+    WikiIngest,
+    /// Wiki lint job.
+    #[cfg(feature = "ai")]
+    WikiLint,
+    /// Wiki jobs list job.
+    #[cfg(feature = "ai")]
+    WikiJobsList,
+    /// Wiki job status job.
+    #[cfg(feature = "ai")]
+    WikiJobStatus,
+    /// Wiki job cancellation job.
+    #[cfg(feature = "ai")]
+    WikiCancelJob,
     /// Local conflict-list job.
     ListConflicts,
     /// Explicit conflict-resolution job.
@@ -827,6 +952,21 @@ pub enum JobResult {
     /// Chat stream completed successfully.
     #[cfg(feature = "ai")]
     ChatStreamDone(ChatStreamDone),
+    /// Wiki ingest completed or was enqueued successfully.
+    #[cfg(feature = "ai")]
+    WikiIngest(WikiIngestResult),
+    /// Wiki lint completed or was enqueued successfully.
+    #[cfg(feature = "ai")]
+    WikiLint(WikiLintResult),
+    /// Wiki jobs list completed successfully.
+    #[cfg(feature = "ai")]
+    WikiJobs(WikiJobsResult),
+    /// One wiki job status loaded successfully.
+    #[cfg(feature = "ai")]
+    WikiJob(WikiJobStatus),
+    /// Wiki job cancellation completed successfully.
+    #[cfg(feature = "ai")]
+    WikiCancelled(WikiCancelResult),
     /// Local conflict list completed successfully.
     Conflicts(ConflictListResult),
     /// Explicit conflict resolution completed successfully.
@@ -1070,6 +1210,16 @@ fn execute_job(
         JobSpec::ChatStream { request, mode } => {
             run_chat_stream_job(runtime, ctx, events, request, mode)
         }
+        #[cfg(feature = "ai")]
+        JobSpec::WikiIngest(request) => run_wiki_ingest_job(runtime, ctx, request),
+        #[cfg(feature = "ai")]
+        JobSpec::WikiLint(request) => run_wiki_lint_job(runtime, ctx, request),
+        #[cfg(feature = "ai")]
+        JobSpec::WikiJobsList => run_wiki_jobs_list_job(runtime, ctx),
+        #[cfg(feature = "ai")]
+        JobSpec::WikiJobStatus { job_id } => run_wiki_job_status_job(runtime, ctx, &job_id),
+        #[cfg(feature = "ai")]
+        JobSpec::WikiCancelJob { job_id } => run_wiki_cancel_job(runtime, ctx, &job_id),
         JobSpec::ListConflicts => run_list_conflicts_job(ctx),
         JobSpec::ResolveConflict(intent) => run_resolve_conflict_job(runtime, ctx, intent),
         JobSpec::IssueDeviceToken(intent) => run_issue_device_token_job(ctx, intent),
@@ -1389,6 +1539,187 @@ fn chat_facade(ctx: &JobContext, mode: ExecutionMode) -> Result<AiFacade> {
         ..AiFacadeDeps::default()
     })
     .context("while attempting to construct chat facade from TUI job")
+}
+
+#[cfg(feature = "ai")]
+fn run_wiki_ingest_job(
+    runtime: &Runtime,
+    ctx: &JobContext,
+    request: WikiIngestRequest,
+) -> Result<JobResult> {
+    let source_note_id = resolve_wiki_source_note_id(&request.source, ctx)?;
+    let facade = wiki_facade(ctx, None)?;
+    let job_id = runtime
+        .block_on(facade.ingest_source(source_note_id.clone()))
+        .context("while attempting to enqueue wiki ingest from TUI job")?;
+
+    let (status, last_error, pages) = if request.wait {
+        let _ = runtime
+            .block_on(facade.wait_for_job(job_id.clone(), WIKI_JOB_WAIT_TIMEOUT))
+            .context("while attempting to wait for wiki ingest job from TUI job")?;
+        let current = runtime
+            .block_on(facade.job_status(job_id.clone()))
+            .context("while attempting to load wiki ingest job status from TUI job")?;
+        let pages = wiki_pages_using_source(ctx, &source_note_id)?;
+
+        (current.status, current.last_error, pages)
+    } else {
+        (AiJobStatus::Pending, None, Vec::new())
+    };
+
+    Ok(JobResult::WikiIngest(WikiIngestResult {
+        source: request.source,
+        source_note_id,
+        job_id,
+        status,
+        last_error,
+        pages,
+    }))
+}
+
+#[cfg(feature = "ai")]
+fn run_wiki_lint_job(
+    runtime: &Runtime,
+    ctx: &JobContext,
+    request: WikiLintRequest,
+) -> Result<JobResult> {
+    let facade = wiki_facade(ctx, None)?;
+    let job_id = runtime
+        .block_on(facade.lint_wiki(request.scope.clone()))
+        .context("while attempting to enqueue wiki lint from TUI job")?;
+
+    let (status, last_error, findings) = if request.wait {
+        let _ = runtime
+            .block_on(facade.wait_for_job(job_id.clone(), WIKI_JOB_WAIT_TIMEOUT))
+            .context("while attempting to wait for wiki lint job from TUI job")?;
+        let current = runtime
+            .block_on(facade.job_status(job_id.clone()))
+            .context("while attempting to load wiki lint job status from TUI job")?;
+        let findings = if current.status == AiJobStatus::Failed {
+            Vec::new()
+        } else {
+            runtime
+                .block_on(facade.list_lint_findings(job_id.clone(), None))
+                .context("while attempting to list wiki lint findings from TUI job")?
+        };
+
+        (current.status, current.last_error, findings)
+    } else {
+        (AiJobStatus::Pending, None, Vec::new())
+    };
+
+    Ok(JobResult::WikiLint(WikiLintResult {
+        scope: request.scope,
+        job_id,
+        status,
+        last_error,
+        findings,
+    }))
+}
+
+#[cfg(feature = "ai")]
+fn run_wiki_jobs_list_job(runtime: &Runtime, ctx: &JobContext) -> Result<JobResult> {
+    let facade = wiki_facade(ctx, None)?;
+    let jobs = runtime
+        .block_on(facade.list_wiki_jobs(Some(WIKI_JOB_LIST_LIMIT)))
+        .context("while attempting to list wiki jobs from TUI job")?;
+
+    Ok(JobResult::WikiJobs(WikiJobsResult { jobs }))
+}
+
+#[cfg(feature = "ai")]
+fn run_wiki_job_status_job(runtime: &Runtime, ctx: &JobContext, job_id: &str) -> Result<JobResult> {
+    let job_id = JobId::new(job_id).context("while attempting to parse wiki job id")?;
+    let facade = wiki_facade(ctx, None)?;
+    let status = runtime
+        .block_on(facade.job_status(job_id))
+        .context("while attempting to load wiki job status from TUI job")?;
+
+    Ok(JobResult::WikiJob(status))
+}
+
+#[cfg(feature = "ai")]
+fn run_wiki_cancel_job(runtime: &Runtime, ctx: &JobContext, job_id: &str) -> Result<JobResult> {
+    let job_id = JobId::new(job_id).context("while attempting to parse wiki job id")?;
+    let facade = wiki_facade(ctx, None)?;
+    let cancelled = runtime
+        .block_on(facade.cancel_job(job_id.clone()))
+        .context("while attempting to cancel wiki job from TUI job")?;
+
+    Ok(JobResult::WikiCancelled(WikiCancelResult {
+        job_id,
+        cancelled,
+    }))
+}
+
+#[cfg(feature = "ai")]
+fn wiki_facade(ctx: &JobContext, local_index: Option<LocalWikiIndexHandle>) -> Result<WikiFacade> {
+    let transport = wiki_http_transport(ctx)?;
+
+    WikiFacade::new(WikiFacadeDeps {
+        http: Some(Arc::new(transport)),
+        local_index,
+    })
+    .context("while attempting to construct wiki facade from TUI job")
+}
+
+#[cfg(feature = "ai")]
+fn wiki_http_transport(ctx: &JobContext) -> Result<HttpTransport> {
+    let server_url = ctx
+        .config
+        .sync
+        .server_url
+        .clone()
+        .context("server_url is required for wiki screen")?;
+    let bearer_token_env = ctx.config.sync.bearer_token_env.clone();
+    let bearer_token = std::env::var(&bearer_token_env).map_err(|_| {
+        anyhow::anyhow!("environment variable {bearer_token_env} is required for wiki screen")
+    })?;
+
+    HttpTransport::new(server_url, Some(bearer_token))
+        .context("while attempting to construct wiki HTTP transport")
+}
+
+#[cfg(feature = "ai")]
+fn resolve_wiki_source_note_id(source: &str, ctx: &JobContext) -> Result<NoteId> {
+    if let Ok(note_id) = NoteId::try_from_strict(source) {
+        return Ok(note_id);
+    }
+    if Path::new(source).is_absolute() {
+        return Err(wiki_source_resolution_error(source));
+    }
+
+    let relative_path = RelativePath::new(source);
+    if relative_path.as_str().is_empty() {
+        return Err(wiki_source_resolution_error(source));
+    }
+
+    let build = zk_vault::build_note_path_index(&ctx.vault_root, &ctx.config)
+        .context("while attempting to build note path index for wiki ingest")?;
+    build
+        .index
+        .note_id_for_path(&relative_path)
+        .cloned()
+        .ok_or_else(|| wiki_source_resolution_error(source))
+}
+
+#[cfg(feature = "ai")]
+fn wiki_source_resolution_error(source: &str) -> anyhow::Error {
+    anyhow::anyhow!("source '{source}' is not a valid note id or indexed vault-relative note path")
+}
+
+#[cfg(feature = "ai")]
+fn wiki_pages_using_source(ctx: &JobContext, source_note_id: &NoteId) -> Result<Vec<NoteId>> {
+    let connection = open_job_connection(ctx)?;
+    let facade = WikiFacade::new(WikiFacadeDeps {
+        http: None,
+        local_index: Some(LocalWikiIndexHandle::new(connection)),
+    })
+    .context("while attempting to construct local wiki facade from TUI job")?;
+
+    facade
+        .list_pages_using_source(source_note_id.clone())
+        .context("while attempting to list wiki pages using source from TUI job")
 }
 
 fn run_list_conflicts_job(ctx: &JobContext) -> Result<JobResult> {

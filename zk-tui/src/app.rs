@@ -39,6 +39,8 @@ use crate::jobs::JobKind;
 #[cfg(feature = "ai")]
 use crate::screens::search::SearchScreen;
 #[cfg(feature = "ai")]
+use crate::screens::wiki::WikiScreen;
+#[cfg(feature = "ai")]
 use crate::screens::{chat::ChatScreen, chat::chat_error_hint};
 
 const EVENT_TICK: Duration = Duration::from_millis(250);
@@ -736,7 +738,7 @@ fn default_screen(id: ScreenId) -> Box<dyn Screen> {
         #[cfg(feature = "ai")]
         ScreenId::Chat => Box::<ChatScreen>::default(),
         #[cfg(feature = "ai")]
-        ScreenId::Wiki => Box::new(PlaceholderScreen { id }),
+        ScreenId::Wiki => Box::<WikiScreen>::default(),
     }
 }
 
@@ -752,28 +754,6 @@ fn is_chat_kind(kind: JobKind) -> bool {
             | JobKind::ChatDeleteConversation
             | JobKind::ChatStream
     )
-}
-
-#[cfg(feature = "ai")]
-struct PlaceholderScreen {
-    id: ScreenId,
-}
-
-#[cfg(feature = "ai")]
-impl Screen for PlaceholderScreen {
-    fn title(&self) -> &str {
-        self.id.title()
-    }
-
-    fn handle_event(&mut self, _event: &AppEvent, _ctx: &mut ScreenCtx) -> ScreenAction {
-        ScreenAction::Stay
-    }
-
-    fn render(&mut self, frame: &mut Frame<'_>, area: Rect, _ctx: &ScreenCtx) {
-        let paragraph = Paragraph::new(format!("{} screen", self.title()))
-            .block(Block::default().borders(Borders::ALL).title(self.title()));
-        frame.render_widget(paragraph, area);
-    }
 }
 
 struct GoToScreenScreen {

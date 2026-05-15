@@ -15,10 +15,14 @@ use ratatui::{
 };
 use zeroize::Zeroizing;
 #[cfg(feature = "ai")]
-use zk_app::{ChatRequest, SemanticSearchRequest};
+use zk_app::{ChatRequest, SemanticSearchRequest, WikiLintScope};
+#[cfg(feature = "ai")]
+use zk_domain::id::NoteId;
 use zk_domain::id::RelativePath;
 #[cfg(feature = "ai")]
 use zk_domain::{ConversationId, ExecutionMode};
+#[cfg(feature = "ai")]
+use zk_tui::jobs::{WikiIngestRequest, WikiLintRequest};
 use zk_tui::{
     app::{App, Screen, ScreenAction, ScreenCtx},
     event::{
@@ -214,6 +218,42 @@ fn chat_job_kinds_are_reachable() {
 }
 
 #[cfg(feature = "ai")]
+#[test]
+fn wiki_job_kinds_are_reachable() {
+    assert_eq!(
+        JobSpec::WikiIngest(WikiIngestRequest {
+            source: "raw/source.md".to_string(),
+            wait: false,
+        })
+        .kind(),
+        JobKind::WikiIngest
+    );
+    assert_eq!(
+        JobSpec::WikiLint(WikiLintRequest {
+            scope: WikiLintScope::Vault,
+            wait: true,
+        })
+        .kind(),
+        JobKind::WikiLint
+    );
+    assert_eq!(JobSpec::WikiJobsList.kind(), JobKind::WikiJobsList);
+    assert_eq!(
+        JobSpec::WikiJobStatus {
+            job_id: "01JAR5A3PJEZ3SKG67PN8N6S6J".to_string(),
+        }
+        .kind(),
+        JobKind::WikiJobStatus
+    );
+    assert_eq!(
+        JobSpec::WikiCancelJob {
+            job_id: "01JAR5A3PJEZ3SKG67PN8N6S6J".to_string(),
+        }
+        .kind(),
+        JobKind::WikiCancelJob
+    );
+}
+
+#[cfg(feature = "ai")]
 #[tokio::test(flavor = "current_thread")]
 async fn runner_streams_chat_chunks_from_mock_server() {
     use serde_json::json;
@@ -283,6 +323,106 @@ async fn runner_streams_chat_chunks_from_mock_server() {
     assert_eq!(
         done.expect("stream should finish").conversation_id.as_str(),
         CONVERSATION_ID
+    );
+    server.verify().await;
+}
+
+#[cfg(feature = "ai")]
+#[tokio::test(flavor = "current_thread")]
+async fn runner_enqueues_wiki_ingest_by_path_from_mock_server() {
+    use serde_json::json;
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{header, method, path},
+    };
+
+    const TOKEN_ENV: &str = "CARGO_MANIFEST_DIR";
+    const SOURCE_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S6S";
+    const JOB_ID: &str = "01JAR5A3PJEZ3SKG67PN8N6S6J";
+
+    let temp = tempfile::tempdir().expect("temp dir should create");
+    let raw_dir = temp.path().join("raw");
+    fs::create_dir_all(&raw_dir).expect("raw dir should create");
+    fs::write(
+        raw_dir.join("source.md"),
+        format!("---\nid: {SOURCE_ID}\ntitle: Source\n---\nbody\n"),
+    )
+    .expect("source note should write");
+    let expected_token = std::env::var(TOKEN_ENV).expect("cargo should set manifest dir");
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/admin/ai/wiki/ingest"))
+        .and(header("authorization", format!("Bearer {expected_token}")))
+        .and(|request: &wiremock::Request| {
+            let body: serde_json::Value = request.body_json().expect("body should be JSON");
+
+            body.get("source_note_id")
+                .and_then(serde_json::Value::as_str)
+                == Some(SOURCE_ID)
+                && body
+                    .get("request_id")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some()
+        })
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "job_id": JOB_ID })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let (tx, rx) = sync_channel(EVENT_CHANNEL_CAPACITY);
+    let mut config = zk_app::EffectiveConfig {
+        vault_path: temp.path().to_path_buf(),
+        ..zk_app::EffectiveConfig::default()
+    };
+    config.sync.server_url = Some(server.uri().parse().expect("mock server URL should parse"));
+    config.sync.bearer_token_env = TOKEN_ENV.to_string();
+    let runner = JobRunner::start(tx, JobContext::new(config, temp.path().to_path_buf()));
+
+    runner.enqueue(JobSpec::WikiIngest(WikiIngestRequest {
+        source: "raw/source.md".to_string(),
+        wait: false,
+    }));
+
+    let JobResult::WikiIngest(result) = recv_job_result(&rx, Duration::from_secs(1)) else {
+        panic!("expected wiki ingest result");
+    };
+    assert_eq!(result.source_note_id, NoteId::new(SOURCE_ID));
+    assert_eq!(result.job_id.as_str(), JOB_ID);
+    assert!(result.pages.is_empty());
+    server.verify().await;
+}
+
+#[cfg(feature = "ai")]
+#[tokio::test(flavor = "current_thread")]
+async fn runner_rejects_unknown_wiki_ingest_path_before_http() {
+    use wiremock::MockServer;
+
+    const TOKEN_ENV: &str = "CARGO_MANIFEST_DIR";
+
+    let temp = tempfile::tempdir().expect("temp dir should create");
+    let server = MockServer::start().await;
+    let (tx, rx) = sync_channel(EVENT_CHANNEL_CAPACITY);
+    let mut config = zk_app::EffectiveConfig {
+        vault_path: temp.path().to_path_buf(),
+        ..zk_app::EffectiveConfig::default()
+    };
+    config.sync.server_url = Some(server.uri().parse().expect("mock server URL should parse"));
+    config.sync.bearer_token_env = TOKEN_ENV.to_string();
+    let runner = JobRunner::start(tx, JobContext::new(config, temp.path().to_path_buf()));
+
+    runner.enqueue(JobSpec::WikiIngest(WikiIngestRequest {
+        source: "raw/missing.md".to_string(),
+        wait: false,
+    }));
+
+    let JobResult::Error { kind, error } = recv_job_result(&rx, Duration::from_secs(1)) else {
+        panic!("expected wiki ingest error");
+    };
+    assert_eq!(kind, JobKind::WikiIngest);
+    assert!(
+        error
+            .to_string()
+            .contains("not a valid note id or indexed vault-relative note path")
     );
     server.verify().await;
 }

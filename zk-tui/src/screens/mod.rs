@@ -14,3 +14,5 @@ pub mod resolve_conflict;
 pub mod search;
 pub mod sync;
 pub mod trash;
+#[cfg(feature = "ai")]
+pub mod wiki;
