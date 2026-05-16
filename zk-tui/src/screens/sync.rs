@@ -71,7 +71,7 @@ impl Screen for SyncScreen {
         match event {
             AppEvent::Background(result) => self.handle_background_result(result, ctx),
             AppEvent::Key(key) if key.kind != KeyEventKind::Release => {
-                self.handle_key(key.code, key.modifiers)
+                self.handle_key(key.code, key.modifiers, ctx)
             }
             AppEvent::Tick => {
                 if self.in_flight.is_some() {
@@ -125,7 +125,11 @@ impl SyncScreen {
             }
             JobResult::Sync(outcome) => self.handle_sync_outcome(outcome, ctx),
             JobResult::Error { kind, error } if *kind == JobKind::Sync => {
-                self.handle_sync_error(error.to_string(), ctx);
+                // Render the full anyhow chain so the underlying
+                // `resolve_sync_settings` cause (e.g. a missing env var) is
+                // not hidden behind the outer "while attempting to ..."
+                // context. Same convention used by zk-tui/src/main.rs.
+                self.handle_sync_error(format!("{error:#}"), ctx);
                 ScreenAction::Stay
             }
             JobResult::Cancelled { kind } if *kind == JobKind::Sync => {
@@ -169,12 +173,17 @@ impl SyncScreen {
         }
     }
 
-    fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) -> ScreenAction {
+    fn handle_key(
+        &mut self,
+        code: KeyCode,
+        modifiers: KeyModifiers,
+        ctx: &mut ScreenCtx,
+    ) -> ScreenAction {
         match (code, modifiers) {
-            (KeyCode::Char('b'), KeyModifiers::NONE) => self.start_sync(SyncIntent::Bootstrap),
-            (KeyCode::Char('p'), KeyModifiers::NONE) => self.start_sync(SyncIntent::Push),
-            (KeyCode::Char('l'), KeyModifiers::NONE) => self.start_sync(SyncIntent::Pull),
-            (KeyCode::Char('f'), KeyModifiers::NONE) => self.start_sync(SyncIntent::FullCycle),
+            (KeyCode::Char('b'), KeyModifiers::NONE) => self.start_sync(SyncIntent::Bootstrap, ctx),
+            (KeyCode::Char('p'), KeyModifiers::NONE) => self.start_sync(SyncIntent::Push, ctx),
+            (KeyCode::Char('l'), KeyModifiers::NONE) => self.start_sync(SyncIntent::Pull, ctx),
+            (KeyCode::Char('f'), KeyModifiers::NONE) => self.start_sync(SyncIntent::FullCycle, ctx),
             (KeyCode::Enter, KeyModifiers::NONE) if self.has_conflicts() => {
                 ScreenAction::SwitchTo(ScreenId::Resolve)
             }
@@ -182,8 +191,22 @@ impl SyncScreen {
         }
     }
 
-    fn start_sync(&mut self, intent: SyncIntent) -> ScreenAction {
+    fn start_sync(&mut self, intent: SyncIntent, ctx: &mut ScreenCtx) -> ScreenAction {
         if self.in_flight.is_some() {
+            return ScreenAction::Stay;
+        }
+        // Short-circuit before the worker thread re-discovers the same
+        // missing-config message. We mirror the exact wording emitted by
+        // `zk_cli_core::resolve_sync_settings` so the user sees one
+        // consistent failure message regardless of where it is detected.
+        if let Some(reason) = missing_sync_prereq(ctx) {
+            let label = sync_intent_label(intent);
+            self.push_event(format!("{label} blocked: {reason}"));
+            ctx.push_toast(Toast {
+                severity: ToastSeverity::Error,
+                text: reason,
+                ttl: 3,
+            });
             return ScreenAction::Stay;
         }
 
@@ -292,11 +315,33 @@ impl SyncScreen {
     }
 }
 
+fn missing_sync_prereq(ctx: &ScreenCtx) -> Option<String> {
+    if ctx.config.sync.server_url.is_none() {
+        return Some("server_url is required for sync subcommand".into());
+    }
+    if ctx.config.sync.device_id.is_none() {
+        return Some("device_id is required for sync subcommand".into());
+    }
+    let token_env = &ctx.config.sync.bearer_token_env;
+    if std::env::var(token_env).is_err() {
+        return Some(format!(
+            "environment variable {token_env} is required for sync subcommand"
+        ));
+    }
+    None
+}
+
 fn identity_lines(ctx: &ScreenCtx) -> Vec<Line<'static>> {
+    let token_env = ctx.config.sync.bearer_token_env.clone();
+    let token_status = if std::env::var(&token_env).is_ok() {
+        "set"
+    } else {
+        "missing"
+    };
     vec![
         Line::from(format!("Server: {}", server_label(ctx))),
         Line::from(format!("Device: {}", device_label(ctx))),
-        Line::from(format!("Token: {}", ctx.config.sync.bearer_token_env)),
+        Line::from(format!("Token env: {token_env} ({token_status})")),
     ]
 }
 

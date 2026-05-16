@@ -4,15 +4,21 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use insta::assert_snapshot;
 use ratatui::{Terminal, backend::TestBackend};
 use zk_app::{DeviceSyncStatus, PushApplyOutcome};
+use zk_cli_core::BootstrapError;
 use zk_tui::{
     app::{Screen, ScreenAction, ScreenCtx, ScreenId},
     event::{AppEvent, BackgroundResult},
     jobs::{JobKind, JobResult, JobSpec, SyncIntent, SyncOutcome},
     screens::sync::SyncScreen,
+    widgets::toast::ToastSeverity,
 };
 
 const WIDTH: u16 = 92;
 const HEIGHT: u16 = 20;
+// Cargo guarantees CARGO_MANIFEST_DIR is set during `cargo test`, so we use
+// it as a stand-in bearer-token env var to satisfy the pre-flight check in
+// `SyncScreen::start_sync` without leaking real credentials.
+const TOKEN_ENV: &str = "CARGO_MANIFEST_DIR";
 
 #[test]
 fn sync_enqueues_device_status_on_entry() {
@@ -50,7 +56,7 @@ fn sync_not_configured_snapshot() {
 ┌Identity──────────────────────────────────────────────────────────────────────────────────┐
 │Server: none                                                                              │
 │Device: none                                                                              │
-│Token: ZK_DEVICE_TOKEN                                                                    │
+│Token env: ZK_DEVICE_TOKEN (missing)                                                      │
 └──────────────────────────────────────────────────────────────────────────────────────────┘
 ┌Status────────────────────────────────────────────────────────────────────────────────────┐
 │Error: server_url is required for sync subcommand                                         │
@@ -86,7 +92,7 @@ fn sync_idle_snapshot() {
 ┌Identity──────────────────────────────────────────────────────────────────────────────────┐
 │Server: https://zk.example.test/                                                          │
 │Device: device-local                                                                      │
-│Token: ZK_DEVICE_TOKEN                                                                    │
+│Token env: CARGO_MANIFEST_DIR (set)                                                       │
 └──────────────────────────────────────────────────────────────────────────────────────────┘
 ┌Status────────────────────────────────────────────────────────────────────────────────────┐
 │Push pending: 0                                                                           │
@@ -126,7 +132,7 @@ fn sync_in_flight_snapshot() {
 ┌Identity──────────────────────────────────────────────────────────────────────────────────┐
 │Server: https://zk.example.test/                                                          │
 │Device: device-local                                                                      │
-│Token: ZK_DEVICE_TOKEN                                                                    │
+│Token env: CARGO_MANIFEST_DIR (set)                                                       │
 └──────────────────────────────────────────────────────────────────────────────────────────┘
 ┌Status────────────────────────────────────────────────────────────────────────────────────┐
 │Push pending: 0                                                                           │
@@ -170,7 +176,7 @@ fn sync_success_snapshot() {
 ┌Identity──────────────────────────────────────────────────────────────────────────────────┐
 │Server: https://zk.example.test/                                                          │
 │Device: device-local                                                                      │
-│Token: ZK_DEVICE_TOKEN                                                                    │
+│Token env: CARGO_MANIFEST_DIR (set)                                                       │
 └──────────────────────────────────────────────────────────────────────────────────────────┘
 ┌Status────────────────────────────────────────────────────────────────────────────────────┐
 │loading...                                                                                │
@@ -219,7 +225,7 @@ fn sync_auth_error_snapshot() {
 ┌Identity──────────────────────────────────────────────────────────────────────────────────┐
 │Server: https://zk.example.test/                                                          │
 │Device: device-local                                                                      │
-│Token: ZK_DEVICE_TOKEN                                                                    │
+│Token env: CARGO_MANIFEST_DIR (set)                                                       │
 └──────────────────────────────────────────────────────────────────────────────────────────┘
 ┌Status────────────────────────────────────────────────────────────────────────────────────┐
 │Error: auth failed; check $ZK_DEVICE_TOKEN scope                                          │
@@ -283,7 +289,7 @@ fn sync_conflict_detected_snapshot_and_enter_jumps_to_resolve() {
 ┌Identity──────────────────────────────────────────────────────────────────────────────────┐
 │Server: https://zk.example.test/                                                          │
 │Device: device-local                                                                      │
-│Token: ZK_DEVICE_TOKEN                                                                    │
+│Token env: CARGO_MANIFEST_DIR (set)                                                       │
 └──────────────────────────────────────────────────────────────────────────────────────────┘
 ┌Status────────────────────────────────────────────────────────────────────────────────────┐
 │Push pending: 1                                                                           │
@@ -314,6 +320,7 @@ fn configured_context() -> ScreenCtx {
     ctx.config.sync.server_url =
         Some(url::Url::parse("https://zk.example.test").expect("URL should parse"));
     ctx.config.sync.device_id = Some("device-local".to_string());
+    ctx.config.sync.bearer_token_env = TOKEN_ENV.to_string();
     ctx
 }
 
@@ -412,4 +419,69 @@ fn rendered_rows(terminal: &Terminal<TestBackend>) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[test]
+fn sync_error_render_includes_inner_cause() {
+    // The bug we are fixing: `error.to_string()` only rendered the outer
+    // `.context("while attempting to resolve sync settings for TUI job")`
+    // and hid the actual reason (e.g. a missing env var). The TUI now
+    // renders the full anyhow chain so users see the underlying message.
+    let mut ctx = unconfigured_context();
+    let mut screen = SyncScreen::default();
+
+    let inner = BootstrapError::Issue(
+        "environment variable ZK_DEVICE_TOKEN is required for sync subcommand".to_string(),
+    );
+    let error =
+        anyhow::Error::new(inner).context("while attempting to resolve sync settings for TUI job");
+    let event = AppEvent::Background(BackgroundResult::new(Box::new(JobResult::Error {
+        kind: JobKind::Sync,
+        error,
+    })));
+
+    assert!(matches!(
+        screen.handle_event(&event, &mut ctx),
+        ScreenAction::Stay
+    ));
+
+    let toast = ctx
+        .status_messages
+        .visible()
+        .expect("error toast should be queued");
+    assert_eq!(toast.severity, ToastSeverity::Error);
+    assert!(
+        toast.text.contains("ZK_DEVICE_TOKEN is required"),
+        "toast should surface the inner cause; got: {}",
+        toast.text
+    );
+    assert!(
+        toast
+            .text
+            .contains("while attempting to resolve sync settings for TUI job"),
+        "toast should retain the outer context; got: {}",
+        toast.text
+    );
+}
+
+#[test]
+fn start_sync_short_circuits_when_prereq_missing() {
+    // With server_url unset, pressing Push must surface the missing-config
+    // toast immediately rather than enqueueing a sync job that would fail
+    // on the worker thread.
+    let mut ctx = unconfigured_context();
+    let mut screen = SyncScreen::default();
+
+    let action = screen.handle_event(&key(KeyCode::Char('p')), &mut ctx);
+
+    assert!(
+        matches!(action, ScreenAction::Stay),
+        "missing prereq must not enqueue a sync job"
+    );
+    let toast = ctx
+        .status_messages
+        .visible()
+        .expect("blocking toast should be queued");
+    assert_eq!(toast.severity, ToastSeverity::Error);
+    assert_eq!(toast.text, "server_url is required for sync subcommand");
 }
