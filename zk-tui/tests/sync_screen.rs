@@ -1,20 +1,37 @@
 #![allow(unused_crate_dependencies)]
 
+use std::{
+    fs,
+    sync::mpsc::{Receiver, SyncSender, sync_channel},
+    time::Duration,
+};
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use insta::assert_snapshot;
 use ratatui::{Terminal, backend::TestBackend};
-use zk_app::{DeviceSyncStatus, PushApplyOutcome};
+use serde_json::{Value, json};
+use tempfile::TempDir;
+use wiremock::{
+    Mock, MockServer, ResponseTemplate,
+    matchers::{header, method, path},
+};
+use zk_app::{
+    DeviceSyncStatus, EffectiveConfig, PushApplyOutcome, RebuildOptions,
+    bootstrap_index_connection, rebuild_index,
+};
 use zk_cli_core::BootstrapError;
 use zk_tui::{
-    app::{Screen, ScreenAction, ScreenCtx, ScreenId},
+    app::{App, Screen, ScreenAction, ScreenCtx, ScreenId},
     event::{AppEvent, BackgroundResult},
-    jobs::{JobKind, JobResult, JobSpec, SyncIntent, SyncOutcome},
+    jobs::{JobContext, JobKind, JobResult, JobRunner, JobSpec, SyncIntent, SyncOutcome},
     screens::sync::SyncScreen,
     widgets::toast::ToastSeverity,
 };
 
 const WIDTH: u16 = 92;
 const HEIGHT: u16 = 20;
+const DEVICE_ID: &str = "device-local";
+const NOTE_ID: &str = "01K4ZJ9F2X6M8P0Q1R2S3T4U5V";
 // Cargo guarantees CARGO_MANIFEST_DIR is set during `cargo test`, so we use
 // it as a stand-in bearer-token env var to satisfy the pre-flight check in
 // `SyncScreen::start_sync` without leaking real credentials.
@@ -398,6 +415,10 @@ fn test_terminal() -> Terminal<TestBackend> {
     Terminal::new(TestBackend::new(WIDTH, HEIGHT)).expect("test terminal should initialize")
 }
 
+fn app_test_terminal() -> Terminal<TestBackend> {
+    Terminal::new(TestBackend::new(WIDTH, 28)).expect("test terminal should initialize")
+}
+
 fn draw_screen(terminal: &mut Terminal<TestBackend>, screen: &mut SyncScreen, ctx: &ScreenCtx) {
     terminal
         .draw(|frame| screen.render(frame, frame.area(), ctx))
@@ -484,4 +505,363 @@ fn start_sync_short_circuits_when_prereq_missing() {
         .expect("blocking toast should be queued");
     assert_eq!(toast.severity, ToastSeverity::Error);
     assert_eq!(toast.text, "server_url is required for sync subcommand");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn sync_screen_runs_bootstrap_push_and_pull_against_mock_server() {
+    let server = MockServer::start().await;
+    mount_register_device(&server, 3).await;
+    mount_empty_pull_probe(&server, 1).await;
+    mount_empty_incremental_pull(&server, 1).await;
+    mount_push_response(&server, PushBody::WithNotes, accepted_push_response(), 1).await;
+    mount_push_response(&server, PushBody::Empty, empty_push_response(), 1).await;
+    let mut harness = TuiSyncHarness::new(&server, true);
+
+    harness.go_to_sync_screen();
+    harness.send_key(KeyCode::Char('b'));
+    harness.wait_for_all(&[
+        "success: sync bootstrap completed",
+        "bootstrap completed: accepted 1, conflicts 0, errors 0",
+        "Registered: yes",
+        "Push pending: 0",
+    ]);
+    harness.expire_toasts();
+
+    harness.send_key(KeyCode::Char('p'));
+    harness.wait_for_all(&[
+        "success: sync push completed",
+        "push completed: accepted 0, conflicts 0, errors 0",
+        "Registered: yes",
+    ]);
+    harness.expire_toasts();
+
+    harness.send_key(KeyCode::Char('l'));
+    harness.wait_for_all(&[
+        "success: sync pull completed",
+        "pull completed: applied 0, conflicts 0",
+        "Registered: yes",
+    ]);
+
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn sync_screen_push_401_shows_auth_error_toast() {
+    let server = MockServer::start().await;
+    mount_register_device(&server, 1).await;
+    mount_push_status(&server, PushBody::WithNotes, 401, "unauthorized", 1).await;
+    let mut harness = TuiSyncHarness::new(&server, true);
+
+    harness.go_to_sync_screen();
+    harness.send_key(KeyCode::Char('p'));
+    harness.wait_for_all(&["error: auth failed; check $CARGO_MANIFEST_DIR scope"]);
+
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn sync_screen_push_409_shows_conflict_toast() {
+    let server = MockServer::start().await;
+    mount_register_device(&server, 1).await;
+    mount_push_status(&server, PushBody::WithNotes, 409, "conflict", 1).await;
+    let mut harness = TuiSyncHarness::new(&server, true);
+
+    harness.go_to_sync_screen();
+    harness.send_key(KeyCode::Char('p'));
+    harness.wait_for_all(&["error: sync conflict detected"]);
+
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn sync_screen_push_conflict_updates_status_panel() {
+    let server = MockServer::start().await;
+    mount_register_device(&server, 1).await;
+    mount_push_response(&server, PushBody::WithNotes, conflicted_push_response(), 1).await;
+    let mut harness = TuiSyncHarness::new(&server, true);
+
+    harness.go_to_sync_screen();
+    harness.send_key(KeyCode::Char('p'));
+    harness.wait_for_all(&[
+        "warn: sync conflict detected",
+        "push completed: accepted 0, conflicts 1, errors 0",
+        "Conflicts: 1",
+    ]);
+
+    server.verify().await;
+}
+
+struct TuiSyncHarness {
+    _tempdir: TempDir,
+    _runner: JobRunner,
+    app: App,
+    terminal: Terminal<TestBackend>,
+    tx: SyncSender<AppEvent>,
+    rx: Receiver<AppEvent>,
+}
+
+impl TuiSyncHarness {
+    fn new(server: &MockServer, with_note: bool) -> Self {
+        let tempdir = tempfile::tempdir().expect("temporary directory should be created");
+        let vault_root = tempdir.path().join("vault");
+        fs::create_dir_all(&vault_root).expect("vault directory should be created");
+        if with_note {
+            write_note(&vault_root);
+        }
+
+        let mut config = EffectiveConfig {
+            vault_path: vault_root.clone(),
+            local_db_path: tempdir.path().join("index.sqlite"),
+            ..EffectiveConfig::default()
+        };
+        config.sync.server_url = Some(server.uri().parse().expect("mock server URL should parse"));
+        config.sync.device_id = Some(DEVICE_ID.to_string());
+        config.sync.bearer_token_env = TOKEN_ENV.to_string();
+
+        let mut connection =
+            bootstrap_index_connection(&config).expect("test index connection should open");
+        if with_note {
+            rebuild_index(
+                &vault_root,
+                &config,
+                &mut connection,
+                RebuildOptions::default(),
+            )
+            .expect("test note should be indexed");
+        }
+
+        let (tx, rx) = sync_channel(64);
+        let runner = JobRunner::start(
+            tx.clone(),
+            JobContext::new(config.clone(), vault_root.clone()),
+        );
+        let mut ctx = ScreenCtx::new(config, connection);
+        ctx.job_runner = Some(runner.handle());
+        let app = App::new(ctx);
+
+        Self {
+            _tempdir: tempdir,
+            _runner: runner,
+            app,
+            terminal: app_test_terminal(),
+            tx,
+            rx,
+        }
+    }
+
+    fn go_to_sync_screen(&mut self) {
+        self.send_key_until_screen(KeyCode::Tab, ScreenId::Notes);
+        self.send_key_until_screen(KeyCode::Tab, ScreenId::Sync);
+        self.wait_for_all(&["Registered: no", "Conflicts: 0"]);
+    }
+
+    fn send_key(&self, code: KeyCode) {
+        self.tx
+            .send(key(code))
+            .expect("test event receiver should stay open");
+    }
+
+    fn expire_toasts(&mut self) {
+        for _ in 0..3 {
+            self.tx
+                .send(AppEvent::Tick)
+                .expect("test event receiver should stay open");
+            self.handle_next_event();
+        }
+    }
+
+    fn send_key_until_screen(&mut self, code: KeyCode, screen_id: ScreenId) {
+        self.send_key(code);
+        self.wait_until(|harness| harness.app.current_screen_id() == screen_id);
+    }
+
+    fn wait_for_all(&mut self, expected: &[&str]) -> String {
+        self.wait_until(|harness| {
+            let output = harness.rendered();
+            expected.iter().all(|needle| output.contains(needle))
+        })
+    }
+
+    fn wait_until(&mut self, mut done: impl FnMut(&mut Self) -> bool) -> String {
+        if done(self) {
+            return self.rendered();
+        }
+
+        for _ in 0..64 {
+            self.handle_next_event();
+            if done(self) {
+                return self.rendered();
+            }
+        }
+
+        panic!(
+            "timed out waiting for rendered TUI state:\n{}",
+            self.rendered()
+        );
+    }
+
+    fn handle_next_event(&mut self) {
+        let event = self
+            .rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap_or_else(|error| {
+                panic!(
+                    "expected next TUI event ({error}); current screen: {:?}\n{}",
+                    self.app.current_screen_id(),
+                    self.rendered()
+                )
+            });
+        assert!(self.app.handle_event(event), "test app should keep running");
+    }
+
+    fn rendered(&mut self) -> String {
+        self.terminal
+            .draw(|frame| self.app.render(frame))
+            .expect("app should render to test backend");
+        rendered_rows(&self.terminal)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PushBody {
+    Empty,
+    WithNotes,
+}
+
+async fn mount_register_device(server: &MockServer, expected_calls: u64) {
+    let expected_token = std::env::var(TOKEN_ENV).expect("cargo should set manifest dir");
+    Mock::given(method("POST"))
+        .and(path("/devices/register"))
+        .and(header("authorization", format!("Bearer {expected_token}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "device_id": DEVICE_ID,
+            "server_time": "2026-05-01T12:00:00Z",
+            "trash_retention_days": 14,
+            "max_batch_size": 100
+        })))
+        .expect(expected_calls)
+        .mount(server)
+        .await;
+}
+
+async fn mount_empty_pull_probe(server: &MockServer, expected_calls: u64) {
+    Mock::given(method("POST"))
+        .and(path("/sync/pull"))
+        .and(|request: &wiremock::Request| {
+            request
+                .body_json::<Value>()
+                .ok()
+                .is_some_and(|body| body.get("batch_size") == Some(&json!(1)))
+        })
+        .respond_with(empty_pull_response())
+        .expect(expected_calls)
+        .mount(server)
+        .await;
+}
+
+async fn mount_empty_incremental_pull(server: &MockServer, expected_calls: u64) {
+    Mock::given(method("POST"))
+        .and(path("/sync/pull"))
+        .and(|request: &wiremock::Request| {
+            request.body_json::<Value>().ok().is_some_and(|body| {
+                body.get("device_id").and_then(Value::as_str) == Some(DEVICE_ID)
+                    && body.get("batch_size").is_none()
+            })
+        })
+        .respond_with(empty_pull_response())
+        .expect(expected_calls)
+        .mount(server)
+        .await;
+}
+
+async fn mount_push_response(
+    server: &MockServer,
+    body: PushBody,
+    response: ResponseTemplate,
+    expected_calls: u64,
+) {
+    Mock::given(method("POST"))
+        .and(path("/sync/push"))
+        .and(move |request: &wiremock::Request| push_body_matches(request, body))
+        .respond_with(response)
+        .expect(expected_calls)
+        .mount(server)
+        .await;
+}
+
+async fn mount_push_status(
+    server: &MockServer,
+    body: PushBody,
+    status: u16,
+    message: &'static str,
+    expected_calls: u64,
+) {
+    mount_push_response(
+        server,
+        body,
+        ResponseTemplate::new(status).set_body_string(message),
+        expected_calls,
+    )
+    .await;
+}
+
+fn push_body_matches(request: &wiremock::Request, expected: PushBody) -> bool {
+    let Some(notes) = request
+        .body_json::<Value>()
+        .ok()
+        .and_then(|body| body.get("notes").and_then(Value::as_array).cloned())
+    else {
+        return false;
+    };
+
+    match expected {
+        PushBody::Empty => notes.is_empty(),
+        PushBody::WithNotes => !notes.is_empty(),
+    }
+}
+
+fn empty_pull_response() -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(json!({
+        "changes": [],
+        "next_cursor": null
+    }))
+}
+
+fn accepted_push_response() -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(json!({
+        "results": [{
+            "item_id": NOTE_ID,
+            "accepted": true,
+            "conflict": false,
+            "new_server_revision": 1
+        }]
+    }))
+}
+
+fn empty_push_response() -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(json!({
+        "results": []
+    }))
+}
+
+fn conflicted_push_response() -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(json!({
+        "results": [{
+            "item_id": NOTE_ID,
+            "accepted": false,
+            "conflict": true,
+            "new_server_revision": 9,
+            "message": "remote changed first"
+        }]
+    }))
+}
+
+fn write_note(vault_root: &std::path::Path) {
+    let notes_dir = vault_root.join("notes");
+    fs::create_dir_all(&notes_dir).expect("notes directory should be created");
+    fs::write(
+        notes_dir.join("shared.md"),
+        format!("---\nid: {NOTE_ID}\ntitle: Shared\ntags:\n  - tui\n---\n# Shared\n\nbody\n"),
+    )
+    .expect("test note should be written");
 }

@@ -641,6 +641,9 @@ impl App {
             });
             return;
         }
+        if *kind == JobKind::Sync && self.current == ScreenId::Sync {
+            return;
+        }
         self.ctx.push_toast(Toast {
             severity: ToastSeverity::Error,
             text: error.to_string(),

@@ -129,7 +129,7 @@ impl SyncScreen {
                 // `resolve_sync_settings` cause (e.g. a missing env var) is
                 // not hidden behind the outer "while attempting to ..."
                 // context. Same convention used by zk-tui/src/main.rs.
-                self.handle_sync_error(format!("{error:#}"), ctx);
+                self.handle_sync_error(sync_error_message(error, ctx), ctx);
                 ScreenAction::Stay
             }
             JobResult::Cancelled { kind } if *kind == JobKind::Sync => {
@@ -379,6 +379,10 @@ fn sync_event_line(outcome: &SyncOutcome) -> String {
 }
 
 fn sync_toast_text(outcome: &SyncOutcome) -> &'static str {
+    if sync_outcome_has_conflicts(outcome) {
+        return "sync conflict detected";
+    }
+
     match outcome {
         SyncOutcome::DeviceStatus(_) => "sync status refreshed",
         SyncOutcome::Bootstrap(_) => "sync bootstrap completed",
@@ -386,6 +390,29 @@ fn sync_toast_text(outcome: &SyncOutcome) -> &'static str {
         SyncOutcome::Pull(_) => "sync pull completed",
         SyncOutcome::FullCycle { .. } => "sync full cycle completed",
     }
+}
+
+fn sync_error_message(error: &anyhow::Error, ctx: &ScreenCtx) -> String {
+    let message = format!("{error:#}");
+    if is_http_auth_error(&message) {
+        return format!(
+            "auth failed; check ${} scope",
+            ctx.config.sync.bearer_token_env
+        );
+    }
+    if is_http_conflict_error(&message) {
+        return "sync conflict detected".to_string();
+    }
+
+    message
+}
+
+fn is_http_auth_error(message: &str) -> bool {
+    message.contains("401 Unauthorized") || message.contains("403 Forbidden")
+}
+
+fn is_http_conflict_error(message: &str) -> bool {
+    message.contains("409 Conflict")
 }
 
 fn sync_toast_severity(outcome: &SyncOutcome) -> ToastSeverity {
@@ -407,6 +434,21 @@ fn sync_outcome_has_issues(outcome: &SyncOutcome) -> bool {
         }
         SyncOutcome::FullCycle { pushed, pulled } => {
             push_has_issues(pushed) || !pulled.conflicts.is_empty()
+        }
+    }
+}
+
+fn sync_outcome_has_conflicts(outcome: &SyncOutcome) -> bool {
+    match outcome {
+        SyncOutcome::DeviceStatus(_) => false,
+        SyncOutcome::Bootstrap(BootstrapOutcome::Pulled(pulled)) | SyncOutcome::Pull(pulled) => {
+            !pulled.conflicts.is_empty()
+        }
+        SyncOutcome::Bootstrap(BootstrapOutcome::Pushed(pushed)) | SyncOutcome::Push(pushed) => {
+            !pushed.conflicts.is_empty()
+        }
+        SyncOutcome::FullCycle { pushed, pulled } => {
+            !pushed.conflicts.is_empty() || !pulled.conflicts.is_empty()
         }
     }
 }
