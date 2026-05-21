@@ -2,14 +2,15 @@
 
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc::Receiver},
     time::Duration,
 };
 
 use anyhow::{Context, Result};
 use crossterm::event::{KeyCode, KeyEventKind};
 use ratatui::{
-    Frame,
+    Frame, Terminal,
+    backend::Backend,
     layout::{Constraint, Layout, Rect},
     widgets::{Block, Borders, Clear, Paragraph},
 };
@@ -372,9 +373,7 @@ impl App {
             return Ok(());
         }
 
-        terminal
-            .draw(|frame| self.render(frame))
-            .context("while attempting to draw TUI frame")?;
+        self.draw_frame(&mut terminal)?;
 
         loop {
             let event = events
@@ -386,9 +385,38 @@ impl App {
             #[cfg(feature = "ai")]
             events.set_tick_interval(self.desired_tick_interval());
 
-            terminal
-                .draw(|frame| self.render(frame))
-                .context("while attempting to draw TUI frame")?;
+            self.draw_frame(&mut terminal)?;
+        }
+    }
+
+    /// Runs the app against an injected terminal, guard, and event receiver.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when drawing or event reception fails.
+    #[doc(hidden)]
+    pub fn run_with_terminal_events<B>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        _guard: TerminalGuard,
+        events: &Receiver<AppEvent>,
+    ) -> Result<()>
+    where
+        B: Backend,
+    {
+        if !self.enter_current_screen() {
+            return Ok(());
+        }
+        self.draw_frame(terminal)?;
+
+        loop {
+            let event = events
+                .recv()
+                .context("while attempting to receive TUI event")?;
+            if !self.handle_event(event) {
+                return Ok(());
+            }
+            self.draw_frame(terminal)?;
         }
     }
 
@@ -708,6 +736,16 @@ impl App {
 
     fn available_screen_ids(&self) -> &[ScreenId] {
         &ScreenId::all()[..self.screens.len()]
+    }
+
+    fn draw_frame<B>(&mut self, terminal: &mut Terminal<B>) -> Result<()>
+    where
+        B: Backend,
+    {
+        terminal
+            .draw(|frame| self.render(frame))
+            .context("while attempting to draw TUI frame")?;
+        Ok(())
     }
 
     #[cfg(feature = "ai")]
