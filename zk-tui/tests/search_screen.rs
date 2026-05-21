@@ -14,7 +14,8 @@ use zk_tui::{
     app::{Screen, ScreenAction, ScreenCtx, ScreenId},
     event::{AppEvent, BackgroundResult},
     jobs::{
-        JobKind, JobResult, JobSpec, NoteBodyResult, SemanticSearchResult, SemanticSearchResultItem,
+        JobKind, JobResult, JobSpec, NoteBodyPreview, NoteBodyResult, SemanticSearchResult,
+        SemanticSearchResultItem,
     },
     screens::search::SearchScreen,
 };
@@ -308,7 +309,7 @@ fn body_event(path: &str, preview: &str) -> AppEvent {
     AppEvent::Background(BackgroundResult::new(Box::new(JobResult::NoteBody(
         NoteBodyResult {
             path: RelativePath::new(path),
-            preview: preview.to_string(),
+            preview: NoteBodyPreview::Available(preview.to_string()),
         },
     ))))
 }

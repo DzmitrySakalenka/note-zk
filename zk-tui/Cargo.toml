@@ -44,6 +44,6 @@ clipboard = ["dep:arboard"]
 test-stub-ai = ["ai"]
 
 [dev-dependencies]
-insta = "1.47.2"
+insta = { version = "1.47.2", features = ["yaml"] }
 tempfile = "3.27.0"
 wiremock = "0.6.5"

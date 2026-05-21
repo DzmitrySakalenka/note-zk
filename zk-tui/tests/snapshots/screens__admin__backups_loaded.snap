@@ -1,0 +1,44 @@
+---
+source: zk-tui/tests/screens/helpers.rs
+expression: rows
+---
+- ┌Admin─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+- "│Tabs: >[1] Backups<  [2] AI Jobs                                                                                      │"
+- "│Server: https://zk.example.test/  Token env: ZK_DEVICE_TOKEN                                                          │"
+- └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+- ┌Backups─────────────────────────────────────────────────────────┐┌Backup detail───────────────────────────────────────┐
+- "│BACKUP_ID              CREATED_AT             SIZE  ENC         ││backup_id: 01HZZZZZZZZZZZZZZZZZZZZZZZ               │"
+- "│> 01HZZZZZZZZZZZZZZZZZ  2026-05-02T10:00:00Z   128  none        ││schema_version: 1                                   │"
+- "│                                                                ││created_at: 2026-05-02T10:00:00Z                    │"
+- "│in_flight: manual-run                                           ││archive: backup-01HZZZZZZZZZZZZZZZZZZZZZZZ.tar.zst  │"
+- "│                                                                ││sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│"
+- "│                                                                ││size_bytes: 128                                     │"
+- "│                                                                ││encryption: none                                    │"
+- "│                                                                ││retention: not recorded in manifest                 │"
+- "│                                                                ││source_vault_path: /vault                           │"
+- "│                                                                ││note_count: 3                                       │"
+- "│                                                                ││asset_count: 2                                      │"
+- "│                                                                ││server_db_included: true                            │"
+- "│                                                                ││server_db_size_bytes: 4096                          │"
+- │                                                                ││                                                    │
+- "│                                                                ││Status: idle                                        │"
+- "│                                                                ││[Enter] Detail  [T] Trigger backup  [r] Refresh     │"
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- │                                                                ││                                                    │
+- └────────────────────────────────────────────────────────────────┘└────────────────────────────────────────────────────┘

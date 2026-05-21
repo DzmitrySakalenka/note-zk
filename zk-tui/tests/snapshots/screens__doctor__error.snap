@@ -1,0 +1,44 @@
+---
+source: zk-tui/tests/screens/helpers.rs
+expression: rows
+---
+- ┌Actions───────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+- "│[r] Rerun doctor  [R] Rebuild index  [e] Collapse all  [E] Expand all                                                 │"
+- └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+- ┌Doctor────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+- "│Rebuild failed: index database is locked                                                                              │"
+- │Errors (1)                                                                                                            │
+- │  missing-id (1)                                                                                                      │
+- │> > notes/missing-id.md -- note is missing required id                                                                │
+- │Warnings (1)                                                                                                          │
+- │  orphan-delete-record (1)                                                                                            │
+- │  > notes/deleted.md -- delete record has no matching indexed item                                                    │
+- │Info (1)                                                                                                              │
+- │  retention-expired-not-purged (1)                                                                                    │
+- "│  > .trash/old.md -- retention expired on 2026-05-01T00:00:00Z                                                        │"
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -1,0 +1,44 @@
+---
+source: zk-tui/tests/screens/helpers.rs
+expression: rows
+---
+- ┌Input form──────────────────────────────────────────┐┌Token log───────────────────────────────────────────────────────┐
+- "│Server: https://zk.example.test/                    ││laptop  prefix zk_liv                                           │"
+- "│                                                    ││scopes: sync                                                    │"
+- "│  Username: admin                                   ││created: 2026-05-15T12:00:00Z                                   │"
+- "│> Label: laptop_                                    ││                                                                │"
+- "│  Scopes:  [x] sync   [ ] chat   [ ] admin          ││                                                                │"
+- │                                                    ││                                                                │
+- "│Status: idle                                        ││                                                                │"
+- │                                                    ││                                                                │
+- "│[Up/Down] Field                                     ││                                                                │"
+- "│[Left/Right] Scope  [Space] Toggle                  ││                                                                │"
+- "│[Enter] Issue token                                 ││                                                                │"
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                    ┌Token issued────────────────────────────────────────────────────────────────┐                    │
+- "│                    │Plaintext token:                                                            │                    │"
+- │                    │<redacted-token>                                                     │                    │
+- │                    │                                                                            │                    │
+- │                    │Clipboard disabled; copy manually.                                          │                    │
+- │                    │Press Enter after storing this token.                                       │                    │
+- │                    │                                                                            │                    │
+- │                    └────────────────────────────────────────────────────────────────────────────┘                    │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- └────────────────────────────────────────────────────┘└────────────────────────────────────────────────────────────────┘

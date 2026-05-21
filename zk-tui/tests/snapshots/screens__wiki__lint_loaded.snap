@@ -1,0 +1,44 @@
+---
+source: zk-tui/tests/screens/helpers.rs
+expression: rows
+---
+- ┌Wiki──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+- "│Tabs: [1] Ingest  >[2] Lint<  [3] Jobs                                                                                │"
+- "│Server: not configured  Token env: ZK_DEVICE_TOKEN                                                                    │"
+- └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+- ┌Lint──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+- "│Scope: vault                                                                                                          │"
+- "│Wait: on                                                                                                              │"
+- "│Filters: orphan-page:on stale-claim:on missing-xref:on missing-page:on                                                │"
+- "│Status: idle                                                                                                          │"
+- "│job_id: 01JAR5A3PJEZ3SKG67PN8N6S6J                                                                                    │"
+- "│scope: vault                                                                                                          │"
+- "│status: done                                                                                                          │"
+- │orphan-page                                                                                                           │
+- "│  [warning] wiki page is orphaned                                                                                     │"
+- "│    page_id: 01JAR5A3PJEZ3SKG67PN8N6S6P                                                                               │"
+- "│    source_id: 01JAR5A3PJEZ3SKG67PN8N6S6S                                                                             │"
+- │stale-claim                                                                                                           │
+- "│  [warning] source is newer than wiki page                                                                            │"
+- "│    page_id: 01JAR5A3PJEZ3SKG67PN8N6S6P                                                                               │"
+- "│    source_id: 01JAR5A3PJEZ3SKG67PN8N6S6S                                                                             │"
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- │                                                                                                                      │
+- └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

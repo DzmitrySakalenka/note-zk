@@ -1,0 +1,44 @@
+---
+source: zk-tui/tests/screens/helpers.rs
+expression: rows
+---
+- ┌Input form──────────────────────────────────────────┐┌Token log───────────────────────────────────────────────────────┐
+- "│Server: https://zk.example.test/                    ││No tokens issued this session                                   │"
+- │                                                    ││                                                                │
+- "│  Username: admin                                   ││Plaintext tokens never appear in this log.                      │"
+- "│> Label: laptop_                                    ││                                                                │"
+- "│  Scopes:  [x] sync   [ ] chat   [ ] admin          ││                                                                │"
+- │                                                    ││                                                                │
+- "│Status: issuing...                                  ││                                                                │"
+- │                                                    ││                                                                │
+- "│[Up/Down] Field                                     ││                                                                │"
+- "│[Left/Right] Scope  [Space] Toggle                  ││                                                                │"
+- "│[Enter] Issue token                                 ││                                                                │"
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- │                                                    ││                                                                │
+- └────────────────────────────────────────────────────┘└────────────────────────────────────────────────────────────────┘
