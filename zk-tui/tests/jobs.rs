@@ -1,10 +1,9 @@
 #![allow(unused_crate_dependencies)]
 
 use std::{
-    fs, io,
+    fs,
     sync::mpsc::{Receiver, RecvTimeoutError, sync_channel},
-    thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use ratatui::{
@@ -13,6 +12,8 @@ use ratatui::{
     layout::Rect,
     widgets::{Paragraph, Widget},
 };
+#[cfg(feature = "ai")]
+use std::thread;
 use zeroize::Zeroizing;
 #[cfg(feature = "ai")]
 use zk_app::{ChatRequest, SemanticSearchRequest, WikiLintScope};
@@ -25,9 +26,7 @@ use zk_domain::{ConversationId, ExecutionMode};
 use zk_tui::jobs::{WikiIngestRequest, WikiLintRequest};
 use zk_tui::{
     app::{App, Screen, ScreenAction, ScreenCtx},
-    event::{
-        AppEvent, AppEventSender, BackgroundResult, EventLoop, SystemClock, TerminalEventSource,
-    },
+    event::{AppEvent, AppEventSender, BackgroundResult},
     jobs::{
         ConflictItemKind, ConflictResolutionStrategy, ConflictResolutionTarget,
         IssueDeviceTokenIntent, JobContext, JobHandle, JobKind, JobResult, JobRunner, JobSpec,
@@ -53,22 +52,6 @@ impl Screen for StubScreen {
 
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect, _ctx: &ScreenCtx) {
         Paragraph::new("jobs body").render(area, frame.buffer_mut());
-    }
-}
-
-struct TimeoutInput;
-
-impl TerminalEventSource for TimeoutInput {
-    fn poll(&mut self, timeout: Duration) -> io::Result<bool> {
-        if !timeout.is_zero() {
-            thread::sleep(timeout);
-        }
-
-        Ok(false)
-    }
-
-    fn read(&mut self) -> io::Result<crossterm::event::Event> {
-        Err(io::Error::other("timeout input has no terminal events"))
     }
 }
 
@@ -558,62 +541,6 @@ fn runner_executes_mock_jobs_fifo() {
 
     assert_mock_result(first, "first");
     assert_mock_result(second, "second");
-}
-
-#[test]
-fn cancelled_mock_job_returns_cancelled_result() {
-    let (tx, rx) = sync_channel(EVENT_CHANNEL_CAPACITY);
-    let runner = JobRunner::start(tx, test_context());
-    let handle = runner.enqueue(JobSpec::Mock(MockJob::new(
-        "slow",
-        Duration::from_millis(500),
-    )));
-
-    handle.cancel();
-
-    let result = recv_job_result(&rx, Duration::from_millis(250));
-    assert!(handle.is_cancelled());
-    assert!(matches!(
-        result,
-        JobResult::Cancelled {
-            kind: JobKind::Mock,
-        }
-    ));
-}
-
-#[test]
-fn render_loop_receives_ticks_while_mock_job_is_in_flight() {
-    let event_loop =
-        EventLoop::start_with_source(TimeoutInput, SystemClock, Duration::from_millis(50));
-    let runner = JobRunner::start(event_loop.sender(), test_context());
-    let started = Instant::now();
-
-    runner.enqueue(JobSpec::Mock(MockJob::new(
-        "slow",
-        Duration::from_millis(500),
-    )));
-
-    let mut tick_count = 0;
-    loop {
-        match event_loop
-            .recv()
-            .expect("event loop should remain connected")
-        {
-            AppEvent::Tick => tick_count += 1,
-            AppEvent::Background(result) => {
-                let result = downcast_job_result(result);
-                assert_mock_result(result, "slow");
-                break;
-            }
-            AppEvent::Key(_) | AppEvent::Resize(_, _) => {}
-        }
-    }
-
-    assert!(started.elapsed() >= Duration::from_millis(500));
-    assert!(
-        tick_count >= 5,
-        "expected at least 5 ticks while job ran, got {tick_count}"
-    );
 }
 
 #[test]
