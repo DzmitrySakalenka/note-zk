@@ -29,3 +29,17 @@ jobs:
 
       - name: Tests
         run: cargo test --workspace
+
+  miri:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Miri
+        run: |
+          rustup toolchain install nightly --component miri
+          rustup run nightly cargo miri setup
+
+      - name: Test with Miri
+        run: make miri

@@ -73,7 +73,7 @@ pub(crate) fn validate_vault_with_rules_and_parsed_indexes(
     )
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 type ValidateVaultWithRulesAndParsedIndexesFn = fn(
     &VaultScanResult,
     &[ParsedNoteIndex],
@@ -83,7 +83,7 @@ type ValidateVaultWithRulesAndParsedIndexesFn = fn(
 
 // Integration tests include this module and call the helper from their own
 // crate; this reference keeps the library test target from reporting it dead.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 const _: ValidateVaultWithRulesAndParsedIndexesFn = validate_vault_with_rules_and_parsed_indexes;
 
 fn validate_vault_with_rule_refs_and_parsed_indexes(
