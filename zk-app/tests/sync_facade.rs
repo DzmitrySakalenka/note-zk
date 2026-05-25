@@ -14,15 +14,16 @@ use zk_app::{
 use zk_domain::{
     RegisterDeviceRequest, RegisterDeviceResponse, ResolveConflictRequest, ResolveConflictResponse,
     WireConflictResolution, WireItemType,
+    asset::AssetRecord,
     config::FolderPolicy,
-    id::{ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
+    id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     note::NoteRecord,
     sync::{PendingOperation, SyncStatus},
-    sync_state::{DeleteRecord, DeleteRecordTarget, DeviceRecord, NoteSyncState},
+    sync_state::{AssetSyncState, DeleteRecord, DeleteRecordTarget, DeviceRecord, NoteSyncState},
 };
 use zk_index::{
-    DeleteRecordRepo, DeviceRepo, NoteRepo, SyncStateRepo, UpsertNoteParams, ensure_schema,
-    open_memory,
+    AssetRepo, DeleteRecordRepo, DeviceRepo, NoteRepo, SyncStateRepo, UpsertNoteParams,
+    ensure_schema, open_memory,
 };
 use zk_sync::{
     SyncError,
@@ -92,6 +93,23 @@ fn base_note(note_id: &NoteId, path: &str, body: &[u8]) -> NoteRecord {
     }
 }
 
+fn base_asset(asset_id: &AssetId, path: &str, body: &[u8]) -> AssetRecord {
+    AssetRecord {
+        asset_id: asset_id.clone(),
+        current_path: RelativePath::new(path),
+        content_hash: ContentHash::from_bytes(body),
+        mime_type: Some("application/octet-stream".to_string()),
+        size_bytes: body.len() as u64,
+        created_at: "2026-04-01T00:00:00Z".to_string(),
+        updated_at: "2026-04-02T00:00:00Z".to_string(),
+        trashed_at: None,
+        deleted_at: None,
+        is_trashed: false,
+        is_deleted: false,
+        server_revision: ServerRevision::new(0),
+    }
+}
+
 fn insert_note(conn: &rusqlite::Connection, record: &NoteRecord) {
     NoteRepo::upsert_note(
         conn,
@@ -108,6 +126,10 @@ fn insert_note(conn: &rusqlite::Connection, record: &NoteRecord) {
         },
     )
     .expect("note should be inserted");
+}
+
+fn insert_asset(conn: &rusqlite::Connection, record: &AssetRecord) {
+    AssetRepo::upsert_asset(conn, record).expect("asset should be inserted");
 }
 
 fn note_sync_state(
@@ -129,6 +151,25 @@ fn note_sync_state(
     }
 }
 
+fn asset_sync_state(
+    asset_id: &str,
+    sync_status: SyncStatus,
+    pending_operation: Option<PendingOperation>,
+) -> AssetSyncState {
+    AssetSyncState {
+        item_id: AssetId::new(asset_id),
+        device_id: device_id(),
+        last_local_hash: Some(ContentHash::from_bytes(asset_id.as_bytes())),
+        last_synced_hash: None,
+        last_synced_path: Some(RelativePath::new("assets/status.bin")),
+        last_known_server_revision: Some(ServerRevision::new(3)),
+        sync_status,
+        last_sync_attempt_at: Some("2026-04-21T00:00:00Z".to_string()),
+        last_sync_error: None,
+        pending_operation,
+    }
+}
+
 fn write_vault_file(vault_root: &std::path::Path, relative_path: &str, bytes: &[u8]) {
     let absolute_path = vault_root.join(relative_path);
     if let Some(parent) = absolute_path.parent() {
@@ -140,6 +181,7 @@ fn write_vault_file(vault_root: &std::path::Path, relative_path: &str, bytes: &[
 #[test]
 fn resolve_conflict_keep_local_marks_note_pending_upload() {
     let connection = open_sync_connection();
+    let vault = TempDir::new().expect("temp vault should create");
     let note_id = "01TGUI15KEEPLOCAL0000001";
     let note = base_note(&NoteId::new(note_id), "notes/conflict.md", b"local body");
     insert_note(&connection, &note);
@@ -164,8 +206,13 @@ fn resolve_conflict_keep_local_marks_note_pending_upload() {
         new_server_revision: Some(9),
     });
 
-    let response = block_on(resolve_conflict(&transport, &connection, &request))
-        .expect("keep-local resolution should succeed");
+    let response = block_on(resolve_conflict(
+        &transport,
+        vault.path(),
+        &connection,
+        &request,
+    ))
+    .expect("keep-local resolution should succeed");
 
     assert_eq!(
         response,
@@ -194,6 +241,7 @@ fn resolve_conflict_keep_local_marks_note_pending_upload() {
 #[test]
 fn resolve_conflict_keep_local_rejects_server_noop_and_preserves_conflict() {
     let connection = open_sync_connection();
+    let vault = TempDir::new().expect("temp vault should create");
     let note_id = "01TGUI15KEEPLOCALNOOP0001";
     let note = base_note(&NoteId::new(note_id), "notes/conflict.md", b"local body");
     insert_note(&connection, &note);
@@ -218,8 +266,13 @@ fn resolve_conflict_keep_local_rejects_server_noop_and_preserves_conflict() {
         new_server_revision: None,
     });
 
-    let error = block_on(resolve_conflict(&transport, &connection, &request))
-        .expect_err("server no-op should not resolve a local conflict");
+    let error = block_on(resolve_conflict(
+        &transport,
+        vault.path(),
+        &connection,
+        &request,
+    ))
+    .expect_err("server no-op should not resolve a local conflict");
     assert!(matches!(error, AppError::InvariantViolation { .. }));
 
     let actual = SyncStateRepo::get_note_sync_state(&connection, &NoteId::new(note_id))
@@ -235,11 +288,21 @@ fn resolve_conflict_keep_local_rejects_server_noop_and_preserves_conflict() {
 }
 
 #[test]
-fn resolve_conflict_keep_remote_marks_note_pending_download() {
+fn resolve_conflict_keep_remote_applies_note_conflict_copy() {
     let connection = open_sync_connection();
+    let vault = TempDir::new().expect("temp vault should create");
     let note_id = "01TGUI15KEEPREMOTE0000001";
-    let note = base_note(&NoteId::new(note_id), "notes/conflict.md", b"local body");
+    let local_body = b"local body";
+    let remote_body =
+        format!("---\nid: {note_id}\ntitle: Remote winner\n---\n# Remote winner\n\nremote body\n");
+    let note = base_note(&NoteId::new(note_id), "notes/conflict.md", local_body);
     insert_note(&connection, &note);
+    write_vault_file(vault.path(), "notes/conflict.md", local_body);
+    write_vault_file(
+        vault.path(),
+        "notes/conflict.conflict-remote-20260515T100000Z.md",
+        remote_body.as_bytes(),
+    );
 
     let mut state = note_sync_state(
         note_id,
@@ -261,24 +324,164 @@ fn resolve_conflict_keep_remote_marks_note_pending_download() {
         new_server_revision: Some(9),
     });
 
-    let response = block_on(resolve_conflict(&transport, &connection, &request))
-        .expect("keep-remote resolution should succeed");
+    let response = block_on(resolve_conflict(
+        &transport,
+        vault.path(),
+        &connection,
+        &request,
+    ))
+    .expect("keep-remote resolution should succeed");
 
     assert_eq!(response.new_server_revision, Some(9));
+    assert_eq!(
+        fs::read_to_string(vault.path().join("notes/conflict.md")).expect("local note should read"),
+        remote_body
+    );
 
     let actual = SyncStateRepo::get_note_sync_state(&connection, &NoteId::new(note_id))
         .expect("state query should succeed")
         .expect("state should exist");
-    assert_eq!(actual.sync_status, SyncStatus::PendingDownload);
+    let remote_hash = ContentHash::from_bytes(remote_body.as_bytes());
+    assert_eq!(actual.sync_status, SyncStatus::Synced);
     assert_eq!(actual.pending_operation, None);
-    assert_eq!(actual.last_local_hash, Some(note.content_hash.clone()));
-    assert_eq!(actual.last_synced_hash, Some(note.content_hash.clone()));
+    assert_eq!(actual.last_local_hash, Some(remote_hash.clone()));
+    assert_eq!(actual.last_synced_hash, Some(remote_hash.clone()));
     assert_eq!(actual.last_synced_path, Some(note.current_path.clone()));
     assert_eq!(
         actual.last_known_server_revision,
         Some(ServerRevision::new(9))
     );
     assert_eq!(actual.last_sync_error, None);
+
+    let indexed_note = NoteRepo::get_note(&connection, &NoteId::new(note_id))
+        .expect("note query should succeed")
+        .expect("note should exist");
+    assert_eq!(indexed_note.content_hash, remote_hash);
+    assert_eq!(indexed_note.server_revision, ServerRevision::new(9));
+}
+
+#[test]
+fn resolve_conflict_keep_remote_preserves_conflict_when_note_copy_is_missing() {
+    let connection = open_sync_connection();
+    let vault = TempDir::new().expect("temp vault should create");
+    let note_id = "01TGUI15REMOTEMISSING001";
+    let local_body = b"local body";
+    let note = base_note(&NoteId::new(note_id), "notes/conflict.md", local_body);
+    insert_note(&connection, &note);
+    write_vault_file(vault.path(), "notes/conflict.md", local_body);
+
+    let mut state = note_sync_state(
+        note_id,
+        SyncStatus::Conflict,
+        Some(PendingOperation::Update),
+    );
+    state.last_sync_error = Some("remote content conflicts with local changes".to_string());
+    SyncStateRepo::upsert_note_sync_state(&connection, &state)
+        .expect("conflict state should insert");
+
+    let request = ResolveConflictRequest {
+        device_id: device_id().to_string(),
+        item_id: note_id.to_string(),
+        item_type: WireItemType::Note,
+        resolution: WireConflictResolution::KeepRemote,
+    };
+    let transport = ResolveConflictTransport::new(ResolveConflictResponse {
+        accepted: true,
+        new_server_revision: Some(9),
+    });
+
+    let error = block_on(resolve_conflict(
+        &transport,
+        vault.path(),
+        &connection,
+        &request,
+    ))
+    .expect_err("missing remote copy should not clear the conflict");
+    assert!(matches!(error, AppError::InvariantViolation { .. }));
+    assert_eq!(
+        fs::read(vault.path().join("notes/conflict.md")).expect("local note should read"),
+        local_body
+    );
+
+    let actual = SyncStateRepo::get_note_sync_state(&connection, &NoteId::new(note_id))
+        .expect("state query should succeed")
+        .expect("state should exist");
+    assert_eq!(actual.sync_status, SyncStatus::Conflict);
+    assert_eq!(actual.pending_operation, state.pending_operation);
+    assert_eq!(actual.last_sync_error, state.last_sync_error);
+}
+
+#[test]
+fn resolve_conflict_keep_remote_applies_asset_conflict_copy() {
+    let connection = open_sync_connection();
+    let vault = TempDir::new().expect("temp vault should create");
+    let asset_id = "asset-keep-remote";
+    let local_bytes = b"local asset";
+    let remote_bytes = b"remote asset bytes";
+    let asset = base_asset(&AssetId::new(asset_id), "assets/conflict.bin", local_bytes);
+    insert_asset(&connection, &asset);
+    write_vault_file(vault.path(), "assets/conflict.bin", local_bytes);
+    write_vault_file(
+        vault.path(),
+        "assets/conflict.conflict-remote-20260515T100000Z.bin",
+        remote_bytes,
+    );
+
+    let mut state = asset_sync_state(
+        asset_id,
+        SyncStatus::Conflict,
+        Some(PendingOperation::Update),
+    );
+    state.last_sync_error = Some("remote content conflicts with local changes".to_string());
+    SyncStateRepo::upsert_asset_sync_state(&connection, &state)
+        .expect("conflict state should insert");
+
+    let request = ResolveConflictRequest {
+        device_id: device_id().to_string(),
+        item_id: asset_id.to_string(),
+        item_type: WireItemType::Asset,
+        resolution: WireConflictResolution::KeepRemote,
+    };
+    let transport = ResolveConflictTransport::new(ResolveConflictResponse {
+        accepted: true,
+        new_server_revision: Some(10),
+    });
+
+    let response = block_on(resolve_conflict(
+        &transport,
+        vault.path(),
+        &connection,
+        &request,
+    ))
+    .expect("keep-remote resolution should succeed");
+
+    assert_eq!(response.new_server_revision, Some(10));
+    assert_eq!(
+        fs::read(vault.path().join("assets/conflict.bin")).expect("local asset should read"),
+        remote_bytes
+    );
+
+    let remote_hash = ContentHash::from_bytes(remote_bytes);
+    let actual = SyncStateRepo::get_asset_sync_state(&connection, &AssetId::new(asset_id))
+        .expect("state query should succeed")
+        .expect("state should exist");
+    assert_eq!(actual.sync_status, SyncStatus::Synced);
+    assert_eq!(actual.pending_operation, None);
+    assert_eq!(actual.last_local_hash, Some(remote_hash.clone()));
+    assert_eq!(actual.last_synced_hash, Some(remote_hash.clone()));
+    assert_eq!(actual.last_synced_path, Some(asset.current_path.clone()));
+    assert_eq!(
+        actual.last_known_server_revision,
+        Some(ServerRevision::new(10))
+    );
+    assert_eq!(actual.last_sync_error, None);
+
+    let indexed_asset = AssetRepo::get_asset(&connection, &AssetId::new(asset_id))
+        .expect("asset query should succeed")
+        .expect("asset should exist");
+    assert_eq!(indexed_asset.content_hash, remote_hash);
+    assert_eq!(indexed_asset.size_bytes, remote_bytes.len() as u64);
+    assert_eq!(indexed_asset.server_revision, ServerRevision::new(10));
 }
 
 #[test]
@@ -390,6 +593,38 @@ fn get_device_sync_status_excludes_pending_download_from_pending_push_count() {
             last_sync_cursor: Some(9),
             last_sync_at: Some("2026-04-22T18:07:33Z".to_string()),
             pending_push_count: 0,
+            conflict_count: 0,
+        }
+    );
+}
+
+#[test]
+fn get_device_sync_status_counts_items_without_sync_state_as_pending_push() {
+    let connection = open_sync_connection();
+    let note = base_note(
+        &NoteId::new("01TGTUI12NOSYNCSTATE0001"),
+        "notes/new.md",
+        b"new note",
+    );
+    let asset = base_asset(
+        &AssetId::new("asset-no-sync-state"),
+        "assets/new.bin",
+        b"new asset",
+    );
+    insert_note(&connection, &note);
+    insert_asset(&connection, &asset);
+    DeviceRepo::upsert_device(&connection, &device_record(Some(9))).expect("device should insert");
+
+    let status = get_device_sync_status(&connection, &device_id())
+        .expect("device status query should succeed");
+
+    assert_eq!(
+        status,
+        DeviceSyncStatus {
+            registered: true,
+            last_sync_cursor: Some(9),
+            last_sync_at: Some("2026-04-22T18:07:33Z".to_string()),
+            pending_push_count: 2,
             conflict_count: 0,
         }
     );

@@ -1876,6 +1876,7 @@ fn run_resolve_conflict_job(
     let response = runtime
         .block_on(zk_app::sync::resolve_conflict(
             &transport,
+            &ctx.vault_root,
             &connection,
             &request,
         ))

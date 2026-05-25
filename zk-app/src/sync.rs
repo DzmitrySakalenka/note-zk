@@ -1,15 +1,22 @@
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    fs,
+    io::ErrorKind,
+    path::{Path, PathBuf},
+};
 
 use rusqlite::Connection;
 use zk_domain::{
     RegisterDeviceRequest, RegisterDeviceResponse, ResolveConflictRequest, ResolveConflictResponse,
     SyncPushRequest, WireConflictResolution, WireItemType, WireOperation,
+    asset::AssetRecord,
     config::FolderPolicy,
     id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
+    note::NoteRecord,
     sync::SyncStatus,
     sync_state::{AssetSyncState, DeviceRecord, NoteSyncState, SyncState},
 };
-use zk_index::{AssetRepo, DeviceRepo, IndexError, NoteRepo, SyncStateRepo};
+use zk_index::{AssetRepo, DeviceRepo, IndexError, NoteRepo, SyncStateRepo, UpsertNoteParams};
 use zk_sync::{
     SyncError,
     bootstrap::{
@@ -29,32 +36,44 @@ use crate::{AppError, Clock, Result};
 
 const COUNT_PENDING_NOTE_PUSH_SQL: &str = r"
 SELECT COUNT(*)
-FROM note_sync_state AS state
-JOIN notes_index AS note ON note.note_id = state.note_id
-WHERE state.device_id = ?1
-  AND state.sync_status NOT IN ('conflict', 'pending_download')
-  AND note.is_deleted = 0
+FROM notes_index AS note
+LEFT JOIN note_sync_state AS state
+  ON state.note_id = note.note_id
+ AND state.device_id = ?1
+WHERE note.is_deleted = 0
   AND (
-      state.pending_operation IS NOT NULL
-      OR state.sync_status IN ('modified_local', 'pending_upload', 'error')
-      OR state.last_synced_hash IS NULL
-      OR state.last_local_hash IS NOT state.last_synced_hash
-      OR state.last_synced_path IS NOT note.current_path
+      state.note_id IS NULL
+      OR (
+          state.sync_status NOT IN ('conflict', 'pending_download')
+          AND (
+              state.pending_operation IS NOT NULL
+              OR state.sync_status IN ('modified_local', 'pending_upload', 'error')
+              OR state.last_synced_hash IS NULL
+              OR state.last_local_hash IS NOT state.last_synced_hash
+              OR state.last_synced_path IS NOT note.current_path
+          )
+      )
   )
 ";
 const COUNT_PENDING_ASSET_PUSH_SQL: &str = r"
 SELECT COUNT(*)
-FROM asset_sync_state AS state
-JOIN assets_index AS asset ON asset.asset_id = state.asset_id
-WHERE state.device_id = ?1
-  AND state.sync_status NOT IN ('conflict', 'pending_download')
-  AND asset.is_deleted = 0
+FROM assets_index AS asset
+LEFT JOIN asset_sync_state AS state
+  ON state.asset_id = asset.asset_id
+ AND state.device_id = ?1
+WHERE asset.is_deleted = 0
   AND (
-      state.pending_operation IS NOT NULL
-      OR state.sync_status IN ('modified_local', 'pending_upload', 'error')
-      OR state.last_synced_hash IS NULL
-      OR state.last_local_hash IS NOT state.last_synced_hash
-      OR state.last_synced_path IS NOT asset.current_path
+      state.asset_id IS NULL
+      OR (
+          state.sync_status NOT IN ('conflict', 'pending_download')
+          AND (
+              state.pending_operation IS NOT NULL
+              OR state.sync_status IN ('modified_local', 'pending_upload', 'error')
+              OR state.last_synced_hash IS NULL
+              OR state.last_local_hash IS NOT state.last_synced_hash
+              OR state.last_synced_path IS NOT asset.current_path
+          )
+      )
   )
 ";
 const COUNT_PENDING_DELETE_PUSH_SQL: &str =
@@ -67,6 +86,16 @@ const COUNT_CONFLICT_ASSET_SQL: &str =
 struct LocalBaseline {
     content_hash: ContentHash,
     path: RelativePath,
+}
+
+struct ConflictResolutionEnv<'a> {
+    vault: &'a VaultRoot,
+    conn: &'a Connection,
+}
+
+struct ConflictResolutionDecision<'a> {
+    request: &'a ResolveConflictRequest,
+    response: &'a ResolveConflictResponse,
 }
 
 /// Summary returned from the bootstrap facade entry point.
@@ -188,12 +217,13 @@ pub fn get_device_sync_status(conn: &Connection, device_id: &DeviceId) -> Result
 /// sync-state persistence fails.
 pub async fn resolve_conflict(
     transport: &dyn SyncTransport,
+    vault: &VaultRoot,
     conn: &Connection,
     request: &ResolveConflictRequest,
 ) -> Result<ResolveConflictResponse> {
     ensure_local_conflict_state(conn, request)?;
     let response = transport.resolve_conflict(request).await?;
-    apply_conflict_resolution(conn, request, &response)?;
+    apply_conflict_resolution(vault, conn, request, &response)?;
     Ok(response)
 }
 
@@ -215,25 +245,33 @@ fn ensure_local_conflict_state(conn: &Connection, request: &ResolveConflictReque
 }
 
 fn apply_conflict_resolution(
+    vault: &VaultRoot,
     conn: &Connection,
     request: &ResolveConflictRequest,
     response: &ResolveConflictResponse,
 ) -> Result<()> {
+    let env = ConflictResolutionEnv { vault, conn };
+    let decision = ConflictResolutionDecision { request, response };
+
     match request.item_type {
         WireItemType::Note => {
             let note_id = NoteId::new(&request.item_id);
-            let baseline = note_local_baseline(conn, &note_id, request)?;
+            let note = NoteRepo::get_note(conn, &note_id)?
+                .ok_or_else(|| missing_conflict_item(request))?;
+            let baseline = note_baseline(&note);
             let mut state = SyncStateRepo::get_note_sync_state(conn, &note_id)?
                 .ok_or_else(|| missing_conflict_item(request))?;
-            apply_note_resolution(&mut state, &baseline, request, response)?;
+            apply_note_resolution(&env, &note, &mut state, &baseline, &decision)?;
             SyncStateRepo::upsert_note_sync_state(conn, &state)?;
         }
         WireItemType::Asset => {
             let asset_id = AssetId::new(&request.item_id);
-            let baseline = asset_local_baseline(conn, &asset_id, request)?;
+            let asset = AssetRepo::get_asset(conn, &asset_id)?
+                .ok_or_else(|| missing_conflict_item(request))?;
+            let baseline = asset_baseline(&asset);
             let mut state = SyncStateRepo::get_asset_sync_state(conn, &asset_id)?
                 .ok_or_else(|| missing_conflict_item(request))?;
-            apply_asset_resolution(&mut state, &baseline, request, response)?;
+            apply_asset_resolution(&env, &asset, &mut state, &baseline, &decision)?;
             SyncStateRepo::upsert_asset_sync_state(conn, &state)?;
         }
     }
@@ -242,30 +280,42 @@ fn apply_conflict_resolution(
 }
 
 fn apply_note_resolution(
+    env: &ConflictResolutionEnv<'_>,
+    note: &NoteRecord,
     state: &mut NoteSyncState,
     baseline: &LocalBaseline,
-    request: &ResolveConflictRequest,
-    response: &ResolveConflictResponse,
+    decision: &ConflictResolutionDecision<'_>,
 ) -> Result<()> {
+    let request = decision.request;
     ensure_conflict_status(request, state.sync_status)?;
     match request.resolution {
-        WireConflictResolution::KeepLocal => mark_keep_local(state, baseline, request, response)?,
-        WireConflictResolution::KeepRemote => mark_keep_remote(state, baseline, request, response)?,
+        WireConflictResolution::KeepLocal => {
+            mark_keep_local(state, baseline, request, decision.response)?;
+        }
+        WireConflictResolution::KeepRemote => {
+            apply_remote_note_copy(env, note, state, decision)?;
+        }
         WireConflictResolution::KeepBoth => return Err(unsupported_keep_both(request)),
     }
     Ok(())
 }
 
 fn apply_asset_resolution(
+    env: &ConflictResolutionEnv<'_>,
+    asset: &AssetRecord,
     state: &mut AssetSyncState,
     baseline: &LocalBaseline,
-    request: &ResolveConflictRequest,
-    response: &ResolveConflictResponse,
+    decision: &ConflictResolutionDecision<'_>,
 ) -> Result<()> {
+    let request = decision.request;
     ensure_conflict_status(request, state.sync_status)?;
     match request.resolution {
-        WireConflictResolution::KeepLocal => mark_keep_local(state, baseline, request, response)?,
-        WireConflictResolution::KeepRemote => mark_keep_remote(state, baseline, request, response)?,
+        WireConflictResolution::KeepLocal => {
+            mark_keep_local(state, baseline, request, decision.response)?;
+        }
+        WireConflictResolution::KeepRemote => {
+            apply_remote_asset_copy(env, asset, state, decision)?;
+        }
         WireConflictResolution::KeepBoth => return Err(unsupported_keep_both(request)),
     }
     Ok(())
@@ -286,46 +336,181 @@ fn mark_keep_local<Id>(
     Ok(())
 }
 
-fn mark_keep_remote<Id>(
+fn mark_synced<Id>(
     state: &mut SyncState<Id>,
-    baseline: &LocalBaseline,
-    request: &ResolveConflictRequest,
-    response: &ResolveConflictResponse,
-) -> Result<()> {
-    let revision = accepted_server_revision(request, response)?;
-    state.last_local_hash = Some(baseline.content_hash.clone());
-    state.last_synced_hash = Some(baseline.content_hash.clone());
-    state.last_synced_path = Some(baseline.path.clone());
-    state.sync_status = SyncStatus::PendingDownload;
+    content_hash: &ContentHash,
+    path: &RelativePath,
+    revision: ServerRevision,
+) {
+    state.last_local_hash = Some(content_hash.clone());
+    state.last_synced_hash = Some(content_hash.clone());
+    state.last_synced_path = Some(path.clone());
     state.last_known_server_revision = Some(revision);
+    state.sync_status = SyncStatus::Synced;
     state.pending_operation = None;
     state.last_sync_error = None;
+}
+
+fn apply_remote_note_copy(
+    env: &ConflictResolutionEnv<'_>,
+    note: &NoteRecord,
+    state: &mut NoteSyncState,
+    decision: &ConflictResolutionDecision<'_>,
+) -> Result<()> {
+    let request = decision.request;
+    let revision = accepted_server_revision(request, decision.response)?;
+    let remote_path = newest_conflict_copy(env.vault, &note.current_path)?
+        .ok_or_else(|| missing_remote_conflict_copy(request, &note.current_path))?;
+    let remote_absolute_path = env.vault.join(remote_path.as_str());
+    let local_absolute_path = env.vault.join(note.current_path.as_str());
+    let remote_bytes = read_remote_copy(&remote_absolute_path)?;
+    let parsed = zk_vault::parse_note_file(&remote_absolute_path)?;
+    let frontmatter = parsed
+        .frontmatter
+        .ok_or_else(|| invalid_remote_note_copy(request, "missing frontmatter"))?;
+    let frontmatter_id = frontmatter
+        .id
+        .as_ref()
+        .ok_or_else(|| invalid_remote_note_copy(request, "missing note id"))?;
+    if frontmatter_id != &note.note_id {
+        return Err(invalid_remote_note_copy(
+            request,
+            "note id does not match conflict target",
+        ));
+    }
+    let title = frontmatter
+        .title
+        .as_deref()
+        .ok_or_else(|| invalid_remote_note_copy(request, "missing title"))?;
+    let frontmatter_json = serde_json::to_string(&frontmatter)
+        .map_err(|source| AppError::FrontmatterSerialization { source })?;
+    let content_hash = ContentHash::from_bytes(&remote_bytes);
+
+    zk_vault::atomic_write_file(&local_absolute_path, &remote_bytes)?;
+    NoteRepo::upsert_note_with_server_revision(
+        env.conn,
+        UpsertNoteParams {
+            note_id: &note.note_id,
+            path: &note.current_path,
+            title,
+            content_hash: &content_hash,
+            frontmatter_json: &frontmatter_json,
+            created_at: frontmatter.created.as_deref().unwrap_or_default(),
+            updated_at: frontmatter.updated.as_deref().unwrap_or_default(),
+            trashed_at: note.trashed_at.as_deref(),
+            is_trashed: note.is_trashed,
+        },
+        &revision,
+    )?;
+    mark_synced(state, &content_hash, &note.current_path, revision);
     Ok(())
 }
 
-fn note_local_baseline(
-    conn: &Connection,
-    note_id: &NoteId,
-    request: &ResolveConflictRequest,
-) -> Result<LocalBaseline> {
-    let note = NoteRepo::get_note(conn, note_id)?.ok_or_else(|| missing_conflict_item(request))?;
-    Ok(LocalBaseline {
-        content_hash: note.content_hash,
-        path: note.current_path,
+fn apply_remote_asset_copy(
+    env: &ConflictResolutionEnv<'_>,
+    asset: &AssetRecord,
+    state: &mut AssetSyncState,
+    decision: &ConflictResolutionDecision<'_>,
+) -> Result<()> {
+    let request = decision.request;
+    let revision = accepted_server_revision(request, decision.response)?;
+    let remote_path = newest_conflict_copy(env.vault, &asset.current_path)?
+        .ok_or_else(|| missing_remote_conflict_copy(request, &asset.current_path))?;
+    let remote_absolute_path = env.vault.join(remote_path.as_str());
+    let local_absolute_path = env.vault.join(asset.current_path.as_str());
+    let remote_bytes = read_remote_copy(&remote_absolute_path)?;
+    let content_hash = ContentHash::from_bytes(&remote_bytes);
+    let size_bytes =
+        u64::try_from(remote_bytes.len()).expect("asset byte length should fit in u64");
+    let record = AssetRecord {
+        content_hash: content_hash.clone(),
+        size_bytes,
+        server_revision: revision.clone(),
+        ..asset.clone()
+    };
+
+    zk_vault::atomic_write_file(&local_absolute_path, &remote_bytes)?;
+    AssetRepo::upsert_asset(env.conn, &record)?;
+    mark_synced(state, &content_hash, &asset.current_path, revision);
+    Ok(())
+}
+
+fn note_baseline(note: &NoteRecord) -> LocalBaseline {
+    LocalBaseline {
+        content_hash: note.content_hash.clone(),
+        path: note.current_path.clone(),
+    }
+}
+
+fn asset_baseline(asset: &AssetRecord) -> LocalBaseline {
+    LocalBaseline {
+        content_hash: asset.content_hash.clone(),
+        path: asset.current_path.clone(),
+    }
+}
+
+fn read_remote_copy(path: &Path) -> Result<Vec<u8>> {
+    fs::read(path).map_err(|source| AppError::Io {
+        path: path.to_path_buf(),
+        source,
     })
 }
 
-fn asset_local_baseline(
-    conn: &Connection,
-    asset_id: &AssetId,
-    request: &ResolveConflictRequest,
-) -> Result<LocalBaseline> {
-    let asset =
-        AssetRepo::get_asset(conn, asset_id)?.ok_or_else(|| missing_conflict_item(request))?;
-    Ok(LocalBaseline {
-        content_hash: asset.content_hash,
-        path: asset.current_path,
-    })
+fn newest_conflict_copy(
+    vault: &VaultRoot,
+    local_path: &RelativePath,
+) -> Result<Option<RelativePath>> {
+    let local = Path::new(local_path.as_str());
+    let parent = local.parent().unwrap_or_else(|| Path::new(""));
+    let Some(stem) = local.file_stem().map(|value| value.to_string_lossy()) else {
+        return Ok(None);
+    };
+    let extension = local.extension().map(|value| value.to_string_lossy());
+    let directory = vault.join(parent);
+    let entries = match fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(source) if source.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(AppError::Io {
+                path: directory,
+                source,
+            });
+        }
+    };
+    let mut matches = Vec::new();
+
+    for entry in entries {
+        let entry = entry.map_err(|source| AppError::Io {
+            path: directory.clone(),
+            source,
+        })?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !is_conflict_copy_name(&name, &stem, extension.as_deref()) {
+            continue;
+        }
+
+        let relative = if parent.as_os_str().is_empty() {
+            PathBuf::from(&name)
+        } else {
+            parent.join(&name)
+        };
+        matches.push(relative.to_string_lossy().into_owned());
+    }
+
+    matches.sort_unstable();
+    Ok(matches.pop().map(|path| RelativePath::new(&path)))
+}
+
+fn is_conflict_copy_name(name: &str, stem: &str, extension: Option<&str>) -> bool {
+    let prefix = format!("{stem}.conflict-remote-");
+    if !name.starts_with(&prefix) {
+        return false;
+    }
+
+    extension.map_or_else(
+        || Path::new(name).extension().is_none(),
+        |extension| name.ends_with(&format!(".{extension}")),
+    )
 }
 
 fn accepted_server_revision(
@@ -387,6 +572,29 @@ fn unsupported_keep_both(request: &ResolveConflictRequest) -> AppError {
         context: format!(
             "keep-both is not supported for {} {}",
             item_type_label(request.item_type),
+            request.item_id
+        ),
+    }
+}
+
+fn missing_remote_conflict_copy(
+    request: &ResolveConflictRequest,
+    local_path: &RelativePath,
+) -> AppError {
+    AppError::InvariantViolation {
+        context: format!(
+            "remote conflict copy for {} {} at {} is missing",
+            item_type_label(request.item_type),
+            request.item_id,
+            local_path.as_str()
+        ),
+    }
+}
+
+fn invalid_remote_note_copy(request: &ResolveConflictRequest, reason: &str) -> AppError {
+    AppError::InvariantViolation {
+        context: format!(
+            "remote conflict copy for note {} is invalid: {reason}",
             request.item_id
         ),
     }
