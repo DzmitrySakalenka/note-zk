@@ -363,6 +363,50 @@ fn planner_keeps_update_when_local_content_changed_and_server_revision_advanced(
 }
 
 #[test]
+fn planner_treats_note_move_with_content_change_as_update() {
+    let connection = open_memory().expect("in-memory database should open");
+    ensure_schema(&connection).expect("schema should be ready");
+    let note_id = NoteId::new("01TG11004MOVECONTENT00001");
+    let note = base_note(
+        &note_id,
+        "notes/readwise/manifold_sleering.md",
+        b"synced note body with new tags",
+    );
+    insert_note(&connection, &note);
+    SyncStateRepo::upsert_note_sync_state(
+        &connection,
+        &NoteSyncState {
+            last_local_hash: Some(note.content_hash.clone()),
+            last_synced_hash: Some(ContentHash::from_bytes(b"synced note body")),
+            last_synced_path: Some(RelativePath::new("notes/manifold_sleering.md")),
+            ..base_note_sync_state(&note_id, "notes/manifold_sleering.md")
+        },
+    )
+    .expect("combined move/update sync-state should be inserted");
+
+    let planned = plan_local_changes(&PlannerContext {
+        conn: &connection,
+        device_id: &device_id(),
+        clock: &fixed_clock(),
+        trash_dir: &trash_dir(),
+    })
+    .expect("planner should succeed");
+
+    assert_eq!(
+        planned,
+        vec![PlannedOperation::Note(
+            zk_sync::plan::NotePlannedOperation {
+                note_id,
+                current_path: RelativePath::new("notes/readwise/manifold_sleering.md"),
+                op: PlannedOp::Update,
+                local_hash: ContentHash::from_bytes(b"synced note body with new tags"),
+                base_server_revision: Some(ServerRevision::new(7)),
+            }
+        )]
+    );
+}
+
+#[test]
 fn planner_uses_trash_dir_to_distinguish_restore_from_move() {
     let connection = open_memory().expect("in-memory database should open");
     ensure_schema(&connection).expect("schema should be ready");

@@ -2342,6 +2342,7 @@ fn run_sync_job(runtime: &Runtime, ctx: &JobContext, intent: SyncIntent) -> Resu
             register_request(&device_id),
         ))
         .context("while attempting to register sync device from TUI job")?;
+    normalize_before_push_capable_sync(ctx, &mut connection, intent)?;
 
     let trash_dir = zk_app::RelativePath::new(&ctx.config.trash_dir);
     let clock = SystemClock;
@@ -2390,6 +2391,31 @@ fn run_sync_job(runtime: &Runtime, ctx: &JobContext, intent: SyncIntent) -> Resu
     };
 
     Ok(JobResult::Sync(outcome))
+}
+
+fn normalize_before_push_capable_sync(
+    ctx: &JobContext,
+    connection: &mut rusqlite::Connection,
+    intent: SyncIntent,
+) -> Result<()> {
+    if !matches!(
+        intent,
+        SyncIntent::Bootstrap | SyncIntent::Push | SyncIntent::FullCycle
+    ) {
+        return Ok(());
+    }
+
+    zk_app::rebuild_index(
+        &ctx.vault_root,
+        &ctx.config,
+        connection,
+        RebuildOptions {
+            write_normalized: true,
+        },
+    )
+    .context("while attempting to normalize vault before TUI sync")?;
+
+    Ok(())
 }
 
 fn run_trash_job(ctx: &JobContext, intent: TrashIntent) -> Result<JobResult> {

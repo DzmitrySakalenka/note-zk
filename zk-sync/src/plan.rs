@@ -208,9 +208,10 @@ fn plan_note_change(
     }
 
     if let Some(last_synced_path) = state.last_synced_path {
+        let content_changed = state.last_synced_hash.as_ref() != Some(&note.content_hash);
         if note.current_path != last_synced_path
             && note.is_trashed == path_is_under_trash(&last_synced_path, ctx.trash_dir)
-            && state.last_synced_hash.as_ref() == Some(&note.content_hash)
+            && !content_changed
         {
             return Ok(Some(note_planned_operation(
                 note,
@@ -221,10 +222,7 @@ fn plan_note_change(
             )));
         }
 
-        if !note.is_trashed
-            && state.last_synced_hash.as_ref() != Some(&note.content_hash)
-            && note.current_path == last_synced_path
-        {
+        if !note.is_trashed && content_changed {
             return Ok(Some(note_planned_operation(
                 note,
                 PlannedOp::Update,

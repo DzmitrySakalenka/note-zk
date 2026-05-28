@@ -13,7 +13,7 @@ const REQUIRED_SECTIONS: [&str; 8] = [
     "## Run and observe the server",
 ];
 
-const REQUIRED_CONFIG_SNIPPETS: [&str; 35] = [
+const REQUIRED_CONFIG_SNIPPETS: [&str; 41] = [
     "database_path = \"/var/lib/note-zk/server.sqlite\"",
     "listen_addr = \"127.0.0.1:7878\"",
     "log_filter = \"info,zk_server=debug\"",
@@ -34,6 +34,12 @@ const REQUIRED_CONFIG_SNIPPETS: [&str; 35] = [
     "dim = 384",
     "[ai.chat]",
     "model_id = \"gpt-4o-mini\"",
+    "model_id = \"gemma4:e4b\"",
+    "base_url = \"http://127.0.0.1:11434\"",
+    "api_key_env_var = \"OLLAMA_API_KEY\"",
+    "export OLLAMA_API_KEY=ollama",
+    "base_url = \"https://router.huggingface.co\"",
+    "api_key_env_var = \"HF_TOKEN\"",
     "max_input_tokens = 8192",
     "max_output_tokens = 1024",
     "retrieval_top_k = 8",
@@ -139,6 +145,12 @@ fn configure_server_doc_covers_server_config_contract() {
         contents.contains("[backup and restore runbook](../architecture/backup-and-restore.md)")
             && contents.contains("[LLM execution model](../architecture/llm-execution-model.md)"),
         "guide should link the detailed architecture docs"
+    );
+    assert!(
+        contents.contains("local chat is not implemented in-process")
+            && contents.contains("required by note-zk")
+            && contents.contains("ignored by local Ollama"),
+        "guide should explain local chat and Ollama API key behavior"
     );
     assert!(
         contents.contains("`GET /health`")

@@ -2,6 +2,7 @@
 
 use std::{
     fs,
+    path::PathBuf,
     sync::mpsc::{Receiver, SyncSender, sync_channel},
     time::Duration,
 };
@@ -591,9 +592,57 @@ async fn sync_screen_push_conflict_updates_status_panel() {
     server.verify().await;
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn sync_screen_push_normalizes_missing_frontmatter_before_upload() {
+    let server = MockServer::start().await;
+    mount_register_device(&server, 1).await;
+    mount_accepting_normalized_push_response(&server, 1).await;
+    let mut harness = TuiSyncHarness::new_with_raw_note(&server);
+
+    harness.go_to_sync_screen();
+    harness.send_key(KeyCode::Char('p'));
+    harness.wait_for_all(&[
+        "success: sync push completed",
+        "push completed: accepted 1, conflicts 0, errors 0",
+    ]);
+
+    let document =
+        zk_vault::parse_note_file(&harness.raw_note_path()).expect("raw note should be normalized");
+    let frontmatter = document
+        .frontmatter
+        .expect("normalized note should contain frontmatter");
+    assert!(frontmatter.id.is_some(), "normalized note should get an id");
+    assert_eq!(frontmatter.title.as_deref(), Some("Missing Frontmatter"));
+    assert_eq!(frontmatter.tags, vec!["untagged".to_string()]);
+
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn sync_screen_pull_does_not_normalize_missing_frontmatter() {
+    let server = MockServer::start().await;
+    mount_register_device(&server, 1).await;
+    mount_empty_incremental_pull(&server, 1).await;
+    let mut harness = TuiSyncHarness::new_with_raw_note(&server);
+
+    harness.go_to_sync_screen();
+    harness.send_key(KeyCode::Char('l'));
+    harness.wait_for_all(&[
+        "success: sync pull completed",
+        "pull completed: applied 0, conflicts 0",
+    ]);
+
+    let body =
+        fs::read_to_string(harness.raw_note_path()).expect("raw note should remain readable");
+    assert_eq!(body, raw_note_body());
+
+    server.verify().await;
+}
+
 struct TuiSyncHarness {
     _tempdir: TempDir,
     _runner: JobRunner,
+    vault_root: PathBuf,
     app: App,
     terminal: Terminal<TestBackend>,
     tx: SyncSender<AppEvent>,
@@ -602,11 +651,26 @@ struct TuiSyncHarness {
 
 impl TuiSyncHarness {
     fn new(server: &MockServer, with_note: bool) -> Self {
+        let note_fixture = if with_note {
+            NoteFixture::Indexed
+        } else {
+            NoteFixture::None
+        };
+        Self::new_with_fixture(server, note_fixture)
+    }
+
+    fn new_with_raw_note(server: &MockServer) -> Self {
+        Self::new_with_fixture(server, NoteFixture::RawUnindexed)
+    }
+
+    fn new_with_fixture(server: &MockServer, note_fixture: NoteFixture) -> Self {
         let tempdir = tempfile::tempdir().expect("temporary directory should be created");
         let vault_root = tempdir.path().join("vault");
         fs::create_dir_all(&vault_root).expect("vault directory should be created");
-        if with_note {
-            write_note(&vault_root);
+        match note_fixture {
+            NoteFixture::None => {}
+            NoteFixture::Indexed => write_note(&vault_root),
+            NoteFixture::RawUnindexed => write_raw_note(&vault_root),
         }
 
         let mut config = EffectiveConfig {
@@ -620,7 +684,7 @@ impl TuiSyncHarness {
 
         let mut connection =
             bootstrap_index_connection(&config).expect("test index connection should open");
-        if with_note {
+        if matches!(note_fixture, NoteFixture::Indexed) {
             rebuild_index(
                 &vault_root,
                 &config,
@@ -642,11 +706,16 @@ impl TuiSyncHarness {
         Self {
             _tempdir: tempdir,
             _runner: runner,
+            vault_root,
             app,
             terminal: app_test_terminal(),
             tx,
             rx,
         }
+    }
+
+    fn raw_note_path(&self) -> PathBuf {
+        self.vault_root.join("notes").join("missing-frontmatter.md")
     }
 
     fn go_to_sync_screen(&mut self) {
@@ -720,6 +789,13 @@ impl TuiSyncHarness {
             .expect("app should render to test backend");
         rendered_rows(&self.terminal)
     }
+}
+
+#[derive(Clone, Copy)]
+enum NoteFixture {
+    None,
+    Indexed,
+    RawUnindexed,
 }
 
 #[derive(Clone, Copy)]
@@ -805,6 +881,63 @@ async fn mount_push_status(
     .await;
 }
 
+async fn mount_accepting_normalized_push_response(server: &MockServer, expected_calls: u64) {
+    Mock::given(method("POST"))
+        .and(path("/sync/push"))
+        .and(normalized_push_body_matches)
+        .respond_with(|request: &wiremock::Request| {
+            let body = request
+                .body_json::<Value>()
+                .expect("normalized push body should be JSON");
+            let note_id = body
+                .get("notes")
+                .and_then(Value::as_array)
+                .and_then(|notes| notes.first())
+                .and_then(|note| note.get("note_id"))
+                .and_then(Value::as_str)
+                .expect("normalized push body should include note id");
+
+            ResponseTemplate::new(200).set_body_json(json!({
+                "results": [{
+                    "item_id": note_id,
+                    "accepted": true,
+                    "conflict": false,
+                    "new_server_revision": 1
+                }]
+            }))
+        })
+        .expect(expected_calls)
+        .mount(server)
+        .await;
+}
+
+fn normalized_push_body_matches(request: &wiremock::Request) -> bool {
+    let Some(notes) = request
+        .body_json::<Value>()
+        .ok()
+        .and_then(|body| body.get("notes").and_then(Value::as_array).cloned())
+    else {
+        return false;
+    };
+    let Some(note) = notes.first() else {
+        return false;
+    };
+    notes.len() == 1
+        && note.get("path").and_then(Value::as_str) == Some("notes/missing-frontmatter.md")
+        && note
+            .get("content")
+            .and_then(Value::as_str)
+            .is_some_and(normalized_raw_note_content_matches)
+}
+
+fn normalized_raw_note_content_matches(content: &str) -> bool {
+    content.starts_with("---\n")
+        && content.contains("\nid: ")
+        && content.contains("\ntitle: Missing Frontmatter\n")
+        && content.contains("\ntags:\n  - untagged\n")
+        && content.contains("# Missing Frontmatter\n\nBody text\n")
+}
+
 fn push_body_matches(request: &wiremock::Request, expected: PushBody) -> bool {
     let Some(notes) = request
         .body_json::<Value>()
@@ -864,4 +997,15 @@ fn write_note(vault_root: &std::path::Path) {
         format!("---\nid: {NOTE_ID}\ntitle: Shared\ntags:\n  - tui\n---\n# Shared\n\nbody\n"),
     )
     .expect("test note should be written");
+}
+
+fn write_raw_note(vault_root: &std::path::Path) {
+    let notes_dir = vault_root.join("notes");
+    fs::create_dir_all(&notes_dir).expect("notes directory should be created");
+    fs::write(notes_dir.join("missing-frontmatter.md"), raw_note_body())
+        .expect("raw note should be written");
+}
+
+fn raw_note_body() -> &'static str {
+    "# Missing Frontmatter\n\nBody text\n"
 }

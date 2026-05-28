@@ -11,7 +11,7 @@ use zk_index::{
     DeleteRecordRepo, NoteIndexedMetadata, NoteRepo, SyncStateRepo, SyncedNoteStateInput,
     UpsertNoteParams,
 };
-use zk_vault::{error::VaultError, parse_note_file};
+use zk_vault::{VaultRoot, error::VaultError, parse_note_file};
 
 use crate::{
     SyncError, SyncResult,
@@ -94,17 +94,7 @@ fn apply_note_content_change(
     let server_revision = required_server_revision(change)?;
 
     if loaded.snapshot.last_local_hash.is_some() && detect_pull_conflict(&loaded.snapshot, change) {
-        let local_path = loaded
-            .note
-            .as_ref()
-            .map(|record| record.current_path.clone())
-            .or_else(|| {
-                loaded
-                    .sync_state
-                    .as_ref()
-                    .and_then(|record| record.last_synced_path.clone())
-            })
-            .unwrap_or_else(|| path.clone());
+        let local_path = local_note_conflict_path(loaded, &path);
         let derived_policy = if is_path_derived(&local_path, workspace.folders) {
             DerivedFolderPolicy::RemoteWins
         } else {
@@ -146,6 +136,7 @@ fn apply_note_content_change(
         }
     }
 
+    move_existing_note_file_for_content_update(workspace.vault, loaded.note.as_ref(), &path)?;
     ensure_file_content(workspace.vault, &path, content.as_bytes())?;
 
     let absolute_path = workspace.vault.join(path.as_str());
@@ -194,6 +185,43 @@ fn apply_note_content_change(
     workspace.outcome.applied += 1;
 
     Ok(())
+}
+
+fn local_note_conflict_path(loaded: &LoadedNoteState, fallback: &RelativePath) -> RelativePath {
+    loaded
+        .note
+        .as_ref()
+        .map(|record| record.current_path.clone())
+        .or_else(|| {
+            loaded
+                .sync_state
+                .as_ref()
+                .and_then(|record| record.last_synced_path.clone())
+        })
+        .unwrap_or_else(|| fallback.clone())
+}
+
+fn move_existing_note_file_for_content_update(
+    vault: &VaultRoot,
+    note: Option<&NoteRecord>,
+    path: &RelativePath,
+) -> SyncResult<()> {
+    let Some(note) = note else {
+        return Ok(());
+    };
+    if note.current_path == *path {
+        return Ok(());
+    }
+
+    let absolute_current_path = vault.join(note.current_path.as_str());
+    match absolute_current_path.try_exists() {
+        Ok(true) => move_path_if_needed(vault, &note.current_path, path),
+        Ok(false) => Ok(()),
+        Err(source) => Err(SyncError::VaultWrite(VaultError::Io {
+            path: absolute_current_path,
+            source,
+        })),
+    }
 }
 
 fn apply_note_move(

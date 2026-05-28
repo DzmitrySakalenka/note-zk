@@ -676,6 +676,97 @@ fn apply_pull_response_creates_note_and_advances_cursor() {
 }
 
 #[test]
+fn apply_pull_response_updates_moved_note_without_leaving_old_file() {
+    let vault = TempDir::new().expect("temp vault should create");
+    let mut connection = open_sync_connection();
+    DeviceRepo::upsert_device(&connection, &device_record(Some(7))).expect("device should insert");
+
+    let note_id = "01TG11007NOTEMOVEDUPDATE1";
+    let old_path = RelativePath::new("notes/manifold_sleering.md");
+    let new_path = RelativePath::new("notes/readwise/manifold_sleering.md");
+    let old_body = note_body(
+        note_id,
+        "Manifold Sleering",
+        "2026-04-20T08:00:00Z",
+        "# Manifold",
+    );
+    let old_hash = ContentHash::from_bytes(old_body.as_bytes());
+    write_vault_file(vault.path(), &old_path, old_body.as_bytes());
+    let note = NoteId::new(note_id);
+    let frontmatter_json = serde_json::json!({
+        "id": note_id,
+        "title": "Manifold Sleering",
+        "created": "2026-04-01T00:00:00Z",
+        "updated": "2026-04-20T08:00:00Z"
+    })
+    .to_string();
+    NoteRepo::upsert_note(
+        &connection,
+        UpsertNoteParams {
+            note_id: &note,
+            path: &old_path,
+            title: "Manifold Sleering",
+            content_hash: &old_hash,
+            frontmatter_json: &frontmatter_json,
+            created_at: "2026-04-01T00:00:00Z",
+            updated_at: "2026-04-20T08:00:00Z",
+            trashed_at: None,
+            is_trashed: false,
+        },
+    )
+    .expect("note should seed");
+    upsert_note_state(
+        &connection,
+        note_id,
+        Some(&old_hash),
+        Some(&old_hash),
+        Some(&old_path),
+        Some(3),
+        None,
+    );
+
+    let response = SyncPullResponse {
+        changes: vec![note_change(
+            8,
+            note_id,
+            WireEventType::Update,
+            Some(new_path.as_str()),
+            "Manifold Sleering",
+            "2026-04-22T18:00:00Z",
+            "# Manifold\n\nTags changed.",
+            4,
+        )],
+        next_cursor: Some(8),
+    };
+
+    let outcome = apply(&mut connection, &vault, &response).expect("pull apply should succeed");
+
+    assert_eq!(outcome.applied, 1);
+    assert_eq!(
+        fs::read_to_string(vault.path().join(new_path.as_str())).expect("note file should read"),
+        note_body(
+            note_id,
+            "Manifold Sleering",
+            "2026-04-22T18:00:00Z",
+            "# Manifold\n\nTags changed."
+        )
+    );
+    let stale_path_error = fs::metadata(vault.path().join(old_path.as_str()))
+        .expect_err("old note path should not remain after moved update");
+    assert_eq!(stale_path_error.kind(), ErrorKind::NotFound);
+
+    let stored_note = NoteRepo::get_note(&connection, &NoteId::new(note_id))
+        .expect("note query should succeed")
+        .expect("note should exist");
+    assert_eq!(stored_note.current_path, new_path);
+    assert_eq!(stored_note.server_revision, ServerRevision::new(4));
+    let state = SyncStateRepo::get_note_sync_state(&connection, &NoteId::new(note_id))
+        .expect("note sync-state query should succeed")
+        .expect("note sync-state should exist");
+    assert_eq!(state.last_synced_path, Some(new_path));
+}
+
+#[test]
 fn apply_pull_response_creates_asset_from_inline_bytes() {
     let vault = TempDir::new().expect("temp vault should create");
     let mut connection = open_sync_connection();

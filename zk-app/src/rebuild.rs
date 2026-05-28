@@ -2,8 +2,8 @@ use std::path::Path;
 
 use rusqlite::{Connection, Transaction};
 use zk_domain::config::EffectiveConfig;
-use zk_index::{IndexError, NoteInput, RebuildStats, SyncStateRepo};
-use zk_vault::NormalizationSummary;
+use zk_index::{IndexError, NoteInput, NoteRepo, RebuildStats, SyncStateRepo};
+use zk_vault::{NormalizationSummary, TrashState, VaultScanResult};
 
 use crate::{
     AppError, ReconciliationStats, ScanOutcome, SystemClock, build_asset_inputs, build_note_inputs,
@@ -77,6 +77,8 @@ pub fn rebuild_index(
 ) -> Result<RebuildOutcome, AppError> {
     let mut scan_outcome = scan_vault(vault_root, config)?;
     let normalization = if options.write_normalized {
+        zk_index::ensure_schema(conn)?;
+        repair_indexed_path_identities(conn, &mut scan_outcome.scan_result)?;
         let normalization = zk_vault::apply_normalization(vault_root, &scan_outcome.scan_result)?;
         scan_outcome = scan_vault(vault_root, config)?;
         Some(normalization)
@@ -123,6 +125,37 @@ pub fn rebuild_index(
             reconciliation,
         }),
     }
+}
+
+fn repair_indexed_path_identities(
+    conn: &Connection,
+    scan_result: &mut VaultScanResult,
+) -> Result<(), AppError> {
+    for note in &mut scan_result.notes {
+        if note.trash_state == TrashState::Trashed {
+            continue;
+        }
+
+        let Some(indexed_note) = NoteRepo::get_note_by_path(conn, &note.relative_path)? else {
+            continue;
+        };
+        let Some(frontmatter) = note.frontmatter.as_mut() else {
+            continue;
+        };
+        let Some(document) = note.document.as_mut() else {
+            continue;
+        };
+        if frontmatter.id == indexed_note.note_id {
+            continue;
+        }
+
+        note.note_id = Some(indexed_note.note_id.clone());
+        frontmatter.id = indexed_note.note_id.clone();
+        document.frontmatter.id = indexed_note.note_id;
+        note.plan.needs_id_injection = true;
+    }
+
+    Ok(())
 }
 
 fn refresh_note_sync_hashes(

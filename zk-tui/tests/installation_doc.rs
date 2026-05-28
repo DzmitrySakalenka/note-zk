@@ -10,7 +10,7 @@ const REQUIRED_SECTIONS: [&str; 5] = [
     "## Verify the install",
 ];
 
-const REQUIRED_COMMANDS: [&str; 9] = [
+const REQUIRED_COMMANDS: [&str; 12] = [
     "make check",
     "cargo build --release --workspace",
     "cargo install --path zk-cli",
@@ -18,6 +18,9 @@ const REQUIRED_COMMANDS: [&str; 9] = [
     "cargo install --path zk-server",
     "cargo install --path zk-tui --features ai",
     "cargo install --path zk-tui --features ai-local",
+    "cargo build --release -p zk-server --features zk-ai/provider-local-metal",
+    "cargo build --release -p zk-cli --features ai-local,zk-ai/provider-local-metal",
+    "cargo build --release -p zk-tui --features ai-local,zk-ai/provider-local-metal",
     "zk-cli --version",
     "zk-tui --version",
 ];
@@ -63,6 +66,10 @@ fn installation_doc_covers_supported_install_paths() {
     assert!(
         contents.contains("[LLM Execution Model](../architecture/llm-execution-model.md)"),
         "guide should cross-link local AI runtime details"
+    );
+    assert!(
+        contents.contains("provider-local-metal") && contents.contains("provider-local-cuda"),
+        "guide should describe hardware-specific local AI build features"
     );
     assert!(
         contents.contains("Truecolor")

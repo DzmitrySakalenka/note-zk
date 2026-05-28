@@ -173,6 +173,139 @@ Body content
 }
 
 #[test]
+fn rebuild_index_write_normalized_reuses_indexed_path_id_when_header_is_removed() {
+    let root = unique_test_dir("rebuild-index-write-normalized-reuse-path-id");
+    let vault_root = root.join("vault");
+    let note_path = vault_root.join("notes").join("existing.md");
+    let original_id = NoteId::new("01ARZ3NDEKTSV4RRFFQ69G5FAX");
+
+    write_text(
+        &note_path,
+        r"---
+id: 01ARZ3NDEKTSV4RRFFQ69G5FAX
+title: Existing
+tags:
+  - tg8
+---
+# Existing
+
+Body content
+",
+    );
+
+    let config = EffectiveConfig {
+        vault_path: vault_root.clone(),
+        allowed_note_extensions: vec!["md".to_string()],
+        ..EffectiveConfig::default()
+    };
+
+    let mut conn = open_memory().expect("open in-memory SQLite");
+    rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
+        .expect("initial rebuild should index original note id");
+
+    write_text(
+        &note_path,
+        r"# Existing
+
+Body content after accidental header removal
+",
+    );
+
+    rebuild_index(
+        &vault_root,
+        &config,
+        &mut conn,
+        RebuildOptions {
+            write_normalized: true,
+        },
+    )
+    .expect("write-normalized rebuild should preserve indexed path identity");
+
+    let normalized_contents =
+        fs::read_to_string(&note_path).expect("read note after normalization write");
+    assert_eq!(
+        extract_frontmatter_id(&normalized_contents).as_deref(),
+        Some(original_id.as_str())
+    );
+    assert_eq!(count_rows(&conn, "notes_index"), 1);
+
+    let indexed_note = NoteRepo::get_note(&conn, &original_id)
+        .expect("lookup note by original id")
+        .expect("note should remain indexed under original id");
+    assert_eq!(
+        indexed_note.current_path,
+        RelativePath::new("notes/existing.md")
+    );
+}
+
+#[test]
+fn rebuild_index_write_normalized_rewrites_changed_id_to_indexed_path_id() {
+    let root = unique_test_dir("rebuild-index-write-normalized-rewrite-path-id");
+    let vault_root = root.join("vault");
+    let note_path = vault_root.join("test.md");
+    let original_id = NoteId::new("01KQSEH1KYATCXG33NFWY017RK");
+    let changed_id = NoteId::new("01KSN1NQSCMGW7H22EVV7FCR8P");
+
+    write_text(
+        &note_path,
+        r"---
+id: 01KQSEH1KYATCXG33NFWY017RK
+title: Test
+tags:
+  - untagged
+---
+# Test
+",
+    );
+
+    let config = EffectiveConfig {
+        vault_path: vault_root.clone(),
+        allowed_note_extensions: vec!["md".to_string()],
+        ..EffectiveConfig::default()
+    };
+
+    let mut conn = open_memory().expect("open in-memory SQLite");
+    rebuild_index(&vault_root, &config, &mut conn, RebuildOptions::default())
+        .expect("initial rebuild should index original note id");
+
+    write_text(
+        &note_path,
+        r"---
+id: 01KSN1NQSCMGW7H22EVV7FCR8P
+title: Test
+tags:
+  - untagged
+---
+# Test
+",
+    );
+
+    rebuild_index(
+        &vault_root,
+        &config,
+        &mut conn,
+        RebuildOptions {
+            write_normalized: true,
+        },
+    )
+    .expect("write-normalized rebuild should repair changed path identity");
+
+    let normalized_contents =
+        fs::read_to_string(&note_path).expect("read note after normalization write");
+    assert_eq!(
+        extract_frontmatter_id(&normalized_contents).as_deref(),
+        Some(original_id.as_str())
+    );
+    assert!(!normalized_contents.contains(changed_id.as_str()));
+    assert_eq!(count_rows(&conn, "notes_index"), 1);
+
+    let indexed_note = NoteRepo::get_note(&conn, &original_id)
+        .expect("lookup note by original id")
+        .expect("note should remain indexed under original id");
+    assert_eq!(indexed_note.current_path, RelativePath::new("test.md"));
+}
+
+#[test]
 fn rebuild_index_reconciles_delete_records_for_trashed_scan_results() {
     let root = unique_test_dir("rebuild-index-trash-reconciliation");
     let vault_root = root.join("vault");
