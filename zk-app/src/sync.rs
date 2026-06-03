@@ -14,9 +14,13 @@ use zk_domain::{
     id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     note::NoteRecord,
     sync::SyncStatus,
-    sync_state::{AssetSyncState, DeviceRecord, NoteSyncState, SyncState},
+    sync_state::{
+        AssetSyncState, DeleteRecord, DeleteRecordTarget, DeviceRecord, NoteSyncState, SyncState,
+    },
 };
-use zk_index::{AssetRepo, DeviceRepo, IndexError, NoteRepo, SyncStateRepo, UpsertNoteParams};
+use zk_index::{
+    AssetRepo, DeleteRecordRepo, DeviceRepo, IndexError, NoteRepo, SyncStateRepo, UpsertNoteParams,
+};
 use zk_sync::{
     SyncError,
     bootstrap::{
@@ -32,7 +36,7 @@ use zk_sync::{
 };
 use zk_vault::VaultRoot;
 
-use crate::{AppError, Clock, Result};
+use crate::{AppError, Clock, Result, item_lifecycle::format_timestamp};
 
 const COUNT_PENDING_NOTE_PUSH_SQL: &str = r"
 SELECT COUNT(*)
@@ -693,6 +697,7 @@ pub async fn plan_and_push(
         trash_dir,
         folders: _folders,
     } = ctx;
+    reconcile_missing_note_files_before_push(conn, vault, device_id, clock)?;
     let planned = {
         let planner = PlannerContext {
             conn: &*conn,
@@ -708,6 +713,98 @@ pub async fn plan_and_push(
     Ok(apply_push_response(
         conn, device_id, &planned, &response, clock,
     )?)
+}
+
+fn reconcile_missing_note_files_before_push(
+    conn: &mut Connection,
+    vault: &VaultRoot,
+    device_id: &DeviceId,
+    clock: &dyn Clock,
+) -> Result<()> {
+    let deleted_at = format_timestamp(clock.now());
+    let transaction = conn.transaction().map_err(|source| {
+        AppError::Index(IndexError::Sqlite {
+            source,
+            context: "begin direct-delete reconciliation".to_string(),
+        })
+    })?;
+
+    for note in NoteRepo::list_notes(&transaction)? {
+        if note.is_deleted || note.is_trashed || note_file_exists(vault, &note.current_path)? {
+            continue;
+        }
+
+        let state = SyncStateRepo::get_note_sync_state(&transaction, &note.note_id)?
+            .filter(|state| state.device_id == *device_id);
+
+        match state {
+            Some(state) if missing_note_state_blocks_reconciliation(&state) => {}
+            Some(state) if state.last_known_server_revision.is_some() => {
+                NoteRepo::mark_deleted(&transaction, &note.note_id, &deleted_at)?;
+                upsert_direct_note_delete_record(&transaction, &note, &deleted_at)?;
+            }
+            _ => {
+                NoteRepo::delete_note(&transaction, &note.note_id)?;
+            }
+        }
+    }
+
+    transaction.commit().map_err(|source| {
+        AppError::Index(IndexError::Sqlite {
+            source,
+            context: "commit direct-delete reconciliation".to_string(),
+        })
+    })?;
+
+    Ok(())
+}
+
+fn note_file_exists(vault: &VaultRoot, relative_path: &RelativePath) -> Result<bool> {
+    let absolute_path = vault.join(relative_path.as_str());
+    match fs::metadata(&absolute_path) {
+        Ok(_) => Ok(true),
+        Err(source) if source.kind() == ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(AppError::Io {
+            path: absolute_path,
+            source,
+        }),
+    }
+}
+
+fn missing_note_state_blocks_reconciliation(state: &NoteSyncState) -> bool {
+    matches!(
+        state.sync_status,
+        SyncStatus::Conflict | SyncStatus::PendingDownload
+    )
+}
+
+fn upsert_direct_note_delete_record(
+    conn: &Connection,
+    note: &NoteRecord,
+    deleted_at: &str,
+) -> Result<()> {
+    let target = DeleteRecordTarget::Note(note.note_id.clone());
+    let record = match DeleteRecordRepo::get_delete_record(conn, &target)? {
+        Some(existing) => DeleteRecord {
+            target: existing.target,
+            original_path: existing.original_path,
+            trashed_at: existing.trashed_at,
+            retention_until: existing.retention_until,
+            deleted_at: existing.deleted_at.or_else(|| Some(deleted_at.to_string())),
+            delete_revision: existing.delete_revision,
+        },
+        None => DeleteRecord {
+            target,
+            original_path: note.current_path.clone(),
+            trashed_at: deleted_at.to_string(),
+            retention_until: deleted_at.to_string(),
+            deleted_at: Some(deleted_at.to_string()),
+            delete_revision: None,
+        },
+    };
+
+    DeleteRecordRepo::insert_delete_record(conn, &record)?;
+    Ok(())
 }
 
 /// Pulls ordered remote batches until the remote cursor is exhausted and applies them locally.

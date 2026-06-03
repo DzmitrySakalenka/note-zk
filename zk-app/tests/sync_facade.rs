@@ -13,7 +13,7 @@ use zk_app::{
 };
 use zk_domain::{
     RegisterDeviceRequest, RegisterDeviceResponse, ResolveConflictRequest, ResolveConflictResponse,
-    WireConflictResolution, WireItemType,
+    SyncPushRequest, SyncPushResponse, WireConflictResolution, WireItemType, WireOperation,
     asset::AssetRecord,
     config::FolderPolicy,
     id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
@@ -715,6 +715,123 @@ fn plan_and_push_with_no_items_returns_empty_outcome_and_preserves_cursor() {
 }
 
 #[test]
+fn plan_and_push_directly_deleted_synced_note_pushes_delete() {
+    let mut connection = open_sync_connection();
+    let vault = TempDir::new().expect("temp vault should create");
+    let folders = BTreeMap::<String, FolderPolicy>::new();
+    let note_id = "01TGDIRECTDELETE000000001";
+    let note = base_note(&NoteId::new(note_id), "notes/delete-me.md", b"synced body");
+    insert_note(&connection, &note);
+    DeviceRepo::upsert_device(&connection, &device_record(Some(3))).expect("device should insert");
+
+    let mut state = note_sync_state(note_id, SyncStatus::Synced, None);
+    state.last_local_hash = Some(note.content_hash.clone());
+    state.last_synced_hash = Some(note.content_hash.clone());
+    state.last_synced_path = Some(note.current_path.clone());
+    state.last_known_server_revision = Some(ServerRevision::new(8));
+    SyncStateRepo::upsert_note_sync_state(&connection, &state)
+        .expect("synced note state should insert");
+
+    let transport = RecordingPushTransport::new();
+    let outcome = block_on(plan_and_push(
+        &transport,
+        SyncContext {
+            conn: &mut connection,
+            vault: vault.path(),
+            device_id: &device_id(),
+            clock: &fixed_clock(),
+            trash_dir: &trash_dir(),
+            folders: &folders,
+        },
+    ))
+    .expect("direct delete should push");
+
+    assert_eq!(outcome.accepted, 1);
+    assert!(outcome.conflicts.is_empty());
+    assert!(outcome.errors.is_empty());
+
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 1);
+    let pushed_note = requests[0]
+        .notes
+        .first()
+        .expect("one note delete should be pushed");
+    assert_eq!(requests[0].notes.len(), 1);
+    assert!(requests[0].assets.is_empty());
+    assert_eq!(pushed_note.note_id, note_id);
+    assert_eq!(pushed_note.path, "notes/delete-me.md");
+    assert_eq!(pushed_note.operation, WireOperation::Delete);
+    assert_eq!(pushed_note.base_server_revision, Some(8));
+    assert_eq!(pushed_note.content, None);
+
+    let actual_note = NoteRepo::get_note(&connection, &NoteId::new(note_id))
+        .expect("note query should succeed")
+        .expect("note tombstone should remain indexed");
+    assert!(actual_note.is_deleted);
+    assert_eq!(
+        actual_note.deleted_at,
+        Some("2026-05-01T00:00:00Z".to_string())
+    );
+
+    let delete_record = DeleteRecordRepo::get_delete_record(
+        &connection,
+        &DeleteRecordTarget::Note(NoteId::new(note_id)),
+    )
+    .expect("delete record query should succeed")
+    .expect("delete record should exist");
+    assert_eq!(delete_record.original_path, note.current_path);
+    assert_eq!(
+        delete_record.deleted_at,
+        Some("2026-05-01T00:00:00Z".to_string())
+    );
+    assert_eq!(delete_record.delete_revision, Some(ServerRevision::new(1)));
+}
+
+#[test]
+fn plan_and_push_directly_deleted_never_synced_note_drops_stale_index_row() {
+    let mut connection = open_sync_connection();
+    let vault = TempDir::new().expect("temp vault should create");
+    let folders = BTreeMap::<String, FolderPolicy>::new();
+    let note_id = "01TGSTALELOCAL000000001";
+    let note = base_note(
+        &NoteId::new(note_id),
+        "notes/local-only.md",
+        b"local only body",
+    );
+    insert_note(&connection, &note);
+
+    let transport = RecordingPushTransport::new();
+    let outcome = block_on(plan_and_push(
+        &transport,
+        SyncContext {
+            conn: &mut connection,
+            vault: vault.path(),
+            device_id: &device_id(),
+            clock: &fixed_clock(),
+            trash_dir: &trash_dir(),
+            folders: &folders,
+        },
+    ))
+    .expect("local-only stale row should not push");
+
+    assert_eq!(outcome.accepted, 0);
+    assert!(transport.requests()[0].notes.is_empty());
+    assert!(
+        NoteRepo::get_note(&connection, &NoteId::new(note_id))
+            .expect("note query should succeed")
+            .is_none()
+    );
+    assert!(
+        DeleteRecordRepo::get_delete_record(
+            &connection,
+            &DeleteRecordTarget::Note(NoteId::new(note_id)),
+        )
+        .expect("delete record query should succeed")
+        .is_none()
+    );
+}
+
+#[test]
 fn pull_and_apply_with_empty_transport_returns_zero_outcome_and_preserves_cursor() {
     let mut connection = open_sync_connection();
     let vault = TempDir::new().expect("temp vault should create");
@@ -872,10 +989,29 @@ struct ProbeTransport {
     counts: RemoteBootstrapProbe,
 }
 
+#[derive(Debug, Default)]
+struct RecordingPushTransport {
+    inner: NoopTransport,
+    requests: std::sync::Mutex<Vec<SyncPushRequest>>,
+}
+
 #[derive(Debug)]
 struct ResolveConflictTransport {
     response: ResolveConflictResponse,
     requests: std::sync::Mutex<Vec<ResolveConflictRequest>>,
+}
+
+impl RecordingPushTransport {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn requests(&self) -> Vec<SyncPushRequest> {
+        self.requests
+            .lock()
+            .expect("push request recorder should not be poisoned")
+            .clone()
+    }
 }
 
 impl ResolveConflictTransport {
@@ -903,6 +1039,38 @@ impl ProbeTransport {
                 asset_count,
             },
         }
+    }
+}
+
+#[async_trait]
+impl SyncTransport for RecordingPushTransport {
+    async fn register_device(
+        &self,
+        request: &RegisterDeviceRequest,
+    ) -> zk_sync::SyncResult<RegisterDeviceResponse> {
+        self.inner.register_device(request).await
+    }
+
+    async fn push(&self, request: &SyncPushRequest) -> zk_sync::SyncResult<SyncPushResponse> {
+        self.requests
+            .lock()
+            .expect("push request recorder should not be poisoned")
+            .push(request.clone());
+        self.inner.push(request).await
+    }
+
+    async fn pull(
+        &self,
+        request: &zk_domain::SyncPullRequest,
+    ) -> zk_sync::SyncResult<zk_domain::SyncPullResponse> {
+        self.inner.pull(request).await
+    }
+
+    async fn probe_remote_counts(
+        &self,
+        device_id: &DeviceId,
+    ) -> zk_sync::SyncResult<RemoteBootstrapProbe> {
+        self.inner.probe_remote_counts(device_id).await
     }
 }
 
