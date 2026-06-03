@@ -320,12 +320,16 @@ fn apply_note_trash(
         return Ok(());
     }
 
-    let local_trash_path = next_trash_path(
-        workspace.vault,
-        workspace.trash_dir,
-        &original_path,
-        &trashed_at,
-    )?;
+    let local_trash_path = if note.is_trashed {
+        note.current_path.clone()
+    } else {
+        next_trash_path(
+            workspace.vault,
+            workspace.trash_dir,
+            &original_path,
+            &trashed_at,
+        )?
+    };
     move_path_if_needed(workspace.vault, &note.current_path, &local_trash_path)?;
     upsert_note_metadata_row(
         workspace.transaction,

@@ -980,6 +980,123 @@ fn apply_pull_response_handles_replayed_remote_note_update() {
 
 #[test]
 #[allow(clippy::too_many_lines)]
+fn apply_pull_response_replayed_trash_keeps_existing_trash_path() {
+    let vault = TempDir::new().expect("temp vault should create");
+    let mut connection = open_sync_connection();
+    DeviceRepo::upsert_device(&connection, &device_record(Some(20))).expect("device should insert");
+
+    let note_id = "01TG16034NOTETRASHREPLAY01";
+    let original_path = RelativePath::new("notes/trash-me.md");
+    let trashed_path = RelativePath::new(".zk-trash/2026-04-22/trash-me.md");
+    let collision_path = RelativePath::new(".zk-trash/2026-04-22/trash-me-1.md");
+    let trashed_at = "2026-04-22T18:07:33Z";
+    let retention_until = "2026-05-22T18:07:33Z";
+    let body = note_body(note_id, "Trash Me", "2026-04-20T08:00:00Z", "# Trash Me");
+    let body_hash = ContentHash::from_bytes(body.as_bytes());
+    write_vault_file(vault.path(), &trashed_path, body.as_bytes());
+
+    let note = NoteId::new(note_id);
+    let frontmatter_json = serde_json::json!({
+        "id": note_id,
+        "title": "Trash Me",
+        "created": "2026-04-01T00:00:00Z",
+        "updated": "2026-04-20T08:00:00Z"
+    })
+    .to_string();
+    NoteRepo::upsert_note(
+        &connection,
+        UpsertNoteParams {
+            note_id: &note,
+            path: &trashed_path,
+            title: "Trash Me",
+            content_hash: &body_hash,
+            frontmatter_json: &frontmatter_json,
+            created_at: "2026-04-01T00:00:00Z",
+            updated_at: "2026-04-20T08:00:00Z",
+            trashed_at: Some(trashed_at),
+            is_trashed: true,
+        },
+    )
+    .expect("trashed note should seed");
+    upsert_note_state(
+        &connection,
+        note_id,
+        Some(&body_hash),
+        Some(&body_hash),
+        Some(&trashed_path),
+        Some(7),
+        None,
+    );
+    DeleteRecordRepo::insert_delete_record(
+        &connection,
+        &DeleteRecord {
+            target: DeleteRecordTarget::Note(note.clone()),
+            original_path: original_path.clone(),
+            trashed_at: trashed_at.to_string(),
+            retention_until: retention_until.to_string(),
+            deleted_at: None,
+            delete_revision: None,
+        },
+    )
+    .expect("delete record should seed");
+
+    let response = SyncPullResponse {
+        changes: vec![SyncChange {
+            event_seq: 21,
+            item_id: note_id.to_string(),
+            item_type: WireItemType::Note,
+            event_type: WireEventType::Trash,
+            path: Some(original_path.to_string()),
+            content: None,
+            asset_bytes_base64: None,
+            content_hash: None,
+            server_revision: Some(8),
+            trashed_at: Some(trashed_at.to_string()),
+            retention_until: Some(retention_until.to_string()),
+            deleted_at: None,
+        }],
+        next_cursor: Some(21),
+    };
+
+    let outcome = apply(&mut connection, &vault, &response).expect("trash replay should apply");
+
+    assert_eq!(outcome.applied, 1);
+    assert!(
+        vault.path().join(trashed_path.as_str()).is_file(),
+        "existing trash path should stay in place"
+    );
+    assert!(
+        !vault.path().join(collision_path.as_str()).exists(),
+        "replayed trash should not create a collision path"
+    );
+    let stored_note = NoteRepo::get_note(&connection, &note)
+        .expect("note query should succeed")
+        .expect("note should exist");
+    let sync_state = SyncStateRepo::get_note_sync_state(&connection, &note)
+        .expect("sync-state query should succeed")
+        .expect("sync state should exist");
+    let delete_record =
+        DeleteRecordRepo::get_delete_record(&connection, &DeleteRecordTarget::Note(note))
+            .expect("delete-record query should succeed")
+            .expect("delete record should exist");
+    let device = DeviceRepo::get_device(&connection, &device_id())
+        .expect("device query should succeed")
+        .expect("device should exist");
+
+    assert_eq!(stored_note.current_path, trashed_path);
+    assert!(stored_note.is_trashed);
+    assert_eq!(stored_note.server_revision, ServerRevision::new(8));
+    assert_eq!(sync_state.last_synced_path, Some(trashed_path));
+    assert_eq!(
+        sync_state.last_known_server_revision,
+        Some(ServerRevision::new(8))
+    );
+    assert_eq!(delete_record.original_path, original_path);
+    assert_eq!(device.last_sync_cursor, Some(21));
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
 fn apply_pull_response_trashes_and_restores_note_using_original_path() {
     let vault = TempDir::new().expect("temp vault should create");
     let mut connection = open_sync_connection();
