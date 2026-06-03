@@ -6,11 +6,11 @@ use anyhow::Context;
 use rusqlite::Connection;
 use zk_app::{
     AppError, BootstrapOutcome, Clock, DeviceId, PullApplyOutcome, PushApplyOutcome,
-    RegisterDeviceRequest, SyncContext, bootstrap, get_device_sync_status, plan_and_push,
-    pull_and_apply, register_device,
+    RebuildOptions, RegisterDeviceRequest, SyncContext, bootstrap, get_device_sync_status,
+    plan_and_push, pull_and_apply, rebuild_index, register_device,
 };
 use zk_app::{RelativePath, SystemClock};
-use zk_domain::config::FolderPolicy;
+use zk_domain::config::{EffectiveConfig, FolderPolicy};
 use zk_sync::{HttpTransport, SyncError};
 
 use crate::{
@@ -61,6 +61,7 @@ pub fn run(args: &SyncArgs, shared: &SharedFlags) -> Result<i32, CliError> {
         trash_dir: &trash_dir,
         folders: &config.folders,
         transport: &transport,
+        config: &config,
     };
 
     let payload = runtime
@@ -107,6 +108,7 @@ struct SyncRunContext<'a> {
     trash_dir: &'a RelativePath,
     folders: &'a BTreeMap<String, FolderPolicy>,
     transport: &'a HttpTransport,
+    config: &'a EffectiveConfig,
 }
 
 async fn execute_sync_workflow(
@@ -174,6 +176,14 @@ async fn run_pull(
     context: &mut SyncRunContext<'_>,
     payload: &mut SyncCommandPayload,
 ) -> zk_app::Result<()> {
+    rebuild_index(
+        context.vault_root,
+        context.config,
+        context.connection,
+        RebuildOptions {
+            write_normalized: false,
+        },
+    )?;
     let outcome = pull_and_apply(context.transport, sync_context(context)).await?;
     payload.pulled = Some(pull_summary(&outcome));
 

@@ -21,6 +21,12 @@ use zk_app::{
     bootstrap_index_connection, rebuild_index,
 };
 use zk_cli_core::BootstrapError;
+use zk_domain::{
+    id::{ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
+    sync::SyncStatus,
+    sync_state::NoteSyncState,
+};
+use zk_index::SyncStateRepo;
 use zk_tui::{
     app::{App, Screen, ScreenAction, ScreenCtx, ScreenId},
     event::{AppEvent, BackgroundResult},
@@ -639,6 +645,30 @@ async fn sync_screen_pull_does_not_normalize_missing_frontmatter() {
     server.verify().await;
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn sync_screen_pull_scans_before_applying_moved_note_update() {
+    let server = MockServer::start().await;
+    mount_register_device(&server, 1).await;
+    mount_moved_note_pull(&server, 1).await;
+    let mut harness = TuiSyncHarness::new_with_stale_synced_old_path(&server);
+
+    harness.go_to_sync_screen();
+    harness.send_key(KeyCode::Char('l'));
+    harness.wait_for_all(&[
+        "success: sync pull completed",
+        "pull completed: applied 1, conflicts 0",
+    ]);
+
+    let stale_path_error = fs::metadata(harness.old_synced_note_path())
+        .expect_err("old synced path should be moved away by pull");
+    assert_eq!(stale_path_error.kind(), std::io::ErrorKind::NotFound);
+    let content = fs::read_to_string(harness.moved_synced_note_path())
+        .expect("moved synced note should be written");
+    assert_eq!(content, moved_synced_note_body());
+
+    server.verify().await;
+}
+
 struct TuiSyncHarness {
     _tempdir: TempDir,
     _runner: JobRunner,
@@ -663,6 +693,10 @@ impl TuiSyncHarness {
         Self::new_with_fixture(server, NoteFixture::RawUnindexed)
     }
 
+    fn new_with_stale_synced_old_path(server: &MockServer) -> Self {
+        Self::new_with_fixture(server, NoteFixture::StaleSyncedOldPath)
+    }
+
     fn new_with_fixture(server: &MockServer, note_fixture: NoteFixture) -> Self {
         let tempdir = tempfile::tempdir().expect("temporary directory should be created");
         let vault_root = tempdir.path().join("vault");
@@ -671,6 +705,7 @@ impl TuiSyncHarness {
             NoteFixture::None => {}
             NoteFixture::Indexed => write_note(&vault_root),
             NoteFixture::RawUnindexed => write_raw_note(&vault_root),
+            NoteFixture::StaleSyncedOldPath => write_synced_old_path_note(&vault_root),
         }
 
         let mut config = EffectiveConfig {
@@ -692,6 +727,9 @@ impl TuiSyncHarness {
                 RebuildOptions::default(),
             )
             .expect("test note should be indexed");
+        }
+        if matches!(note_fixture, NoteFixture::StaleSyncedOldPath) {
+            insert_synced_old_path_state(&connection);
         }
 
         let (tx, rx) = sync_channel(64);
@@ -716,6 +754,22 @@ impl TuiSyncHarness {
 
     fn raw_note_path(&self) -> PathBuf {
         self.vault_root.join("notes").join("missing-frontmatter.md")
+    }
+
+    fn old_synced_note_path(&self) -> PathBuf {
+        self.vault_root
+            .join("03_areas")
+            .join("ml")
+            .join("llm")
+            .join("manifold_steering.md")
+    }
+
+    fn moved_synced_note_path(&self) -> PathBuf {
+        self.vault_root
+            .join("03_areas")
+            .join("ml")
+            .join("nn")
+            .join("manifold_steering.md")
     }
 
     fn go_to_sync_screen(&mut self) {
@@ -796,6 +850,7 @@ enum NoteFixture {
     None,
     Indexed,
     RawUnindexed,
+    StaleSyncedOldPath,
 }
 
 #[derive(Clone, Copy)]
@@ -845,6 +900,33 @@ async fn mount_empty_incremental_pull(server: &MockServer, expected_calls: u64) 
             })
         })
         .respond_with(empty_pull_response())
+        .expect(expected_calls)
+        .mount(server)
+        .await;
+}
+
+async fn mount_moved_note_pull(server: &MockServer, expected_calls: u64) {
+    Mock::given(method("POST"))
+        .and(path("/sync/pull"))
+        .and(|request: &wiremock::Request| {
+            request.body_json::<Value>().ok().is_some_and(|body| {
+                body.get("device_id").and_then(Value::as_str) == Some(DEVICE_ID)
+                    && body.get("batch_size").is_none()
+            })
+        })
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "changes": [{
+                "event_seq": 2,
+                "item_id": NOTE_ID,
+                "item_type": "note",
+                "event_type": "update",
+                "path": "03_areas/ml/nn/manifold_steering.md",
+                "content": moved_synced_note_body(),
+                "content_hash": ContentHash::from_bytes(moved_synced_note_body().as_bytes()).to_string(),
+                "server_revision": 2
+            }],
+            "next_cursor": null
+        })))
         .expect(expected_calls)
         .mount(server)
         .await;
@@ -1006,6 +1088,45 @@ fn write_raw_note(vault_root: &std::path::Path) {
         .expect("raw note should be written");
 }
 
+fn write_synced_old_path_note(vault_root: &std::path::Path) {
+    let path = vault_root
+        .join("03_areas")
+        .join("ml")
+        .join("llm")
+        .join("manifold_steering.md");
+    let parent = path.parent().expect("old path should have parent");
+    fs::create_dir_all(parent).expect("old note parent should be created");
+    fs::write(path, old_synced_note_body()).expect("old synced note should be written");
+}
+
+fn insert_synced_old_path_state(connection: &rusqlite::Connection) {
+    let old_hash = ContentHash::from_bytes(old_synced_note_body().as_bytes());
+    SyncStateRepo::upsert_note_sync_state(
+        connection,
+        &NoteSyncState {
+            item_id: NoteId::new(NOTE_ID),
+            device_id: DeviceId::new(DEVICE_ID),
+            last_local_hash: Some(old_hash.clone()),
+            last_synced_hash: Some(old_hash),
+            last_synced_path: Some(RelativePath::new("03_areas/ml/llm/manifold_steering.md")),
+            last_known_server_revision: Some(ServerRevision::new(1)),
+            sync_status: SyncStatus::Synced,
+            last_sync_attempt_at: None,
+            last_sync_error: None,
+            pending_operation: None,
+        },
+    )
+    .expect("old synced state should insert");
+}
+
 fn raw_note_body() -> &'static str {
     "# Missing Frontmatter\n\nBody text\n"
+}
+
+fn old_synced_note_body() -> &'static str {
+    "---\nid: 01K4ZJ9F2X6M8P0Q1R2S3T4U5V\ntitle: Manifold Steering\ntags:\n  - llm\n---\n# Manifold Steering\n\nOld body\n"
+}
+
+fn moved_synced_note_body() -> &'static str {
+    "---\nid: 01K4ZJ9F2X6M8P0Q1R2S3T4U5V\ntitle: Manifold Steering\ntags:\n  - nn\n  - steering\n---\n# Manifold Steering\n\nUpdated body\n"
 }

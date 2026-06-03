@@ -171,6 +171,55 @@ async fn pull_is_idempotent() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pull_scans_stale_index_before_applying_moved_update() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let source = device_fixture(tempdir.path(), "device-a");
+    let target = device_fixture(tempdir.path(), "device-b");
+    let token = token_for("stale-index-move");
+    let server = start_server(&token).await;
+    let old_path = "03_areas/ml/llm/manifold_steering.md";
+    let new_path = "03_areas/ml/nn/manifold_steering.md";
+    let note_id = "01K4ZJ9F2X6M8P0Q1R2S3T4M1V";
+
+    write_note(
+        &source,
+        old_path,
+        note_id,
+        "Manifold Steering",
+        "Old body\n",
+    );
+    run_scan_write(&source);
+    run_sync(&source, &server, &token, 0);
+    run_sync(&target, &server, &token, 0);
+    delete_indexed_note_row(&target.db_path, note_id);
+
+    fs::remove_file(source.vault_root.join(old_path)).expect("old source note should remove");
+    write_note_with_tags(
+        &source,
+        NoteFile {
+            relative_path: new_path,
+            note_id,
+            title: "Manifold Steering",
+            tags: &["nn", "steering"],
+            body: "Updated body\n",
+        },
+    );
+    run_scan_write(&source);
+    run_sync(&source, &server, &token, 0);
+
+    let target_sync = run_sync(&target, &server, &token, 0);
+
+    assert_eq!(target_sync["payload"]["pulled"]["applied"], 1);
+    assert!(
+        !target.vault_root.join(old_path).exists(),
+        "stale local path should be moved away before writing pulled update"
+    );
+    let pulled = read_note(&target, new_path);
+    assert!(pulled.contains("  - nn"));
+    assert!(pulled.contains("Updated body"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn asset_create_is_filtered_from_multi_device_pull_until_upload_transport() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let source = device_fixture(tempdir.path(), "device-a");
@@ -295,12 +344,43 @@ fn command_for(device: &DeviceFixture, subcommand: &str) -> Command {
 }
 
 fn write_note(device: &DeviceFixture, relative_path: &str, note_id: &str, title: &str, body: &str) {
-    let path = device.vault_root.join(relative_path);
+    write_note_with_tags(
+        device,
+        NoteFile {
+            relative_path,
+            note_id,
+            title,
+            tags: &["e2e"],
+            body,
+        },
+    );
+}
+
+#[derive(Clone, Copy)]
+struct NoteFile<'a> {
+    relative_path: &'a str,
+    note_id: &'a str,
+    title: &'a str,
+    tags: &'a [&'a str],
+    body: &'a str,
+}
+
+fn write_note_with_tags(device: &DeviceFixture, note: NoteFile<'_>) {
+    let path = device.vault_root.join(note.relative_path);
     let parent = path.parent().expect("note path should have parent");
     fs::create_dir_all(parent).expect("note parent dir should be created");
+    let mut tags_yaml = String::new();
+    for tag in note.tags {
+        tags_yaml.push_str("  - ");
+        tags_yaml.push_str(tag);
+        tags_yaml.push('\n');
+    }
     fs::write(
         path,
-        format!("---\nid: {note_id}\ntitle: {title}\ntags:\n  - e2e\n---\n# {title}\n\n{body}"),
+        format!(
+            "---\nid: {}\ntitle: {}\ntags:\n{tags_yaml}---\n# {}\n\n{}",
+            note.note_id, note.title, note.title, note.body
+        ),
     )
     .expect("note should be written");
 }
@@ -379,6 +459,13 @@ fn note_sync_state_count(db_path: &Path) -> i64 {
     connection
         .query_row("SELECT COUNT(*) FROM note_sync_state", [], |row| row.get(0))
         .expect("note_sync_state count should query")
+}
+
+fn delete_indexed_note_row(db_path: &Path, note_id: &str) {
+    let connection = Connection::open(db_path).expect("local database should open");
+    connection
+        .execute("DELETE FROM notes_index WHERE note_id = ?1", [note_id])
+        .expect("indexed note row should delete");
 }
 
 fn indexed_asset_count(db_path: &Path, asset_path: &str) -> i64 {

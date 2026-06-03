@@ -6,7 +6,7 @@ use std::{fs, path::Path};
 use tempfile::TempDir;
 use zk_domain::note::{NoteFrontmatter, RawNoteFrontmatter};
 use zk_vault::error::VaultError;
-use zk_vault::{RawNoteDocument, parse_note_file, render_note_file};
+use zk_vault::{RawNoteDocument, parse_note_content, parse_note_file, render_note_file};
 
 fn write_text_file(path: &Path, content: &str) {
     if let Some(parent) = path.parent() {
@@ -65,6 +65,27 @@ fn parse_standard_frontmatter_and_body() {
         Some("01J7ABCDEF1234567890ABCDEF".to_string())
     );
     assert_eq!(frontmatter.tags, vec!["rust".to_string()]);
+}
+
+#[test]
+fn parse_note_content_extracts_body_without_filesystem_read() {
+    let parsed = parse_note_content(
+        Path::new("notes/synced.md"),
+        "---\nid: 01J7ABCDEF1234567890ABCDE1\ntitle: Synced\ntags:\n  - sync\n---\n# Synced\n\nBody\n"
+            .to_string(),
+    )
+    .expect("in-memory note content should parse");
+
+    assert!(parsed.has_frontmatter_delimiters);
+    assert_eq!(parsed.body_markdown, "# Synced\n\nBody\n");
+    assert_eq!(
+        parsed
+            .frontmatter
+            .expect("frontmatter should parse")
+            .title
+            .as_deref(),
+        Some("Synced")
+    );
 }
 
 #[test]

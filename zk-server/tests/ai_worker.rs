@@ -82,6 +82,43 @@ async fn recompute_note_job_transitions_in_flight_then_done() {
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn recompute_note_job_uses_server_row_body_when_vault_file_is_absent() {
+    let fixture = WorkerFixture::new("ai-worker-row-body");
+    let note_id = note_id("01JAR5A3PJEZ3SKG67PN8N6ROW");
+    fixture.insert_note_with_row_body(
+        &note_id,
+        "notes/synced.md",
+        "obsolete filesystem body",
+        "Server snapshot body unique",
+    );
+    std::fs::remove_file(fixture.vault_root.join("notes/synced.md"))
+        .expect("server vault file should be absent");
+    let job = fixture.enqueue(AiJobKind::RecomputeNote {
+        note_id: note_id.clone(),
+    });
+    let shutdown = CancellationToken::new();
+    let handle = spawn_ai_job_worker(
+        fixture.deps(
+            selector_with_provider(Arc::new(BlockingProvider::ready())),
+            ai_config(1),
+        ),
+        shutdown.clone(),
+    );
+
+    let done = wait_for_status(&fixture.db, &job.job_id, AiJobStatus::Done).await;
+    shutdown.cancel();
+    timeout(Duration::from_secs(1), handle)
+        .await
+        .expect("worker should join after shutdown")
+        .expect("worker task should not panic");
+
+    assert_eq!(done.attempts, 0);
+    let chunks = fixture.chunks_for_note(&note_id);
+    assert_eq!(chunks.len(), 1);
+    assert_eq!(chunks[0].text, "Server snapshot body unique");
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn failing_provider_marks_job_failed_after_max_attempts() {
     let fixture = WorkerFixture::new("ai-worker-provider-fails");
     let note_id = note_id("01JAR5A3PJEZ3SKG67PN8N6S6T");
@@ -375,6 +412,21 @@ impl WorkerFixture {
     }
 
     fn insert_note(&self, note_id: &NoteId, relative_path: &str, file_body: &str) {
+        self.insert_note_with_row_body(
+            note_id,
+            relative_path,
+            file_body,
+            "stale server mirror body",
+        );
+    }
+
+    fn insert_note_with_row_body(
+        &self,
+        note_id: &NoteId,
+        relative_path: &str,
+        file_body: &str,
+        row_body: &str,
+    ) {
         write_text(&self.vault_root.join(relative_path), file_body);
         let now = parse_timestamp("2026-05-05T10:00:00Z");
         let content_hash = ContentHash::from_bytes(file_body.as_bytes());
@@ -388,7 +440,7 @@ impl WorkerFixture {
                         current_path: relative_path.to_string(),
                         title: "fixture".to_string(),
                         content_hash: content_hash.to_string(),
-                        body_markdown: "stale server mirror body".to_string(),
+                        body_markdown: row_body.to_string(),
                         frontmatter_json: "{}".to_string(),
                         created_at: now,
                         updated_at: now,
@@ -510,6 +562,15 @@ impl BlockingProvider {
             started_rx,
             release_tx,
         )
+    }
+
+    fn ready() -> Self {
+        Self {
+            id: provider_id(),
+            capability: capability(),
+            started_tx: Mutex::new(None),
+            release_rx: Mutex::new(None),
+        }
     }
 }
 

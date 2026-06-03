@@ -49,11 +49,25 @@ pub(crate) struct LenientNoteParse {
 pub fn parse_note_file(path: &Path) -> Result<RawNoteDocument, VaultError> {
     let file_content = read_note_text(path)?;
 
+    parse_note_content(path, file_content)
+}
+
+/// Parses markdown text into raw frontmatter and body sections.
+///
+/// `path_for_errors` is used only when reporting frontmatter parse failures.
+///
+/// # Errors
+///
+/// Returns [`VaultError::FrontmatterParse`] when a detected frontmatter block
+/// contains invalid YAML.
+pub fn parse_note_content(
+    path_for_errors: &Path,
+    file_content: String,
+) -> Result<RawNoteDocument, VaultError> {
     let Some((raw_yaml, body_markdown)) = split_frontmatter_sections(&file_content) else {
         return Ok(document_without_frontmatter(file_content));
     };
-
-    let parsed_frontmatter = parse_raw_frontmatter_yaml(path, raw_yaml)?;
+    let parsed_frontmatter = parse_raw_frontmatter_yaml(path_for_errors, raw_yaml)?;
 
     Ok(document_with_frontmatter(
         Some(parsed_frontmatter),

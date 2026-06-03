@@ -36,7 +36,9 @@ use zk_domain::{
     note::{NoteFrontmatter, NoteRecord},
     write::{BatchWriteRequest, UpdateNoteRequest},
 };
-use zk_vault::{NormalizationContext, analyze_body, normalize_frontmatter, parse_note_file};
+use zk_vault::{
+    NormalizationContext, analyze_body, normalize_frontmatter, parse_note_content, parse_note_file,
+};
 
 use crate::{
     ServerDb, ServerError,
@@ -469,14 +471,21 @@ async fn process_ingest_source(
 }
 
 fn read_note_body(deps: &AiWorkerDeps, note_id: &NoteId) -> Result<String, AiWorkerError> {
-    let note_path = deps
+    let row = deps
         .db
         .with_conn(|connection| NotesRepo::get(connection, note_id.as_str()))?
-        .ok_or_else(|| AiWorkerError::NoteNotFound(note_id.clone()))?
-        .current_path;
-    let relative_path = RelativePath::new(&note_path);
-    let absolute_path = deps.vault_root.join(relative_path.as_str());
-    let document = parse_note_file(&absolute_path)?;
+        .ok_or_else(|| AiWorkerError::NoteNotFound(note_id.clone()))?;
+    let relative_path = RelativePath::new(&row.current_path);
+    let path = deps.vault_root.join(relative_path.as_str());
+    let document = match parse_note_file(&path) {
+        Ok(document) => document,
+        Err(zk_vault::error::VaultError::Io { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            parse_note_content(Path::new(relative_path.as_str()), row.body_markdown)?
+        }
+        Err(error) => return Err(error.into()),
+    };
 
     Ok(document.body_markdown)
 }
