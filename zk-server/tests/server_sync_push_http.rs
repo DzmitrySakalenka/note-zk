@@ -396,6 +396,60 @@ async fn push_stale_note_update_returns_conflict_without_new_event() {
 }
 
 #[tokio::test]
+async fn push_note_update_refreshes_server_frontmatter_metadata() {
+    let harness = build_harness();
+    seed_note(&harness.state, "note-a", 1);
+
+    let response = test_router(harness.state.clone())
+        .oneshot(push_request(&json!({
+            "device_id": "device-a",
+            "notes": [{
+                "note_id": "note-a",
+                "path": "notes/note-a.md",
+                "content": "---\nid: note-a\ntitle: Manual Retitled\ntags:\n  - sync\n---\n# Manual Retitled\n\nUpdated body\n",
+                "content_hash": "hash-retitled",
+                "base_server_revision": 1,
+                "operation": "update"
+            }],
+            "assets": []
+        })))
+        .await
+        .expect("push request should succeed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "results": [{
+                "item_id": "note-a",
+                "accepted": true,
+                "conflict": false,
+                "new_server_revision": 2
+            }]
+        })
+    );
+
+    harness
+        .state
+        .db()
+        .with_conn(|connection| {
+            let note =
+                NotesRepo::get(connection, "note-a")?.expect("accepted note should be persisted");
+            let frontmatter: Value = serde_json::from_str(&note.frontmatter_json)
+                .expect("frontmatter json should decode");
+
+            assert_eq!(note.title, "Manual Retitled");
+            assert_eq!(frontmatter["title"], json!("Manual Retitled"));
+            assert_eq!(note.body_markdown, "---\nid: note-a\ntitle: Manual Retitled\ntags:\n  - sync\n---\n# Manual Retitled\n\nUpdated body\n");
+            assert_eq!(note.content_hash, "hash-retitled");
+            assert_eq!(note.server_revision, 2);
+
+            Ok(())
+        })
+        .expect("stored note metadata should be readable");
+}
+
+#[tokio::test]
 async fn push_duplicate_note_create_returns_existing_revision_conflict() {
     let harness = build_harness();
     seed_note(&harness.state, "note-a", 4);

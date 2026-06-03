@@ -1,12 +1,13 @@
 //! DTO bridge helpers for sync HTTP payloads.
 
-use std::io;
+use std::{io, path::Path};
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use zk_domain::{
     PushAssetItem, PushNoteItem, SyncChange, WireEventType, WireItemType, WireOperation,
 };
+use zk_vault::{error::VaultError, parse_note_content};
 
 use crate::{
     ServerError, ServerResult,
@@ -31,11 +32,10 @@ pub(super) fn note_row_from_push_item(
         }
         WireOperation::Trash | WireOperation::Restore | WireOperation::Delete => None,
     };
-    let title = existing.map_or_else(|| title_from_path(&item.path), |row| row.title.clone());
-    let frontmatter_json = existing.map_or_else(
-        || minimal_frontmatter_json(&item.note_id, &title),
-        |row| row.frontmatter_json.clone(),
-    );
+    let metadata = match content {
+        Some(content) => note_metadata_from_content(item, existing, content)?,
+        None => fallback_note_metadata(item, existing),
+    };
     let body_markdown = content
         .cloned()
         .or_else(|| existing.map(|row| row.body_markdown.clone()))
@@ -47,10 +47,10 @@ pub(super) fn note_row_from_push_item(
     Ok(NoteRow {
         note_id: item.note_id.clone(),
         current_path: item.path.clone(),
-        title,
+        title: metadata.title,
         content_hash: item.content_hash.clone(),
         body_markdown,
-        frontmatter_json,
+        frontmatter_json: metadata.frontmatter_json,
         created_at,
         updated_at: now,
         trashed_at,
@@ -60,6 +60,54 @@ pub(super) fn note_row_from_push_item(
         last_editor_device_id: last_editor_device_id.map(str::to_string),
         server_revision,
     })
+}
+
+struct NoteMetadata {
+    title: String,
+    frontmatter_json: String,
+}
+
+fn note_metadata_from_content(
+    item: &PushNoteItem,
+    existing: Option<&NoteRow>,
+    content: &str,
+) -> ServerResult<NoteMetadata> {
+    let fallback = fallback_note_metadata(item, existing);
+    let parsed = parse_note_content(Path::new(&item.path), content.to_string())
+        .map_err(|error| invalid_note_content_error(&error))?;
+    let Some(frontmatter) = parsed.frontmatter else {
+        return Ok(fallback);
+    };
+    let Some(title) = frontmatter.title.clone() else {
+        return Ok(fallback);
+    };
+    let frontmatter_json = serde_json::to_string(&frontmatter).map_err(frontmatter_json_error)?;
+
+    Ok(NoteMetadata {
+        title,
+        frontmatter_json,
+    })
+}
+
+fn fallback_note_metadata(item: &PushNoteItem, existing: Option<&NoteRow>) -> NoteMetadata {
+    let title = existing.map_or_else(|| title_from_path(&item.path), |row| row.title.clone());
+    let frontmatter_json = existing.map_or_else(
+        || minimal_frontmatter_json(&item.note_id, &title),
+        |row| row.frontmatter_json.clone(),
+    );
+
+    NoteMetadata {
+        title,
+        frontmatter_json,
+    }
+}
+
+fn invalid_note_content_error(error: &VaultError) -> ServerError {
+    ServerError::InvalidRequest(format!("invalid note content: {error}"))
+}
+
+fn frontmatter_json_error(error: serde_json::Error) -> ServerError {
+    ServerError::Internal(Box::new(error))
 }
 
 pub(super) fn asset_row_from_push_item(
