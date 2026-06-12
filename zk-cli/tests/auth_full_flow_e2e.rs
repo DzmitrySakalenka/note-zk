@@ -31,6 +31,7 @@ struct TestServer {
     base_url: Url,
     shutdown_tx: Option<oneshot::Sender<()>>,
     join: JoinHandle<()>,
+    _vault: TempDir,
 }
 
 impl Drop for TestServer {
@@ -91,6 +92,7 @@ async fn full_first_run_admin_token_revoke_cycle() {
 }
 
 async fn start_server(database_path: PathBuf) -> TestServer {
+    let vault = TempDir::new().expect("server vault tempdir should be created");
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("test server should bind");
@@ -102,6 +104,7 @@ async fn start_server(database_path: PathBuf) -> TestServer {
         .expect("test server URL should parse");
     let config = ServerConfig {
         database_path,
+        vault_path: vault.path().to_path_buf(),
         stub_auth_token_sha256_hex: None,
         ..ServerConfig::default()
     };
@@ -123,6 +126,7 @@ async fn start_server(database_path: PathBuf) -> TestServer {
         base_url,
         shutdown_tx: Some(shutdown_tx),
         join,
+        _vault: vault,
     }
 }
 

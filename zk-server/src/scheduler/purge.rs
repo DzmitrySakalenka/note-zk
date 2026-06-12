@@ -1,6 +1,6 @@
 //! Tokio task that purges expired server-side delete records.
 
-use std::{io, sync::Arc, time::Duration};
+use std::{io, path::Path, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, Transaction, TransactionBehavior};
@@ -130,7 +130,8 @@ fn purge_batch(server_state: &ServerState, now: DateTime<Utc>) -> ServerResult<P
     server_state.db().with_conn_mut(|connection| {
         let transaction = Transaction::new(connection, TransactionBehavior::Immediate)
             .map_err(ServerError::Database)?;
-        let purge_stats = purge_batch_in_transaction(&transaction, now)?;
+        let purge_stats =
+            purge_batch_in_transaction(&transaction, now, &server_state.config().vault_path)?;
         transaction.commit().map_err(ServerError::Database)?;
 
         Ok(purge_stats)
@@ -140,12 +141,13 @@ fn purge_batch(server_state: &ServerState, now: DateTime<Utc>) -> ServerResult<P
 fn purge_batch_in_transaction(
     transaction: &Transaction<'_>,
     now: DateTime<Utc>,
+    vault_path: &Path,
 ) -> ServerResult<PurgeStats> {
     let expired = DeleteRecordsRepo::list_expired(transaction, now, BATCH_SIZE)?;
     let mut stats = PurgeStats::default();
 
     for record in expired {
-        purge_record(transaction, &record, now)?;
+        purge_record(transaction, &record, now, vault_path)?;
         match record.item_type.as_str() {
             "note" => stats.notes_purged += 1,
             "asset" => stats.assets_purged += 1,
@@ -161,9 +163,10 @@ fn purge_record(
     conn: &Connection,
     record: &DeleteRecordRow,
     deleted_at: DateTime<Utc>,
+    vault_path: &Path,
 ) -> ServerResult<()> {
     let purge_revision = match record.item_type.as_str() {
-        "note" => purge_note(conn, record)?,
+        "note" => purge_note(conn, record, vault_path)?,
         "asset" => purge_asset(conn, record)?,
         other => return Err(unsupported_item_type_error(other)),
     };
@@ -188,9 +191,12 @@ fn purge_record(
     )
 }
 
-fn purge_note(conn: &Connection, record: &DeleteRecordRow) -> ServerResult<i64> {
+fn purge_note(conn: &Connection, record: &DeleteRecordRow, vault_path: &Path) -> ServerResult<i64> {
     let note = NotesRepo::get(conn, &record.item_id)?;
     let purge_revision = purge_revision(note.as_ref().map(|row| row.server_revision), record);
+    if let Some(note) = note.as_ref() {
+        crate::service::remove_note_row_file_if_present(vault_path, note)?;
+    }
     NotesRepo::delete_hard(conn, &record.item_id)?;
 
     Ok(purge_revision)

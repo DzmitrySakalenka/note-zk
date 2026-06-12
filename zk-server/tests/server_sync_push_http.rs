@@ -1,7 +1,7 @@
 // Integration tests are separate crates; each uses only a subset of package dependencies.
 #![allow(unused_crate_dependencies)]
 
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{fs, net::SocketAddr, path::PathBuf, time::Duration};
 
 use axum::{
     Router,
@@ -11,7 +11,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
-use tempfile::NamedTempFile;
+use tempfile::{Builder as TempDirBuilder, TempDir};
 use tokio::{
     task::JoinHandle,
     time::{advance, timeout},
@@ -34,7 +34,7 @@ use zk_server::{
 };
 
 struct TestHarness {
-    _database_file: NamedTempFile,
+    _root: TempDir,
     state: ServerState,
 }
 
@@ -44,13 +44,13 @@ fn parse_timestamp(value: &str) -> DateTime<Utc> {
         .with_timezone(&Utc)
 }
 
-fn test_config(database_path: PathBuf) -> ServerConfig {
-    test_config_with_ai(database_path, None)
-}
-
-fn test_config_with_ai(database_path: PathBuf, ai: Option<AiConfig>) -> ServerConfig {
+fn test_config_with_ai(
+    vault_path: PathBuf,
+    database_path: PathBuf,
+    ai: Option<AiConfig>,
+) -> ServerConfig {
     ServerConfig {
-        vault_path: PathBuf::from("."),
+        vault_path,
         database_path,
         listen_addr: "127.0.0.1:7878"
             .parse::<SocketAddr>()
@@ -78,28 +78,27 @@ fn ai_config() -> AiConfig {
 }
 
 fn build_harness() -> TestHarness {
-    let database_file = NamedTempFile::new().expect("temp database file should be created");
-    let state = bootstrap_with_config(test_config(database_file.path().to_path_buf()))
-        .expect("bootstrap_with_config should succeed");
-
-    TestHarness {
-        _database_file: database_file,
-        state,
-    }
+    build_harness_with_ai_config(None)
 }
 
 fn build_harness_with_ai() -> TestHarness {
-    let database_file = NamedTempFile::new().expect("temp database file should be created");
-    let state = bootstrap_with_config(test_config_with_ai(
-        database_file.path().to_path_buf(),
-        Some(ai_config()),
-    ))
-    .expect("bootstrap_with_config should succeed");
+    build_harness_with_ai_config(Some(ai_config()))
+}
 
-    TestHarness {
-        _database_file: database_file,
-        state,
-    }
+fn build_harness_with_ai_config(ai: Option<AiConfig>) -> TestHarness {
+    let temp_parent = PathBuf::from("tmp").join("zk-server");
+    fs::create_dir_all(&temp_parent).expect("test temp parent should be created");
+    let root = TempDirBuilder::new()
+        .prefix("sync-push-")
+        .tempdir_in(temp_parent)
+        .expect("temp server root should be created");
+    let vault_path = root.path().join("vault");
+    let database_path = root.path().join("server.sqlite");
+    fs::create_dir_all(&vault_path).expect("vault directory should be created");
+    let state = bootstrap_with_config(test_config_with_ai(vault_path, database_path, ai))
+        .expect("bootstrap_with_config should succeed");
+
+    TestHarness { _root: root, state }
 }
 
 fn test_router(state: ServerState) -> Router {
@@ -176,6 +175,67 @@ fn note_create_request(note_id: &str) -> Value {
     })
 }
 
+fn vault_file(harness: &TestHarness, relative_path: &str) -> PathBuf {
+    harness.state.config().vault_path.join(relative_path)
+}
+
+fn read_vault_file(harness: &TestHarness, relative_path: &str) -> String {
+    fs::read_to_string(vault_file(harness, relative_path))
+        .expect("server vault file should be readable")
+}
+
+fn assert_vault_file_absent(harness: &TestHarness, relative_path: &str) {
+    assert!(!vault_file(harness, relative_path).exists());
+}
+
+async fn push_json(harness: &TestHarness, body: &Value) -> Value {
+    let response = test_router(harness.state.clone())
+        .oneshot(push_request(body))
+        .await
+        .expect("push request should succeed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    response_json(response).await
+}
+
+struct NotePushCase<'a> {
+    path: &'a str,
+    content: Option<&'a str>,
+    content_hash: &'a str,
+    base_server_revision: Option<i64>,
+    operation: &'a str,
+    new_server_revision: i64,
+}
+
+async fn assert_note_push_accepted(harness: &TestHarness, push_case: NotePushCase<'_>) {
+    assert_eq!(
+        push_json(
+            harness,
+            &json!({
+                "device_id": "device-a",
+                "notes": [{
+                    "note_id": "mirror-note",
+                    "path": push_case.path,
+                    "content": push_case.content,
+                    "content_hash": push_case.content_hash,
+                    "base_server_revision": push_case.base_server_revision,
+                    "operation": push_case.operation
+                }],
+                "assets": []
+            }),
+        )
+        .await,
+        json!({
+            "results": [{
+                "item_id": "mirror-note",
+                "accepted": true,
+                "conflict": false,
+                "new_server_revision": push_case.new_server_revision
+            }]
+        })
+    );
+}
+
 fn spawn_ingest_flush_loop(state: &ServerState) -> (CancellationToken, JoinHandle<()>) {
     let enqueuer = state
         .ai_ingest()
@@ -220,6 +280,96 @@ fn pending_note_jobs(db: &ServerDb) -> Vec<AiJob> {
         })
     })
     .expect("pending AI jobs should list")
+}
+
+#[tokio::test]
+async fn push_note_changes_mirror_markdown_files_in_server_vault() {
+    let harness = build_harness();
+    let moved_content = "---\nid: mirror-note\ntitle: Mirror Moved\ntags:\n  - nn\n---\n# Mirror Moved\n\nMoved body\n";
+
+    assert_note_push_accepted(
+        &harness,
+        NotePushCase {
+            path: "notes/mirror.md",
+            content: Some("# Mirror\n\nCreated body\n"),
+            content_hash: "hash-created",
+            base_server_revision: None,
+            operation: "create",
+            new_server_revision: 1,
+        },
+    )
+    .await;
+    assert_eq!(
+        read_vault_file(&harness, "notes/mirror.md"),
+        "# Mirror\n\nCreated body\n"
+    );
+
+    assert_note_push_accepted(
+        &harness,
+        NotePushCase {
+            path: "notes/mirror.md",
+            content: Some("# Mirror\n\nUpdated body\n"),
+            content_hash: "hash-updated",
+            base_server_revision: Some(1),
+            operation: "update",
+            new_server_revision: 2,
+        },
+    )
+    .await;
+    assert_eq!(
+        read_vault_file(&harness, "notes/mirror.md"),
+        "# Mirror\n\nUpdated body\n"
+    );
+
+    assert_note_push_accepted(
+        &harness,
+        NotePushCase {
+            path: "areas/nn/moved.md",
+            content: Some(moved_content),
+            content_hash: "hash-moved",
+            base_server_revision: Some(2),
+            operation: "move",
+            new_server_revision: 3,
+        },
+    )
+    .await;
+    assert_vault_file_absent(&harness, "notes/mirror.md");
+    assert_eq!(
+        read_vault_file(&harness, "areas/nn/moved.md"),
+        moved_content
+    );
+
+    assert_note_push_accepted(
+        &harness,
+        NotePushCase {
+            path: "99_trash/2026-06-08/moved.md",
+            content: None,
+            content_hash: "hash-moved",
+            base_server_revision: Some(3),
+            operation: "trash",
+            new_server_revision: 4,
+        },
+    )
+    .await;
+    assert_vault_file_absent(&harness, "areas/nn/moved.md");
+    assert_eq!(
+        read_vault_file(&harness, "99_trash/2026-06-08/moved.md"),
+        moved_content
+    );
+
+    assert_note_push_accepted(
+        &harness,
+        NotePushCase {
+            path: "99_trash/2026-06-08/moved.md",
+            content: None,
+            content_hash: "hash-moved",
+            base_server_revision: Some(4),
+            operation: "delete",
+            new_server_revision: 5,
+        },
+    )
+    .await;
+    assert_vault_file_absent(&harness, "99_trash/2026-06-08/moved.md");
 }
 
 #[tokio::test]

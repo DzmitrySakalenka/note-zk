@@ -11,7 +11,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use tempfile::NamedTempFile;
+use tempfile::{NamedTempFile, TempDir};
 use tower::ServiceExt;
 use zk_server::{
     config::ServerConfig,
@@ -24,12 +24,17 @@ const AUTH_TOKEN: &str = "shared-secret";
 
 struct TestHarness {
     _database_file: NamedTempFile,
+    _vault_dir: TempDir,
     state: ServerState,
 }
 
-fn test_config(database_path: PathBuf, stub_hash: Option<String>) -> ServerConfig {
+fn test_config(
+    database_path: PathBuf,
+    vault_path: PathBuf,
+    stub_hash: Option<String>,
+) -> ServerConfig {
     ServerConfig {
-        vault_path: PathBuf::from("."),
+        vault_path,
         database_path,
         listen_addr: "127.0.0.1:7878"
             .parse::<SocketAddr>()
@@ -45,11 +50,17 @@ fn test_config(database_path: PathBuf, stub_hash: Option<String>) -> ServerConfi
 
 fn build_harness(stub_hash: Option<String>) -> TestHarness {
     let database_file = NamedTempFile::new().expect("temp database file should be created");
-    let state = bootstrap_with_config(test_config(database_file.path().to_path_buf(), stub_hash))
-        .expect("bootstrap_with_config should succeed");
+    let vault_dir = TempDir::new().expect("temp server vault dir should be created");
+    let state = bootstrap_with_config(test_config(
+        database_file.path().to_path_buf(),
+        vault_dir.path().to_path_buf(),
+        stub_hash,
+    ))
+    .expect("bootstrap_with_config should succeed");
 
     TestHarness {
         _database_file: database_file,
+        _vault_dir: vault_dir,
         state,
     }
 }

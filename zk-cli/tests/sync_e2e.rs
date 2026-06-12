@@ -22,6 +22,7 @@ struct TestServer {
     join: JoinHandle<()>,
     db_path: PathBuf,
     _db: NamedTempFile,
+    _vault: TempDir,
 }
 
 impl TestServer {
@@ -250,6 +251,7 @@ async fn asset_create_is_filtered_from_multi_device_pull_until_upload_transport(
 async fn start_server(token: &str) -> TestServer {
     let db = NamedTempFile::new().expect("server database tempfile should be created");
     let db_path = db.path().to_path_buf();
+    let vault = TempDir::new().expect("server vault tempdir should be created");
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("test server should bind");
@@ -261,6 +263,7 @@ async fn start_server(token: &str) -> TestServer {
         .expect("test server URL should parse");
     let config = ServerConfig {
         database_path: db_path.clone(),
+        vault_path: vault.path().to_path_buf(),
         stub_auth_token_sha256_hex: Some(sha256_hex(token)),
         ..ServerConfig::default()
     };
@@ -282,6 +285,7 @@ async fn start_server(token: &str) -> TestServer {
         join,
         db_path,
         _db: db,
+        _vault: vault,
     }
 }
 

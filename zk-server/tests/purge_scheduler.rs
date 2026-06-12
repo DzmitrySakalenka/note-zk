@@ -1,7 +1,7 @@
 // Integration tests are separate crates; each uses only a subset of package dependencies.
 #![allow(unused_crate_dependencies)]
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{fs, net::SocketAddr, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use tempfile::{Builder as TempDirBuilder, TempDir};
@@ -104,6 +104,48 @@ fn run_purge_once_purges_expired_items_and_leaves_future_items() {
             Ok(())
         })
         .expect("purge results should be queryable");
+}
+
+#[test]
+fn run_purge_once_removes_expired_note_file_from_server_vault() {
+    let fixture = fresh_temp_state("purge-scheduler-vault-file");
+    let state = &fixture.state;
+    let now = Utc::now();
+    let expired_retention = now - ChronoDuration::hours(1);
+    let expired_note = note_row("expired-note-file", 3, now);
+    let note_path = state.config().vault_path.join(&expired_note.current_path);
+
+    fs::create_dir_all(
+        note_path
+            .parent()
+            .expect("note fixture path should have a parent"),
+    )
+    .expect("note fixture parent should be created");
+    fs::write(&note_path, &expired_note.body_markdown).expect("note fixture should be written");
+
+    state
+        .db()
+        .with_tx(|transaction| {
+            NotesRepo::create(transaction, &expired_note)?;
+            DeleteRecordsRepo::upsert(
+                transaction,
+                &delete_record("expired-note-file", "note", expired_retention, now),
+            )?;
+            Ok(())
+        })
+        .expect("expired note fixture should insert");
+
+    let purge_stats = run_purge_once(state).expect("purge should succeed");
+
+    assert_eq!(
+        purge_stats,
+        PurgeStats {
+            notes_purged: 1,
+            assets_purged: 0,
+            total: 1,
+        }
+    );
+    assert!(!note_path.exists());
 }
 
 #[test]

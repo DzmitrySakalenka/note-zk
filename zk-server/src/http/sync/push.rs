@@ -120,6 +120,7 @@ fn process_note_item(
                     retention_days: state.config().trash_retention_days,
                 };
                 sync_note_delete_record(transaction, item, existing.as_ref(), &row, &delete_sync)?;
+                service::mirror_note_snapshot(&state.config().vault_path, existing.as_ref(), &row)?;
 
                 Ok(accepted_result(&item.note_id, next_revision))
             }

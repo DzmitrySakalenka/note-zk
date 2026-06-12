@@ -5,6 +5,7 @@ mod backups;
 mod conflict;
 mod devices;
 mod events;
+mod vault_mirror;
 
 #[cfg(feature = "test-helpers")]
 pub use auth::register_user_with_test_params;
@@ -29,3 +30,4 @@ pub use events::{
     fetch_changes_since, record_asset_change, record_note_change,
 };
 pub(crate) use events::{record_asset_change_in_conn, record_note_change_in_conn};
+pub(crate) use vault_mirror::{mirror_note_snapshot, remove_note_row_file_if_present};
