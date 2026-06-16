@@ -185,6 +185,12 @@ fn resolve_conflict_keep_local_marks_note_pending_upload() {
     let note_id = "01TGUI15KEEPLOCAL0000001";
     let note = base_note(&NoteId::new(note_id), "notes/conflict.md", b"local body");
     insert_note(&connection, &note);
+    write_vault_file(vault.path(), "notes/conflict.md", b"local body");
+    write_vault_file(
+        vault.path(),
+        "notes/conflict.conflict-remote-20260515T100000Z.md",
+        b"remote body",
+    );
 
     let mut state = note_sync_state(
         note_id,
@@ -236,6 +242,19 @@ fn resolve_conflict_keep_local_marks_note_pending_upload() {
     assert_eq!(actual.last_synced_hash, state.last_synced_hash);
     assert_eq!(actual.last_synced_path, Some(note.current_path.clone()));
     assert_eq!(actual.last_sync_error, None);
+
+    assert_eq!(
+        fs::read_to_string(vault.path().join("notes/conflict.md"))
+            .expect("local note should remain"),
+        "local body"
+    );
+    assert!(
+        !vault
+            .path()
+            .join("notes/conflict.conflict-remote-20260515T100000Z.md")
+            .exists(),
+        "resolved remote conflict copy should be deleted on keep-local"
+    );
 }
 
 #[test]
@@ -358,6 +377,14 @@ fn resolve_conflict_keep_remote_applies_note_conflict_copy() {
         .expect("note should exist");
     assert_eq!(indexed_note.content_hash, remote_hash);
     assert_eq!(indexed_note.server_revision, ServerRevision::new(9));
+
+    assert!(
+        !vault
+            .path()
+            .join("notes/conflict.conflict-remote-20260515T100000Z.md")
+            .exists(),
+        "resolved remote conflict copy should be deleted"
+    );
 }
 
 #[test]
@@ -482,6 +509,14 @@ fn resolve_conflict_keep_remote_applies_asset_conflict_copy() {
     assert_eq!(indexed_asset.content_hash, remote_hash);
     assert_eq!(indexed_asset.size_bytes, remote_bytes.len() as u64);
     assert_eq!(indexed_asset.server_revision, ServerRevision::new(10));
+
+    assert!(
+        !vault
+            .path()
+            .join("assets/conflict.conflict-remote-20260515T100000Z.bin")
+            .exists(),
+        "resolved remote conflict copy should be deleted"
+    );
 }
 
 #[test]

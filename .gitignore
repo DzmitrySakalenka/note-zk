@@ -31,3 +31,6 @@ zk-ai/tests/fixtures/models/
 # App-generated
 *.pending-snap
 *.snap.new
+
+# Manual sync test artifacts
+manual-tests/

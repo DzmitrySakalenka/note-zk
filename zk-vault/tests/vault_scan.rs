@@ -156,6 +156,32 @@ fn scan_skips_hidden_files_and_directories_including_dot_zk() {
 }
 
 #[test]
+fn scan_skips_conflict_copy_sidecars() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let vault_root = tempdir.path();
+    let config = base_config(vault_root);
+
+    // A conflict-copy sidecar shares the live note's stable id; scanning it would
+    // raise a spurious duplicate-id error and drop both files from the index.
+    let live = "---\nid: 01TGUI15CONFLICTSKIP0001\ntitle: Live\n---\n# Live\n\nlocal\n";
+    let remote = "---\nid: 01TGUI15CONFLICTSKIP0001\ntitle: Live\n---\n# Live\n\nremote\n";
+    write_text_file(&vault_root.join("notes/topic.md"), live);
+    write_text_file(
+        &vault_root.join("notes/topic.conflict-remote-20260515T100000Z.md"),
+        remote,
+    );
+
+    let scanned = scan_vault_files(vault_root, &config).expect("scan should succeed");
+    let notes = note_paths(&scanned.notes);
+
+    assert!(notes.contains(&"notes/topic.md".to_string()));
+    assert!(
+        !notes.iter().any(|path| path.contains(".conflict-remote-")),
+        "conflict-copy sidecars must not be scanned as notes"
+    );
+}
+
+#[test]
 fn scan_surfaces_trashed_note_and_asset_candidates() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let vault_root = tempdir.path();

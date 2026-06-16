@@ -40,6 +40,20 @@ cargo install --path zk-tui --features ai-local
 
 The `ai-local` feature enables local AI wiring and depends on platform support for local model runtimes. See the [LLM Execution Model](../architecture/llm-execution-model.md) for connected, offline, and hybrid behavior.
 
+Local Candle embeddings use CPU unless the binary is built with a hardware
+backend and the config selects that device. On Apple Silicon, build the binaries
+that run local embeddings with the Metal feature:
+
+```bash
+cargo build --release -p zk-server --features zk-ai/provider-local-metal
+cargo build --release -p zk-cli --features ai-local,zk-ai/provider-local-metal
+cargo build --release -p zk-tui --features ai-local,zk-ai/provider-local-metal
+```
+
+CUDA builds use the matching `zk-ai/provider-local-cuda` feature instead.
+OpenAI-compatible local servers such as Ollama do not need these feature flags;
+they run inference outside note-zk and are configured as HTTP providers.
+
 ## Supported terminals
 
 Use a Truecolor-capable terminal for the default and high-contrast themes. The `mono` theme avoids colour and works as the ANSI 16-colour fallback for limited terminals.
@@ -58,4 +72,4 @@ zk-tui --version
 zk-server --version
 ```
 
-Last updated: 2026-05-15
+Last updated: 2026-05-25

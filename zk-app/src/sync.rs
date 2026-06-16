@@ -13,7 +13,7 @@ use zk_domain::{
     config::FolderPolicy,
     id::{AssetId, ContentHash, DeviceId, NoteId, RelativePath, ServerRevision},
     note::NoteRecord,
-    sync::SyncStatus,
+    sync::{CONFLICT_COPY_INFIX, SyncStatus},
     sync_state::{
         AssetSyncState, DeleteRecord, DeleteRecordTarget, DeviceRecord, NoteSyncState, SyncState,
     },
@@ -294,7 +294,7 @@ fn apply_note_resolution(
     ensure_conflict_status(request, state.sync_status)?;
     match request.resolution {
         WireConflictResolution::KeepLocal => {
-            mark_keep_local(state, baseline, request, decision.response)?;
+            mark_keep_local(env.vault, state, baseline, request, decision.response)?;
         }
         WireConflictResolution::KeepRemote => {
             apply_remote_note_copy(env, note, state, decision)?;
@@ -315,7 +315,7 @@ fn apply_asset_resolution(
     ensure_conflict_status(request, state.sync_status)?;
     match request.resolution {
         WireConflictResolution::KeepLocal => {
-            mark_keep_local(state, baseline, request, decision.response)?;
+            mark_keep_local(env.vault, state, baseline, request, decision.response)?;
         }
         WireConflictResolution::KeepRemote => {
             apply_remote_asset_copy(env, asset, state, decision)?;
@@ -326,6 +326,7 @@ fn apply_asset_resolution(
 }
 
 fn mark_keep_local<Id>(
+    vault: &VaultRoot,
     state: &mut SyncState<Id>,
     baseline: &LocalBaseline,
     request: &ResolveConflictRequest,
@@ -337,6 +338,9 @@ fn mark_keep_local<Id>(
     state.last_known_server_revision = Some(revision);
     state.sync_status = SyncStatus::PendingUpload;
     state.last_sync_error = None;
+    // The local file already holds the winning version; drop the preserved
+    // remote sidecar so it stops shadowing the live note's stable id.
+    remove_conflict_copies(vault, &baseline.path)?;
     Ok(())
 }
 
@@ -407,6 +411,8 @@ fn apply_remote_note_copy(
         &revision,
     )?;
     mark_synced(state, &content_hash, &note.current_path, revision);
+    // The live note now holds the remote bytes; remove the preserved sidecars.
+    remove_conflict_copies(env.vault, &note.current_path)?;
     Ok(())
 }
 
@@ -436,6 +442,8 @@ fn apply_remote_asset_copy(
     zk_vault::atomic_write_file(&local_absolute_path, &remote_bytes)?;
     AssetRepo::upsert_asset(env.conn, &record)?;
     mark_synced(state, &content_hash, &asset.current_path, revision);
+    // The live asset now holds the remote bytes; remove the preserved sidecars.
+    remove_conflict_copies(env.vault, &asset.current_path)?;
     Ok(())
 }
 
@@ -464,16 +472,47 @@ fn newest_conflict_copy(
     vault: &VaultRoot,
     local_path: &RelativePath,
 ) -> Result<Option<RelativePath>> {
+    Ok(collect_conflict_copies(vault, local_path)?.pop())
+}
+
+/// Deletes every remote conflict-copy sidecar preserved beside `local_path`.
+///
+/// Called after a conflict is resolved (either strategy) so the vault is left
+/// with exactly one file for the note's stable id.
+fn remove_conflict_copies(vault: &VaultRoot, local_path: &RelativePath) -> Result<()> {
+    for copy in collect_conflict_copies(vault, local_path)? {
+        let absolute = vault.join(copy.as_str());
+        match fs::remove_file(&absolute) {
+            Ok(()) => {}
+            Err(source) if source.kind() == ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(AppError::Io {
+                    path: absolute,
+                    source,
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Returns the conflict-copy sidecars beside `local_path`, sorted ascending so
+/// the newest deterministic-timestamp suffix sorts last.
+fn collect_conflict_copies(
+    vault: &VaultRoot,
+    local_path: &RelativePath,
+) -> Result<Vec<RelativePath>> {
     let local = Path::new(local_path.as_str());
     let parent = local.parent().unwrap_or_else(|| Path::new(""));
     let Some(stem) = local.file_stem().map(|value| value.to_string_lossy()) else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
     let extension = local.extension().map(|value| value.to_string_lossy());
     let directory = vault.join(parent);
     let entries = match fs::read_dir(&directory) {
         Ok(entries) => entries,
-        Err(source) if source.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(source) if source.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
         Err(source) => {
             return Err(AppError::Io {
                 path: directory,
@@ -502,11 +541,14 @@ fn newest_conflict_copy(
     }
 
     matches.sort_unstable();
-    Ok(matches.pop().map(|path| RelativePath::new(&path)))
+    Ok(matches
+        .into_iter()
+        .map(|path| RelativePath::new(&path))
+        .collect())
 }
 
 fn is_conflict_copy_name(name: &str, stem: &str, extension: Option<&str>) -> bool {
-    let prefix = format!("{stem}.conflict-remote-");
+    let prefix = format!("{stem}{CONFLICT_COPY_INFIX}");
     if !name.starts_with(&prefix) {
         return false;
     }

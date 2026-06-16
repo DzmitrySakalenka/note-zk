@@ -11,6 +11,7 @@ use zk_domain::{
     config::{EffectiveConfig, FolderPolicy},
     id::RelativePath,
     note::{DiagnosticLevel, ScanDiagnostic},
+    sync::CONFLICT_COPY_INFIX,
 };
 
 use crate::error::{NON_UTF8_PATH_COMPONENT_SCAN_DIAGNOSTIC_PREFIX, VaultError};
@@ -201,7 +202,22 @@ fn should_skip_entry(entry: &DirEntry, relative_path: &RelativePath) -> bool {
     if is_hidden_relative_path(relative_path) {
         return true;
     }
+    if is_conflict_copy_relative_path(relative_path) {
+        return true;
+    }
     false
+}
+
+/// Conflict-copy sidecars preserve a remote version for manual resolution. They
+/// share the live note's stable id, so scanning them would trigger spurious
+/// duplicate-id errors; they are excluded here and reconciled only by the
+/// explicit conflict-resolution flow.
+fn is_conflict_copy_relative_path(relative_path: &RelativePath) -> bool {
+    relative_path
+        .as_str()
+        .rsplit('/')
+        .next()
+        .is_some_and(|file_name| file_name.contains(CONFLICT_COPY_INFIX))
 }
 
 fn relative_path_for_entry(

@@ -26,7 +26,7 @@ use std::{
 use zk_domain::{
     SyncChange,
     id::{ContentHash, RelativePath, ServerRevision},
-    sync::{PendingOperation, SyncStatus},
+    sync::{CONFLICT_COPY_INFIX, PendingOperation, SyncStatus},
 };
 use zk_vault::{VaultRoot, atomic_write_file, error::VaultError};
 
@@ -195,12 +195,12 @@ fn build_conflict_copy_path(
         .unwrap_or(file_name);
     let extension = path.extension().and_then(|segment| segment.to_str());
     let base_name = match (extension, collision_suffix) {
-        (Some(extension), 0) => format!("{stem}.conflict-remote-{timestamp}.{extension}"),
+        (Some(extension), 0) => format!("{stem}{CONFLICT_COPY_INFIX}{timestamp}.{extension}"),
         (Some(extension), suffix) => {
-            format!("{stem}.conflict-remote-{timestamp}-{suffix}.{extension}")
+            format!("{stem}{CONFLICT_COPY_INFIX}{timestamp}-{suffix}.{extension}")
         }
-        (None, 0) => format!("{stem}.conflict-remote-{timestamp}"),
-        (None, suffix) => format!("{stem}.conflict-remote-{timestamp}-{suffix}"),
+        (None, 0) => format!("{stem}{CONFLICT_COPY_INFIX}{timestamp}"),
+        (None, suffix) => format!("{stem}{CONFLICT_COPY_INFIX}{timestamp}-{suffix}"),
     };
     let candidate_path = if parent.as_os_str().is_empty() {
         PathBuf::from(base_name)

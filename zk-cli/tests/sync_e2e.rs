@@ -112,6 +112,94 @@ async fn simultaneous_edits_produce_conflict_copy_on_loser() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resolve_conflict_keep_remote_converges_and_clears_conflict_copy() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let winner = device_fixture(tempdir.path(), "device-a");
+    let loser = device_fixture(tempdir.path(), "device-b");
+    let token = token_for("keep-remote");
+    let server = start_server(&token).await;
+    let note_path = "notes/shared.md";
+    let note_id = "01K4ZJ9F2X6M8P0Q1R2S3T4U6W";
+
+    write_note(&winner, note_path, note_id, "Shared", "Initial body\n");
+    run_scan_write(&winner);
+    run_sync(&winner, &server, &token, 0);
+    run_sync(&loser, &server, &token, 0);
+
+    write_note(
+        &winner,
+        note_path,
+        note_id,
+        "Shared",
+        "Winner remote edit\n",
+    );
+    write_note(&loser, note_path, note_id, "Shared", "Loser local edit\n");
+    run_scan_write(&winner);
+    run_scan_write(&loser);
+    run_sync(&winner, &server, &token, 0);
+    run_sync(&loser, &server, &token, 1);
+    assert_eq!(conflict_copy_paths(&loser).len(), 1);
+
+    // Loser accepts the remote version. After resolution the working file holds
+    // the winner's content and the conflict-copy sidecar is gone, so a rescan
+    // sees no duplicate id and the next sync is a clean no-op.
+    run_resolve_conflict(&loser, &server, &token, note_id, "--keep-remote");
+
+    assert!(read_note(&loser, note_path).contains("Winner remote edit"));
+    assert!(
+        conflict_copy_paths(&loser).is_empty(),
+        "resolved conflict copy should be deleted on keep-remote"
+    );
+    run_scan_write(&loser);
+    let follow_up = run_sync(&loser, &server, &token, 0);
+    assert_eq!(
+        follow_up["payload"]["pulled"]["conflicts"].as_i64(),
+        Some(0)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resolve_conflict_keep_local_pushes_local_version_to_other_device() {
+    let tempdir = TempDir::new().expect("tempdir should be created");
+    let winner = device_fixture(tempdir.path(), "device-a");
+    let loser = device_fixture(tempdir.path(), "device-b");
+    let token = token_for("keep-local");
+    let server = start_server(&token).await;
+    let note_path = "notes/shared.md";
+    let note_id = "01K4ZJ9F2X6M8P0Q1R2S3T4U6W";
+
+    write_note(&winner, note_path, note_id, "Shared", "Initial body\n");
+    run_scan_write(&winner);
+    run_sync(&winner, &server, &token, 0);
+    run_sync(&loser, &server, &token, 0);
+
+    write_note(
+        &winner,
+        note_path,
+        note_id,
+        "Shared",
+        "Winner remote edit\n",
+    );
+    write_note(&loser, note_path, note_id, "Shared", "Loser local edit\n");
+    run_scan_write(&winner);
+    run_scan_write(&loser);
+    run_sync(&winner, &server, &token, 0);
+    run_sync(&loser, &server, &token, 1);
+
+    // Loser keeps its version: the sidecar is removed and the note is requeued
+    // for upload, so the next sync pushes it and the winner converges to it.
+    run_resolve_conflict(&loser, &server, &token, note_id, "--keep-local");
+    assert!(
+        conflict_copy_paths(&loser).is_empty(),
+        "resolved conflict copy should be deleted on keep-local"
+    );
+
+    run_sync(&loser, &server, &token, 0);
+    run_sync(&winner, &server, &token, 0);
+    assert!(read_note(&winner, note_path).contains("Loser local edit"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn trashing_a_note_propagates() {
     let tempdir = TempDir::new().expect("tempdir should be created");
     let source = device_fixture(tempdir.path(), "device-a");
@@ -324,6 +412,29 @@ fn run_sync(device: &DeviceFixture, server: &TestServer, token: &str, expected_c
         .code(expected_code);
 
     serde_json::from_slice(&assert.get_output().stdout).expect("sync JSON output should parse")
+}
+
+fn run_resolve_conflict(
+    device: &DeviceFixture,
+    server: &TestServer,
+    token: &str,
+    note_id: &str,
+    strategy_flag: &str,
+) -> Value {
+    let assert = command_for(device, "resolve-conflict")
+        .arg(note_id)
+        .arg(strategy_flag)
+        .arg("--server-url")
+        .arg(server.base_url.as_str())
+        .arg("--device-id")
+        .arg(&device.device_id)
+        .arg("--json")
+        .env("ZK_DEVICE_TOKEN", token)
+        .assert()
+        .success();
+
+    serde_json::from_slice(&assert.get_output().stdout)
+        .expect("resolve-conflict JSON output should parse")
 }
 
 fn run_trash(device: &DeviceFixture, note_id: &str) {

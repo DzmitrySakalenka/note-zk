@@ -1,5 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+/// Filename infix marking a remote conflict copy written beside a live note or
+/// asset during a pull conflict (`{stem}.conflict-remote-{timestamp}{ext}`).
+///
+/// These sidecar files preserve the remote version for manual resolution. They
+/// are deliberately excluded from vault scans so they never collide with the
+/// live note's stable id; the constant is shared so the writer, the scan skip,
+/// and the resolution cleanup all agree on the marker.
+pub const CONFLICT_COPY_INFIX: &str = ".conflict-remote-";
+
 // ==========================================================================
 // SyncStatus
 // ==========================================================================

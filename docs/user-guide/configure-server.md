@@ -114,7 +114,9 @@ timeout_secs = 30
 Local embeddings use the `local-candle` provider and the `zk-ai/provider-local`
 implementation. Hardware-specific acceleration is controlled by the
 `zk-ai/provider-local-metal` and `zk-ai/provider-local-cuda` feature flags when
-you build a binary that enables them.
+you build a binary that enables them. The local provider is for embeddings,
+semantic search, and local recompute; local chat is not implemented in-process
+in V1.
 
 ```toml
 [ai]
@@ -130,6 +132,14 @@ max_seq_len = 512
 max_batch_size = 32
 device = "cpu"
 ```
+
+Set `device = "metal"` only for binaries built with
+`zk-ai/provider-local-metal`; set `device = "cuda"` only for binaries built with
+`zk-ai/provider-local-cuda`. Local model directories can come from Hugging Face
+embedding repositories when they contain `tokenizer.json`, `config.json`, and
+either `model.safetensors` or `pytorch_model.bin`. BERT and SentenceTransformer
+embedding models such as `sentence-transformers/all-MiniLM-L6-v2` match this
+path; GGUF chat models do not.
 
 The stub provider is for development and tests. It does not call a model or a
 remote API.
@@ -171,6 +181,67 @@ retrieval_token_budget = 2048
 Use `provider = "stub"` only for development or tests. Production chat tokens
 should be issued with the `chat` scope. The server-side chat and wiki protocol
 is described in [ADR 0016](../decisions/0016-llm-wiki-protocol.md).
+
+### Ollama chat
+
+For local Ollama, run chat through the OpenAI-compatible HTTP provider. Keep the
+base URL at the server root because note-zk appends `/v1/chat/completions`.
+
+```toml
+[ai.chat]
+provider = "remote-http"
+model_id = "gemma4:e4b"
+base_url = "http://127.0.0.1:11434"
+api_key_env_var = "OLLAMA_API_KEY"
+max_input_tokens = 8192
+max_output_tokens = 1024
+timeout_secs = 120
+max_attempts = 1
+retrieval_top_k = 8
+retrieval_max_chunks_per_note = 2
+retrieval_token_budget = 2048
+```
+
+Local Ollama does not require a real API key for localhost calls. The key is
+required by note-zk's HTTP provider because it always reads `api_key_env_var`
+and sends a bearer token, but the value is ignored by local Ollama. Use any
+non-empty dummy value:
+
+```bash
+ollama pull gemma4:e4b
+export OLLAMA_API_KEY=ollama
+```
+
+Create a real Ollama key only when you call ollama.com directly or an
+OpenAI-compatible proxy that you configured to require auth. For direct
+ollama.com API access, create the key in Ollama API key settings, export it as
+`OLLAMA_API_KEY`, and check that the remote endpoint exposes the
+OpenAI-compatible `/v1/chat/completions` path expected by note-zk. For
+local-only Ollama, there is no key to create.
+
+### Hugging Face chat
+
+Hugging Face Inference Providers expose an OpenAI-compatible router for hosted
+chat. Configure the router root, not `/v1`, because note-zk appends the OpenAI
+chat path.
+
+```toml
+[ai.chat]
+provider = "remote-http"
+model_id = "meta-llama/Llama-3.1-8B-Instruct"
+base_url = "https://router.huggingface.co"
+api_key_env_var = "HF_TOKEN"
+max_input_tokens = 8192
+max_output_tokens = 1024
+timeout_secs = 120
+max_attempts = 3
+retrieval_top_k = 8
+retrieval_max_chunks_per_note = 2
+retrieval_token_budget = 2048
+```
+
+Create `HF_TOKEN` from Hugging Face settings with read access, then keep it in
+the environment rather than in `server.toml`.
 
 ## Backup configuration
 
@@ -265,4 +336,4 @@ The JSON response includes `status`, `db_ok`, `server_time`,
 `schema_version`, and `uptime_seconds`. Use it for process liveness and basic
 database readiness checks.
 
-Last updated: 2026-05-19
+Last updated: 2026-05-25

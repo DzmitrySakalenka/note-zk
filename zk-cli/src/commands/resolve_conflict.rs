@@ -4,12 +4,15 @@ use std::io;
 
 use anyhow::Context;
 use zk_app::{
-    DeviceId, ResolveConflictRequest, ResolveConflictResponse, WireConflictResolution, WireItemType,
+    AppError, DeviceId, ResolveConflictRequest, ResolveConflictResponse, WireConflictResolution,
+    WireItemType, resolve_conflict,
 };
-use zk_sync::{HttpTransport, transport::SyncTransport};
+use zk_sync::{HttpTransport, SyncError};
 
 use crate::{
-    bootstrap::{load_effective_config, resolve_sync_settings, resolve_vault_root},
+    bootstrap::{
+        load_effective_config, open_index_connection, resolve_sync_settings, resolve_vault_root,
+    },
     cli::{OutputMode, ResolveConflictArgs, ResolveStrategy, SharedFlags},
     error::{CliError, EXIT_OK},
     output::{
@@ -29,21 +32,27 @@ pub fn run(args: &ResolveConflictArgs, shared: &SharedFlags) -> Result<i32, CliE
     let config = load_effective_config(&vault_root, shared)?;
     let sync_settings = resolve_sync_settings(&config)?;
     let device_id = DeviceId::new(&sync_settings.device_id);
+    let connection = open_index_connection(&config)?;
     let http_transport =
         HttpTransport::new(sync_settings.server_url, Some(sync_settings.bearer_token))
             .context("while attempting to construct HTTP sync transport")
             .map_err(CliError::Internal)?;
-    let transport: &dyn SyncTransport = &http_transport;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("while attempting to build sync runtime")
         .map_err(CliError::Internal)?;
     let request = resolve_conflict_request(args, &device_id);
+    // Drive the app facade (not the raw transport): it both calls the server and
+    // reconciles the local working file, sync state, and conflict-copy sidecar.
     let response = runtime
-        .block_on(transport.resolve_conflict(&request))
-        .context("while attempting to resolve sync conflict")
-        .map_err(CliError::Internal)?;
+        .block_on(resolve_conflict(
+            &http_transport,
+            &vault_root,
+            &connection,
+            &request,
+        ))
+        .map_err(map_resolve_conflict_error)?;
     let payload = payload_from_response(&response);
 
     match OutputMode::from(args.json) {
@@ -61,6 +70,16 @@ pub fn run(args: &ResolveConflictArgs, shared: &SharedFlags) -> Result<i32, CliE
     .map_err(CliError::Internal)?;
 
     Ok(EXIT_OK)
+}
+
+fn map_resolve_conflict_error(error: AppError) -> CliError {
+    match error {
+        AppError::Sync(SyncError::Transport(source)) => CliError::Request(source.to_string()),
+        AppError::Sync(SyncError::Protocol(message)) => CliError::Request(message),
+        other => CliError::Internal(
+            anyhow::Error::new(other).context("while attempting to resolve sync conflict"),
+        ),
+    }
 }
 
 fn resolve_conflict_request(
